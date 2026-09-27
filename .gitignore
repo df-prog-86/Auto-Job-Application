@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.uv/
+uv.lock.bak
+
+# Backend runtime data (local-first: never commit user data)
+backend/data/
+backend/*.db
+backend/*.db-wal
+backend/*.db-shm
+backend/generated_documents/
+backend/.env
+backend/logs/
+
+# Node / frontend
+node_modules/
+dashboard/dist/
+dashboard/.vite/
+extension/dist/
+extension/*.zip
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Env files anywhere
+.env
+.env.local

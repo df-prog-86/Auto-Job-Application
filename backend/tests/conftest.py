@@ -7,6 +7,29 @@ from collections.abc import Generator
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _no_llm_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Force "no LLM provider configured" regardless of the developer's local
+    backend/.env. Without this, a real LLM_API_BASE_URL/LLM_API_KEY_REF in
+    .env makes the settings singleton (loaded once at process start) look
+    configured to every test in this process — which doesn't just change
+    test_resume_parse_without_llm_configured_returns_503's expected status
+    code, it makes that test send a real resume to a real provider using
+    the developer's real API key on every test run.
+    """
+    from app.config import settings
+
+    for attr in (
+        "LLM_API_BASE_URL",
+        "LLM_API_KEY_REF",
+        "PRIMARY_FAST_MODEL",
+        "FALLBACK_FAST_MODEL",
+        "ESCALATION_MODEL",
+    ):
+        monkeypatch.setattr(settings, attr, None)
+
+
 @pytest.fixture()
 def temp_db_path() -> Generator[str, None, None]:
     fd, path = tempfile.mkstemp(suffix=".db")

@@ -4,6 +4,7 @@ const NAV_ITEMS = [
   { to: "/", label: "Home" },
   { to: "/profile", label: "Profile" },
   { to: "/preferences", label: "Job Preferences" },
+  { to: "/jobs", label: "Jobs" },
   { to: "/applications", label: "Applications" },
   { to: "/needs-attention", label: "Needs Attention" },
   { to: "/accounts", label: "Accounts" },

@@ -1,12 +1,19 @@
 import type {
   AutomationStatusResponse,
+  DiscoveryRunResult,
   HealthResponse,
+  JobDetailOut,
+  JobOut,
   PairingSecretResponse,
   PairRequest,
   PairResponse,
   ProfileOut,
   ResumeExtraction,
   ResumeParseResponse,
+  SearchProfile,
+  SearchProfileInput,
+  TargetEmployer,
+  TargetEmployerInput,
   VersionResponse,
 } from "@/types/api";
 
@@ -42,6 +49,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // response wasn't JSON; fall back to statusText
     }
     throw new ApiError(res.status, message);
+  }
+  if (res.status === 204) {
+    return undefined as T;
   }
   return (await res.json()) as T;
 }
@@ -82,6 +92,24 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getProfile: () => request<ProfileOut>("/profile"),
+
+  listSearchProfiles: () => request<SearchProfile[]>("/search-profiles"),
+  createSearchProfile: (payload: SearchProfileInput) =>
+    request<SearchProfile>("/search-profiles", { method: "POST", body: JSON.stringify(payload) }),
+  updateSearchProfile: (id: number, payload: Partial<SearchProfileInput>) =>
+    request<SearchProfile>(`/search-profiles/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteSearchProfile: (id: number) =>
+    request<void>(`/search-profiles/${id}`, { method: "DELETE" }),
+
+  listTargetEmployers: () => request<TargetEmployer[]>("/discovery/employers"),
+  addTargetEmployer: (payload: TargetEmployerInput) =>
+    request<TargetEmployer>("/discovery/employers", { method: "POST", body: JSON.stringify(payload) }),
+  deleteTargetEmployer: (id: number) =>
+    request<void>(`/discovery/employers/${id}`, { method: "DELETE" }),
+  runDiscovery: () => request<DiscoveryRunResult>("/discovery/run", { method: "POST" }),
+
+  listJobs: () => request<JobOut[]>("/jobs"),
+  getJob: (id: number) => request<JobDetailOut>(`/jobs/${id}`),
 };
 
 export { ApiError };

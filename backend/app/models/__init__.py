@@ -15,6 +15,7 @@ from app.models.candidate import (
     VerifiedClaim,
     VoluntaryDisclosure,
 )
+from app.models.discovery import TargetEmployer
 from app.models.documents import GeneratedDocument
 from app.models.jobs import Job, JobEvaluation, JobRequirement, JobSource
 from app.models.mappings import FieldMapping, QuestionMapping
@@ -35,6 +36,7 @@ __all__ = [
     "Skill",
     "VerifiedClaim",
     "VoluntaryDisclosure",
+    "TargetEmployer",
     "GeneratedDocument",
     "Job",
     "JobEvaluation",

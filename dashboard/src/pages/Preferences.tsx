@@ -144,10 +144,16 @@ function SearchProfilesSection({ profiles, isLoading }: { profiles: SearchProfil
         </button>
       </div>
 
+      <p className="mb-3 text-xs text-slate-500">
+        A search profile is a saved description of the kind of job you want — discovery only keeps postings that
+        match at least one enabled profile. You can create more than one (e.g. one for "Data Analyst, remote" and
+        another for "Data Engineer, Boston hybrid").
+      </p>
+
       {isLoading && <p className="text-sm text-slate-400">Loading…</p>}
       {!isLoading && profiles.length === 0 && !showForm && (
         <p className="text-sm text-slate-400">
-          No search profiles yet. Add one so discovery knows what you're looking for.
+          No search profiles yet. Click "+ New profile" below to create your first one.
         </p>
       )}
 
@@ -191,36 +197,62 @@ function SearchProfilesSection({ profiles, isLoading }: { profiles: SearchProfil
           }}
           className="mt-4 space-y-3 border-t border-slate-100 pt-4"
         >
-          <TextField label="Name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required />
+          <TextField
+            label="Profile name"
+            value={form.name}
+            onChange={(v) => setForm({ ...form, name: v })}
+            required
+            placeholder="e.g. Data roles, Boston or remote"
+            helpText="Just a label for you — pick anything that helps you tell profiles apart."
+          />
           <ListField
-            label="Job titles (comma-separated)"
+            label="Job titles"
             value={form.titles}
             onChange={(v) => setForm({ ...form, titles: v })}
+            placeholder="e.g. Data Analyst, Business Analyst, BI Analyst"
+            helpText="Separate multiple titles with commas. Leave blank to match any title."
           />
           <ListField
-            label="Locations (comma-separated, ignored for remote-only matches)"
+            label="Locations"
             value={form.locations}
             onChange={(v) => setForm({ ...form, locations: v })}
+            placeholder="e.g. Boston, New York"
+            helpText="Separate with commas. Ignored for jobs already tagged Remote below — leave blank if you only want remote roles."
           />
-          <div className="flex gap-4 text-sm">
-            <CheckField label="Remote" checked={form.remote} onChange={(v) => setForm({ ...form, remote: v })} />
-            <CheckField label="Hybrid" checked={form.hybrid} onChange={(v) => setForm({ ...form, hybrid: v })} />
-            <CheckField label="On-site" checked={form.onsite} onChange={(v) => setForm({ ...form, onsite: v })} />
+          <div>
+            <span className="mb-1 block text-sm font-medium text-slate-600">Work arrangement</span>
+            <span className="mb-2 block text-xs text-slate-400">
+              Check every arrangement you'd accept — a job is only kept if its type is checked here.
+            </span>
+            <div className="flex gap-4 text-sm">
+              <CheckField label="Remote" checked={form.remote} onChange={(v) => setForm({ ...form, remote: v })} />
+              <CheckField label="Hybrid" checked={form.hybrid} onChange={(v) => setForm({ ...form, hybrid: v })} />
+              <CheckField label="On-site" checked={form.onsite} onChange={(v) => setForm({ ...form, onsite: v })} />
+            </div>
           </div>
           <ListField
-            label="Required keywords (must all appear)"
+            label="Required keywords"
             value={form.required_keywords}
             onChange={(v) => setForm({ ...form, required_keywords: v })}
+            placeholder="e.g. SQL, Tableau"
+            optional
+            helpText="Every keyword listed must appear somewhere in the job title or description, or the job is skipped."
           />
           <ListField
             label="Excluded titles"
             value={form.excluded_titles}
             onChange={(v) => setForm({ ...form, excluded_titles: v })}
+            placeholder="e.g. Intern, Manager"
+            optional
+            helpText="Jobs whose title matches one of these are always skipped, even if the title above would otherwise match."
           />
           <ListField
             label="Excluded employers"
             value={form.excluded_employers}
             onChange={(v) => setForm({ ...form, excluded_employers: v })}
+            placeholder="e.g. Acme Corp"
+            optional
+            helpText="Jobs from these companies are always skipped."
           />
 
           <button
@@ -317,9 +349,19 @@ function EmployerWatchlistSection({ employers, isLoading }: { employers: TargetE
           }}
           className="mt-4 space-y-3 border-t border-slate-100 pt-4"
         >
-          <TextField label="Employer name" value={name} onChange={setName} required />
+          <TextField
+            label="Employer name"
+            value={name}
+            onChange={setName}
+            required
+            placeholder="e.g. Acme Corp"
+            helpText="Just for display in your list — doesn't need to match anything exactly."
+          />
           <label className="block text-sm">
-            <span className="mb-1 block text-slate-600">ATS</span>
+            <span className="mb-1 block font-medium text-slate-600">ATS</span>
+            <span className="mb-1 block text-xs text-slate-400">
+              Which system this employer uses for job postings. Not sure? Check their careers page URL below.
+            </span>
             <select
               value={ats}
               onChange={(e) => setAts(e.target.value as "greenhouse" | "lever")}
@@ -330,10 +372,16 @@ function EmployerWatchlistSection({ employers, isLoading }: { employers: TargetE
             </select>
           </label>
           <TextField
-            label="Identifier (board token / company slug)"
+            label="Identifier"
             value={identifier}
             onChange={setIdentifier}
             required
+            placeholder="e.g. acme"
+            helpText={
+              ats === "greenhouse"
+                ? 'The part after "boards.greenhouse.io/" in their careers page URL — e.g. for boards.greenhouse.io/acme, enter "acme".'
+                : 'The part after "jobs.lever.co/" in their careers page URL — e.g. for jobs.lever.co/acme, enter "acme".'
+            }
           />
           <button
             type="submit"
@@ -354,21 +402,27 @@ function TextField({
   value,
   onChange,
   required,
+  placeholder,
+  helpText,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   required?: boolean;
+  placeholder?: string;
+  helpText?: string;
 }) {
   return (
     <label className="block text-sm">
-      <span className="mb-1 block text-slate-600">{label}</span>
+      <span className="mb-1 block font-medium text-slate-600">{label}</span>
+      {helpText && <span className="mb-1 block text-xs text-slate-400">{helpText}</span>}
       <input
         type="text"
         value={value}
         required={required}
+        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border border-slate-300 px-3 py-1.5"
+        className="w-full rounded-md border border-slate-300 px-3 py-1.5 placeholder:text-slate-400 placeholder:italic"
       />
     </label>
   );
@@ -378,18 +432,29 @@ function ListField({
   label,
   value,
   onChange,
+  placeholder,
+  helpText,
+  optional,
 }: {
   label: string;
   value: string[];
   onChange: (v: string[]) => void;
+  placeholder?: string;
+  helpText?: string;
+  optional?: boolean;
 }) {
   const [text, setText] = useState(value.join(", "));
   return (
     <label className="block text-sm">
-      <span className="mb-1 block text-slate-600">{label}</span>
+      <span className="mb-1 block font-medium text-slate-600">
+        {label}
+        {optional && <span className="font-normal text-slate-400"> (optional)</span>}
+      </span>
+      {helpText && <span className="mb-1 block text-xs text-slate-400">{helpText}</span>}
       <input
         type="text"
         value={text}
+        placeholder={placeholder}
         onChange={(e) => {
           setText(e.target.value);
           onChange(
@@ -399,7 +464,7 @@ function ListField({
               .filter(Boolean),
           );
         }}
-        className="w-full rounded-md border border-slate-300 px-3 py-1.5"
+        className="w-full rounded-md border border-slate-300 px-3 py-1.5 placeholder:text-slate-400 placeholder:italic"
       />
     </label>
   );

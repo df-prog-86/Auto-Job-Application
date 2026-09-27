@@ -57,6 +57,38 @@ All product-behavior knobs (rate limits, model routing, qualification thresholds
 interval) are environment variables — see `app/config.py` for the full list and defaults, and
 spec §7 for their intent. Override any of them in `backend/.env` (gitignored).
 
+## Configuring an LLM provider
+
+Resume parsing (structured extraction, `POST /api/v1/profile/resume/parse`) needs an
+OpenAI-compatible LLM provider configured — without one, that endpoint returns a 503 rather
+than guessing. Nothing else in Milestone 1/2 requires it.
+
+1. Store your provider's API key in the OS credential store under some reference name, e.g.:
+   ```bash
+   python -c "from app.services.credentials.store import store_secret; store_secret('openrouter-main', 'sk-...')"
+   ```
+2. Set in `backend/.env`:
+   ```
+   LLM_API_BASE_URL=https://openrouter.ai/api/v1
+   LLM_API_KEY_REF=openrouter-main
+   PRIMARY_FAST_MODEL=deepseek/deepseek-chat
+   FALLBACK_FAST_MODEL=openai/gpt-4o-mini
+   ```
+   Any OpenAI-compatible base URL works; model identifiers are provider-specific strings, not
+   validated against a fixed list (spec §7 — "production code must verify provider capabilities
+   rather than assume them").
+
+## OCR fallback (optional)
+
+Only needed if you'll upload scanned/image-only PDFs. Requires the `ocr` extra plus the
+`poppler` system package (used by `pdf2image` to rasterize PDF pages):
+
+```bash
+uv pip install -e ".[dev,ocr]"
+brew install poppler        # macOS
+# or: apt-get install poppler-utils   (Linux)
+```
+
 ## Tests
 
 ```bash

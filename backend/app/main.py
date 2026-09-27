@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import automation, system
+from app.api import answers, automation, profile, system
 from app.config import settings
 from app.services.security.middleware import LocalOnlyMiddleware
 
@@ -41,6 +41,8 @@ def create_app() -> FastAPI:
 
     app.include_router(system.router)
     app.include_router(automation.router)
+    app.include_router(profile.router)
+    app.include_router(answers.router)
 
     # Serve the built dashboard, once it exists, at /app (spec §14).
     if DASHBOARD_DIST.exists():

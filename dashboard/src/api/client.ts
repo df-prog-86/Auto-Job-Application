@@ -4,6 +4,9 @@ import type {
   PairingSecretResponse,
   PairRequest,
   PairResponse,
+  ProfileOut,
+  ResumeExtraction,
+  ResumeParseResponse,
   VersionResponse,
 } from "@/types/api";
 
@@ -25,13 +28,20 @@ class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const isFormData = init?.body instanceof FormData;
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: isFormData ? undefined : { "Content-Type": "application/json" },
     ...init,
   });
   if (!res.ok) {
-    const body = await res.text();
-    throw new ApiError(res.status, body || res.statusText);
+    let message = res.statusText;
+    try {
+      const body = await res.json();
+      message = body.detail ?? JSON.stringify(body);
+    } catch {
+      // response wasn't JSON; fall back to statusText
+    }
+    throw new ApiError(res.status, message);
   }
   return (await res.json()) as T;
 }
@@ -53,6 +63,25 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+
+  parseResume: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<ResumeParseResponse>("/profile/resume/parse", {
+      method: "POST",
+      body: form,
+    });
+  },
+  commitProfile: (payload: {
+    extraction: ResumeExtraction;
+    approved_claims: ResumeParseResponse["draft_claims"];
+    resume_filename: string;
+  }) =>
+    request<ProfileOut>("/profile/commit", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getProfile: () => request<ProfileOut>("/profile"),
 };
 
 export { ApiError };

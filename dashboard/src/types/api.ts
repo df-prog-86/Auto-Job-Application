@@ -37,3 +37,87 @@ export interface PairRequest {
 export interface PairResponse {
   extension_token: string;
 }
+
+// --- Profile / onboarding (mirrors backend/app/schemas/profile.py) ---------
+
+export interface ContactInfo {
+  name: string;
+  preferred_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  location?: string | null;
+  linkedin_url?: string | null;
+  portfolio_urls: string[];
+}
+
+export interface EmploymentEntry {
+  employer: string;
+  title: string;
+  start_date?: string | null;
+  end_date?: string | null;
+  location?: string | null;
+  source_text: string;
+}
+
+export interface EducationEntry {
+  institution: string;
+  degree?: string | null;
+  field?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+}
+
+export interface CertificationEntry {
+  certification: string;
+  issuer?: string | null;
+  date?: string | null;
+  expiration?: string | null;
+}
+
+export interface ProjectEntry {
+  name: string;
+  description?: string | null;
+  technologies: string[];
+  source_text?: string | null;
+}
+
+export interface ResumeExtraction {
+  contact: ContactInfo;
+  employment: EmploymentEntry[];
+  education: EducationEntry[];
+  skills: string[];
+  certifications: CertificationEntry[];
+  projects: ProjectEntry[];
+}
+
+export interface DraftClaim {
+  category: string;
+  canonical_text: string;
+  employer?: string | null;
+  associated_role?: string | null;
+  skills: string[];
+  start_date?: string | null;
+  end_date?: string | null;
+  metrics: Record<string, unknown>;
+  source_section: string;
+  source_text: string;
+}
+
+export interface ResumeParseResponse {
+  extracted_text_preview: string;
+  used_ocr: boolean;
+  extraction: ResumeExtraction;
+  draft_claims: DraftClaim[];
+}
+
+export interface ProfileOut {
+  id: number;
+  name: string;
+  preferred_name?: string | null;
+  email: string;
+  phone?: string | null;
+  location?: string | null;
+  linkedin_url?: string | null;
+  portfolio_urls: string[];
+}
+

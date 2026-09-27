@@ -110,6 +110,39 @@ export interface ResumeParseResponse {
   draft_claims: DraftClaim[];
 }
 
+export interface EmploymentHistoryOut {
+  employer: string;
+  title: string;
+  start_date?: string | null;
+  end_date?: string | null;
+  location?: string | null;
+}
+
+export interface EducationOut {
+  institution: string;
+  degree?: string | null;
+  field?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+}
+
+export interface SkillOut {
+  canonical_skill: string;
+  candidate_confirmed: boolean;
+}
+
+export interface CertificationOut {
+  certification: string;
+  issuer?: string | null;
+  date?: string | null;
+  expiration?: string | null;
+}
+
+export interface VerifiedClaimSummaryOut {
+  category: string;
+  canonical_text: string;
+}
+
 export interface ProfileOut {
   id: number;
   name: string;
@@ -119,5 +152,10 @@ export interface ProfileOut {
   location?: string | null;
   linkedin_url?: string | null;
   portfolio_urls: string[];
+  employment_history: EmploymentHistoryOut[];
+  education: EducationOut[];
+  skills: SkillOut[];
+  certifications: CertificationOut[];
+  verified_claims: VerifiedClaimSummaryOut[];
 }
 

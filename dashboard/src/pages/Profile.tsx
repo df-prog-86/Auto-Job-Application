@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult } from "@tanstack/react-query";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { api, ApiError } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
@@ -73,6 +74,86 @@ export function Profile() {
             <Row label="LinkedIn" value={profile.linkedin_url} />
           </dl>
         </div>
+
+        {profile.employment_history.length > 0 && (
+          <Section title="Experience">
+            <ul className="divide-y divide-slate-100">
+              {profile.employment_history.map((job, i) => (
+                <li key={i} className="py-3">
+                  <div className="text-sm font-medium text-slate-900">
+                    {job.title} · {job.employer}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {formatDateRange(job.start_date, job.end_date)}
+                    {job.location ? ` · ${job.location}` : ""}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
+        {profile.education.length > 0 && (
+          <Section title="Education">
+            <ul className="divide-y divide-slate-100">
+              {profile.education.map((edu, i) => (
+                <li key={i} className="py-3">
+                  <div className="text-sm font-medium text-slate-900">
+                    {edu.institution}
+                    {edu.degree ? ` — ${edu.degree}` : ""}
+                    {edu.field ? ` in ${edu.field}` : ""}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {formatDateRange(edu.start_date, edu.end_date)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
+        {profile.skills.length > 0 && (
+          <Section title="Skills">
+            <div className="flex flex-wrap gap-2">
+              {profile.skills.map((skill, i) => (
+                <span
+                  key={i}
+                  className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700"
+                >
+                  {skill.canonical_skill}
+                </span>
+              ))}
+            </div>
+          </Section>
+        )}
+
+        {profile.certifications.length > 0 && (
+          <Section title="Certifications">
+            <ul className="divide-y divide-slate-100">
+              {profile.certifications.map((cert, i) => (
+                <li key={i} className="py-3">
+                  <div className="text-sm font-medium text-slate-900">{cert.certification}</div>
+                  <div className="text-xs text-slate-500">
+                    {[cert.issuer, cert.date].filter(Boolean).join(" · ")}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
+        {profile.verified_claims.length > 0 && (
+          <Section title={`Verified claims (${profile.verified_claims.length})`}>
+            <ul className="divide-y divide-slate-100">
+              {profile.verified_claims.map((claim, i) => (
+                <li key={i} className="py-2 text-sm text-slate-700">
+                  {claim.canonical_text}
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
         <UploadForm parseMutation={parseMutation} buttonLabel="Upload a new resume" />
       </div>
     );
@@ -96,6 +177,27 @@ function Row({ label, value }: { label: string; value?: string | null }) {
       <dd className="text-slate-900">{value || "—"}</dd>
     </div>
   );
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="mt-6 max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 className="mb-3 text-sm font-semibold text-slate-700">{title}</h2>
+      {children}
+    </div>
+  );
+}
+
+function formatDateRange(start?: string | null, end?: string | null): string {
+  const fmt = (d?: string | null) => {
+    if (!d) return null;
+    const parsed = new Date(d);
+    if (Number.isNaN(parsed.getTime())) return d;
+    return parsed.toLocaleDateString(undefined, { year: "numeric", month: "short" });
+  };
+  const startLabel = fmt(start) ?? "Unknown start";
+  const endLabel = fmt(end) ?? "Present";
+  return `${startLabel} – ${endLabel}`;
 }
 
 function UploadForm({

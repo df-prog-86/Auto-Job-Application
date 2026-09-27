@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dev": "vite build --watch",
+    "build": "ENTRY=service-worker vite build && ENTRY=popup vite build && ENTRY=content-detector vite build",
+    "dev": "ENTRY=service-worker vite build --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
   },

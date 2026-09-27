@@ -20,6 +20,7 @@ backend/logs/
 node_modules/
 dashboard/dist/
 dashboard/.vite/
+dashboard/*.tsbuildinfo
 extension/dist/
 extension/*.zip
 

@@ -7,17 +7,31 @@ controlled dev use.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import answers, automation, profile, system
+from app.api import answers, automation, discovery, jobs, profile, search_profiles, system
 from app.config import settings
+from app.services.scheduler import start_scheduler, stop_scheduler
 from app.services.security.middleware import LocalOnlyMiddleware
 
 DASHBOARD_DIST = Path(__file__).resolve().parent.parent.parent / "dashboard" / "dist"
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # Discovery scheduling runs regardless of automation mode (spec §18) —
+    # it only ever reads public job feeds and writes to the local jobs
+    # table, never touches an employer's application system. Skipped
+    # entirely under pytest, where each test builds its own isolated app.
+    if settings.APP_ENV != "test":
+        start_scheduler()
+    yield
+    stop_scheduler()
 
 
 def create_app() -> FastAPI:
@@ -25,6 +39,7 @@ def create_app() -> FastAPI:
         title="Job Agent Backend",
         version="0.1.0",
         docs_url="/api/docs" if settings.APP_ENV != "production" else None,
+        lifespan=_lifespan,
     )
 
     app.add_middleware(LocalOnlyMiddleware)
@@ -43,6 +58,9 @@ def create_app() -> FastAPI:
     app.include_router(automation.router)
     app.include_router(profile.router)
     app.include_router(answers.router)
+    app.include_router(search_profiles.router)
+    app.include_router(discovery.router)
+    app.include_router(jobs.router)
 
     # Serve the built dashboard, once it exists, at /app (spec §14).
     if DASHBOARD_DIST.exists():

@@ -159,3 +159,76 @@ export interface ProfileOut {
   verified_claims: VerifiedClaimSummaryOut[];
 }
 
+// --- Search profiles / discovery (mirrors backend/app/schemas/discovery.py) -
+
+export interface SearchProfile {
+  id: number;
+  name: string;
+  titles: string[];
+  locations: string[];
+  remote: boolean;
+  hybrid: boolean;
+  onsite: boolean;
+  salary_minimum?: number | null;
+  employment_type?: string | null;
+  desired_seniority: string[];
+  excluded_titles: string[];
+  excluded_employers: string[];
+  excluded_industries: string[];
+  required_keywords: string[];
+  preferred_keywords: string[];
+  travel_preference?: string | null;
+  relocation_willingness: boolean;
+  enabled: boolean;
+}
+
+export type SearchProfileInput = Omit<SearchProfile, "id">;
+
+export interface TargetEmployer {
+  id: number;
+  name: string;
+  ats: string;
+  identifier: string;
+  enabled: boolean;
+  notes?: string | null;
+  last_checked_at?: string | null;
+  last_check_status?: string | null;
+  last_check_error?: string | null;
+}
+
+export interface TargetEmployerInput {
+  name: string;
+  ats: string;
+  identifier: string;
+  enabled?: boolean;
+  notes?: string | null;
+}
+
+export interface JobOut {
+  id: number;
+  ats?: string | null;
+  company: string;
+  title: string;
+  location?: string | null;
+  remote_type?: string | null;
+  salary: Record<string, unknown>;
+  canonical_application_url: string;
+  first_seen: string;
+  last_seen: string;
+  status: string;
+}
+
+export interface JobDetailOut extends JobOut {
+  description?: string | null;
+}
+
+export interface DiscoveryRunResult {
+  employers_checked: number;
+  employers_failed: number;
+  postings_fetched: number;
+  postings_matched: number;
+  jobs_created: number;
+  jobs_updated: number;
+  errors: string[];
+}
+

@@ -7,6 +7,10 @@ import { defineConfig } from "vite";
 // directly by the backend at /app, where no proxy is needed.
 export default defineConfig({
   plugins: [react()],
+  // Mirrors the "@/*" -> "src/*" path mapping in tsconfig.app.json.
+  resolve: {
+    alias: [{ find: /^@\//, replacement: "/src/" }],
+  },
   server: {
     port: 5173,
     proxy: {

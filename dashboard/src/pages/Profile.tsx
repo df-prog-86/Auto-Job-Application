@@ -28,7 +28,7 @@ export function Profile() {
 
   const noProfileYet = profileQuery.isError && (profileQuery.error as ApiError)?.status === 404;
 
-  const parseMutation = useMutation({
+  const parseMutation = useMutation<ResumeParseResponse, ApiError, File>({
     mutationFn: api.parseResume,
     onSuccess: (data, file) => {
       setReviewData(data);

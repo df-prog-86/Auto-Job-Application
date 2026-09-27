@@ -19,6 +19,7 @@ dependencies = [
     "cryptography>=43.0",
     "python-multipart>=0.0.12",
     "aiosqlite>=0.20",
+    "filelock>=3.16",
 ]
 
 [project.optional-dependencies]

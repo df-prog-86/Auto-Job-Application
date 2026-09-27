@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Job Agent</title>
+    <style>
+      body {
+        width: 280px;
+        margin: 0;
+        padding: 16px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #1e293b;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 12px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+      .status {
+        font-weight: 600;
+      }
+      .status.paused {
+        color: #64748b;
+      }
+      .status.active {
+        color: #059669;
+      }
+      button {
+        border: none;
+        border-radius: 6px;
+        padding: 8px 12px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .primary {
+        background: #3f63f2;
+        color: white;
+      }
+      .link {
+        background: none;
+        color: #3f63f2;
+        padding: 0;
+        text-decoration: underline;
+        font-size: 12px;
+      }
+      input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        margin-bottom: 8px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+      }
+      #pairingSection,
+      #mainSection {
+        display: none;
+      }
+      #error {
+        color: #dc2626;
+        font-size: 12px;
+        margin-top: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Job Agent</h1>
+
+    <div id="pairingSection">
+      <p style="font-size: 12px; color: #64748b">
+        Not paired. Generate a code from the dashboard's "Pair Extension" page and paste it
+        below.
+      </p>
+      <input type="text" id="pairingSecretInput" placeholder="Pairing code" />
+      <button class="primary" id="pairButton">Pair</button>
+    </div>
+
+    <div id="mainSection">
+      <div class="row">
+        <span>Status</span>
+        <span class="status" id="statusText">…</span>
+      </div>
+      <div class="row">
+        <span>Needs Attention</span>
+        <span id="needsAttentionCount">0</span>
+      </div>
+      <div class="row">
+        <button class="primary" id="toggleButton">…</button>
+      </div>
+      <button class="link" id="openDashboardButton">Open Dashboard</button>
+    </div>
+
+    <div id="error"></div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

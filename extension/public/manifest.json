@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Job Agent",
+  "version": "0.1.0",
+  "description": "Browser execution layer for the Job Agent automated application platform.",
+  "minimum_chrome_version": "116",
+
+  "permissions": ["alarms", "storage", "tabs", "scripting", "notifications"],
+
+  "host_permissions": ["http://127.0.0.1:8765/*"],
+
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Job Agent"
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

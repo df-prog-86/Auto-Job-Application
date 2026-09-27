@@ -47,6 +47,54 @@ class CommitProfileRequest(BaseModel):
     resume_filename: str
 
 
+class EmploymentHistoryOut(BaseModel):
+    employer: str
+    title: str
+    start_date: dt.date | None
+    end_date: dt.date | None
+    location: str | None
+
+    class Config:
+        from_attributes = True
+
+
+class EducationOut(BaseModel):
+    institution: str
+    degree: str | None
+    field: str | None
+    start_date: dt.date | None
+    end_date: dt.date | None
+
+    class Config:
+        from_attributes = True
+
+
+class SkillOut(BaseModel):
+    canonical_skill: str
+    candidate_confirmed: bool
+
+    class Config:
+        from_attributes = True
+
+
+class CertificationOut(BaseModel):
+    certification: str
+    issuer: str | None
+    date: dt.date | None
+    expiration: dt.date | None
+
+    class Config:
+        from_attributes = True
+
+
+class VerifiedClaimSummaryOut(BaseModel):
+    category: str
+    canonical_text: str
+
+    class Config:
+        from_attributes = True
+
+
 class ProfileOut(BaseModel):
     id: int
     name: str
@@ -56,6 +104,11 @@ class ProfileOut(BaseModel):
     location: str | None
     linkedin_url: str | None
     portfolio_urls: list[str]
+    employment_history: list[EmploymentHistoryOut] = []
+    education: list[EducationOut] = []
+    skills: list[SkillOut] = []
+    certifications: list[CertificationOut] = []
+    verified_claims: list[VerifiedClaimSummaryOut] = []
 
     class Config:
         from_attributes = True

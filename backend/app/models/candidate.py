@@ -41,6 +41,9 @@ class CandidateProfile(Base, TimestampMixin):
     certifications: Mapped[list["Certification"]] = relationship(
         back_populates="profile", cascade="all, delete-orphan"
     )
+    verified_claims: Mapped[list["VerifiedClaim"]] = relationship(
+        back_populates="profile", cascade="all, delete-orphan"
+    )
 
 
 class EmploymentHistory(Base, TimestampMixin):
@@ -125,6 +128,8 @@ class VerifiedClaim(Base, TimestampMixin):
     source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
     embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+
+    profile: Mapped[CandidateProfile] = relationship(back_populates="verified_claims")
 
 
 class CandidateAnswer(Base, TimestampMixin):

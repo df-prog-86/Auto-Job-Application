@@ -222,6 +222,10 @@ export interface JobDetailOut extends JobOut {
   description?: string | null;
 }
 
+export interface ManualJobInput {
+  url: string;
+}
+
 export interface DiscoveryRunResult {
   employers_checked: number;
   employers_failed: number;

@@ -11,7 +11,8 @@ export type ExtensionMessage =
   | { type: "PAIR"; pairingSecret: string }
   | { type: "GET_PAIRING_STATE" }
   | { type: "GET_AUTOMATION_STATUS" }
-  | { type: "TOGGLE_AUTOMATION" };
+  | { type: "TOGGLE_AUTOMATION" }
+  | { type: "CAPTURE_JOB"; tabId: number };
 
 export interface PairResult {
   ok: boolean;
@@ -26,4 +27,19 @@ export interface AutomationStatusResult {
   ok: boolean;
   mode?: "PAUSED" | "REVIEW" | "AUTO";
   error?: string;
+}
+
+export interface CaptureJobResult {
+  ok: boolean;
+  jobTitle?: string;
+  company?: string;
+  error?: string;
+}
+
+/** What the injected page-reader script hands back to the service worker. */
+export interface CapturedPage {
+  url: string;
+  title: string;
+  jsonLd: string[];
+  bodyText: string;
 }

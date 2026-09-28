@@ -29,6 +29,7 @@ from app.services.discovery.normalization import (
     normalize_company,
     normalize_location,
     normalize_title,
+    parse_salary,
     strip_tracking_params,
 )
 
@@ -183,3 +184,83 @@ def _ingest_posting(
             )
         )
     result.jobs_updated += 1
+
+
+def ingest_manual_posting(db: Session, posting: RawJobPosting, *, source_label: str) -> Job:
+    """
+    A single job the user explicitly submitted (pasted URL or extension
+    capture -- app/services/discovery/manual_extraction.py), not one an
+    automated per-employer crawl found. Reuses the exact same normalization,
+    salary-parsing, and dedup logic as run_discovery() above so a manually
+    added job behaves identically to a discovered one from qualification
+    onward -- there is deliberately no search-profile matching step here,
+    since the user already chose this posting themselves.
+    """
+    description_text = html_to_text(posting.description_html)
+    normalized_company = normalize_company(posting.company)
+    normalized_title = normalize_title(posting.title)
+    normalized_location = normalize_location(posting.location)
+    remote_type = detect_remote_type(posting.location, posting.title, description_text)
+
+    canonical_url = strip_tracking_params(posting.application_url)
+    canonical_key = compute_canonical_job_key(
+        ats=None,
+        external_job_id=None,
+        canonical_application_url=canonical_url,
+        normalized_company=normalized_company,
+        normalized_title=normalized_title,
+        normalized_location=normalized_location,
+    )
+
+    now = dt.datetime.now(dt.UTC)
+    job = db.query(Job).filter(Job.canonical_job_key == canonical_key).first()
+
+    if job is None:
+        job = Job(
+            canonical_job_key=canonical_key,
+            ats=None,
+            external_job_id=None,
+            company=posting.company,
+            normalized_company=normalized_company,
+            title=posting.title,
+            normalized_title=normalized_title,
+            location=posting.location,
+            remote_type=remote_type,
+            salary=parse_salary(posting.salary_text or description_text),
+            description=description_text,
+            description_hash=compute_description_hash(description_text),
+            canonical_application_url=canonical_url,
+            first_seen=now,
+            last_seen=now,
+            status="open",
+        )
+        db.add(job)
+        db.flush()
+        db.add(
+            JobSource(
+                job_id=job.id,
+                provider=source_label,
+                source_url=canonical_url,
+                discovered_at=now,
+                external_source_id=None,
+            )
+        )
+    else:
+        job.last_seen = now
+        new_hash = compute_description_hash(description_text)
+        if new_hash and new_hash != job.description_hash:
+            job.description = description_text
+            job.description_hash = new_hash
+        if not any(s.provider == source_label for s in job.sources):
+            db.add(
+                JobSource(
+                    job_id=job.id,
+                    provider=source_label,
+                    source_url=canonical_url,
+                    discovered_at=now,
+                    external_source_id=None,
+                )
+            )
+
+    db.commit()
+    return job

@@ -7,6 +7,7 @@
 
 import type {
   AutomationStatusResult,
+  CaptureJobResult,
   ExtensionMessage,
   PairingStateResult,
   PairResult,
@@ -26,6 +27,12 @@ function $(id: string): HTMLElement {
 
 function showError(message: string): void {
   $("error").textContent = message;
+  $("captureStatus").textContent = "";
+}
+
+function showCaptureStatus(message: string): void {
+  $("captureStatus").textContent = message;
+  $("error").textContent = "";
 }
 
 function setStatusUI(mode: "PAUSED" | "REVIEW" | "AUTO"): void {
@@ -75,6 +82,32 @@ async function init(): Promise<void> {
       setStatusUI(result.mode);
     } else {
       showError(result.error ?? "Couldn't update automation status.");
+    }
+  });
+
+  $("saveJobButton").addEventListener("click", async () => {
+    const button = $("saveJobButton") as HTMLButtonElement;
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) {
+      showError("Couldn't find the current tab.");
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = "Saving…";
+    try {
+      const result = await sendMessage<CaptureJobResult>({
+        type: "CAPTURE_JOB",
+        tabId: activeTab.id,
+      });
+      if (result.ok) {
+        showCaptureStatus(`Saved: ${result.jobTitle} · ${result.company}`);
+      } else {
+        showError(result.error ?? "Couldn't save this job.");
+      }
+    } finally {
+      button.disabled = false;
+      button.textContent = "Save this job";
     }
   });
 

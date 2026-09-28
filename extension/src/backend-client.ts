@@ -39,4 +39,19 @@ export const backend = {
     request<{ mode: "PAUSED" | "REVIEW" | "AUTO" }>("/api/v1/automation/pause", {
       method: "POST",
     }),
+
+  captureJob: (page: { url: string; title: string; jsonLd: string[]; bodyText: string }) =>
+    request<{ id: number; title: string; company: string }>(
+      "/api/v1/jobs/capture",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          url: page.url,
+          page_title: page.title,
+          json_ld: page.jsonLd,
+          body_text: page.bodyText,
+        }),
+      },
+      true, // extension-token authed, same as any other extension-only endpoint
+    ),
 };

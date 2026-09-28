@@ -96,6 +96,28 @@ class JobDetailOut(JobOut):
         from_attributes = True
 
 
+class ManualJobIn(BaseModel):
+    """Option 1: the user pastes a job posting URL for the backend to fetch itself."""
+
+    url: str
+
+
+class CaptureJobIn(BaseModel):
+    """
+    Option 2: the browser extension has already read the page the user is
+    looking at (from their own logged-in session) and hands us its content
+    directly instead of us fetching it -- json_ld is whatever
+    <script type="application/ld+json"> blocks were on the page, body_text
+    is the page's visible text, both read client-side so no markup/scripts
+    are sent over.
+    """
+
+    url: str
+    page_title: str | None = None
+    json_ld: list[str] = []
+    body_text: str = ""
+
+
 class DiscoveryRunOut(BaseModel):
     employers_checked: int
     employers_failed: int

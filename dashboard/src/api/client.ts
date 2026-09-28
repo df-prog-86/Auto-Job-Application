@@ -4,6 +4,7 @@ import type {
   HealthResponse,
   JobDetailOut,
   JobOut,
+  ManualJobInput,
   PairingSecretResponse,
   PairRequest,
   PairResponse,
@@ -110,6 +111,8 @@ export const api = {
 
   listJobs: () => request<JobOut[]>("/jobs"),
   getJob: (id: number) => request<JobDetailOut>(`/jobs/${id}`),
+  addJobByUrl: (payload: ManualJobInput) =>
+    request<JobOut>("/jobs/manual", { method: "POST", body: JSON.stringify(payload) }),
 };
 
 export { ApiError };

@@ -11,8 +11,29 @@
  */
 
 import { backend } from "@/backend-client";
-import type { ExtensionMessage } from "@/messaging/types";
+import type { CapturedPage, ExtensionMessage } from "@/messaging/types";
 import { getStoredToken, setStoredToken } from "@/security/token-store";
+
+const CAPTURE_BODY_TEXT_LIMIT = 12000;
+
+/**
+ * Runs inside the page the user is looking at (spec §32's programmatic-
+ * injection pattern, on a plain read here rather than an ATS adapter).
+ * Reads only what's needed to extract a job posting -- structured JobPosting
+ * markup if present, plus the page's own visible text as an LLM fallback --
+ * never the full HTML, so nothing beyond that leaves the user's browser.
+ */
+function readJobPostingFromPage(bodyTextLimit: number): CapturedPage {
+  const jsonLd = Array.from(
+    document.querySelectorAll('script[type="application/ld+json"]'),
+  ).map((el) => el.textContent || "");
+  return {
+    url: location.href,
+    title: document.title,
+    jsonLd,
+    bodyText: (document.body?.innerText || "").slice(0, bodyTextLimit),
+  };
+}
 
 const HEALTH_CHECK_ALARM = "job-agent-health-check";
 
@@ -75,6 +96,29 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
           current.mode === "PAUSED" ? backend.startAutomation() : backend.pauseAutomation(),
         )
         .then((res) => sendResponse({ ok: true, mode: res.mode }))
+        .catch((err: Error) => sendResponse({ ok: false, error: err.message }));
+      return true;
+
+    case "CAPTURE_JOB":
+      chrome.scripting
+        .executeScript({
+          target: { tabId: message.tabId },
+          func: readJobPostingFromPage,
+          args: [CAPTURE_BODY_TEXT_LIMIT],
+        })
+        .then(async (results) => {
+          const captured = results[0]?.result;
+          if (!captured) {
+            sendResponse({ ok: false, error: "Couldn't read that page." });
+            return;
+          }
+          try {
+            const job = await backend.captureJob(captured);
+            sendResponse({ ok: true, jobTitle: job.title, company: job.company });
+          } catch (err) {
+            sendResponse({ ok: false, error: (err as Error).message });
+          }
+        })
         .catch((err: Error) => sendResponse({ ok: false, error: err.message }));
       return true;
 

@@ -61,3 +61,21 @@ class ResumeExtraction(BaseModel):
     skills: list[str] = Field(default_factory=list)
     certifications: list[CertificationEntry] = Field(default_factory=list)
     projects: list[ProjectEntry] = Field(default_factory=list)
+
+
+class JobPostingExtraction(BaseModel):
+    """
+    Fallback shape for manual job intake (services/discovery/manual_extraction.py)
+    when a page has no schema.org JobPosting structured data to read
+    deterministically. Only used as a last resort, per spec §7's
+    deterministic-before-generative principle.
+    """
+
+    title: str
+    company: str
+    location: str | None = None
+    description: str = Field(
+        description="The job description/responsibilities/requirements text, "
+        "verbatim from the source page -- do not summarize or paraphrase it."
+    )
+    salary_text: str | None = None

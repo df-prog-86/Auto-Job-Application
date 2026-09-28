@@ -5,7 +5,7 @@
   "description": "Browser execution layer for the Job Agent automated application platform.",
   "minimum_chrome_version": "116",
 
-  "permissions": ["alarms", "storage", "tabs", "scripting", "notifications"],
+  "permissions": ["alarms", "storage", "tabs", "scripting", "notifications", "activeTab"],
 
   "host_permissions": ["http://127.0.0.1:8765/*"],
 

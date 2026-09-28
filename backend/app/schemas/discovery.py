@@ -72,29 +72,16 @@ class TargetEmployerOut(TargetEmployerIn):
         from_attributes = True
 
 
-class RequirementGapOut(BaseModel):
-    """One missing required qualification, tagged by category (skill,
-    education, certification, domain_experience, years_experience, other)
-    so the UI can group gaps instead of showing one flat list."""
-
-    requirement: str
-    type: str
-
-
 class JobEvaluationOut(BaseModel):
-    """Qualification pipeline output (spec §23) -- every component score is
-    included, not just the overall one, so the UI can show *why* a job
-    scored the way it did."""
+    """
+    Qualification result (simplified, Milestone 4): a single direct
+    resume-vs-job comparison -- overall score, a plain-language summary of
+    why, and a short list of concrete gaps.
+    """
 
-    hard_filter_result: str
-    required_coverage: float
-    preferred_score: float
-    domain_alignment: float
-    seniority_alignment: float
-    preference_alignment: float
     overall_score: float
-    disqualifiers: list[str]
-    gaps: list[RequirementGapOut]
+    summary: str
+    gaps: list[str]
     model_used: str | None
     evaluation_version: str
 

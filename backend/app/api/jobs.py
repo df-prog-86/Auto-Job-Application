@@ -103,11 +103,13 @@ async def add_job_from_extension(
 @router.post("/{job_id}/qualify", response_model=JobOut)
 async def requalify_job(job_id: int, db: Session = Depends(get_db)) -> JobOut:
     """
-    The only place qualification scoring runs -- one LLM call, only when
-    the candidate explicitly clicks "Score match" (first run) or "Re-score
-    match" (e.g. after updating their profile) on the Jobs page. Scoring
-    never runs automatically on add, so adding a job never costs an LLM
-    call by itself.
+    The only place qualification scoring runs -- one LLM call that directly
+    compares the candidate's resume/profile against the job description
+    (see services/qualification/pipeline.py), only when the candidate
+    explicitly clicks "Score match" (first run) or "Re-score match" (e.g.
+    after updating their profile) on the Jobs page. Scoring never runs
+    automatically on add, so adding a job never costs an LLM call by
+    itself.
     """
     job = db.get(Job, job_id)
     if job is None:

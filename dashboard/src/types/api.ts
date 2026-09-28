@@ -204,21 +204,10 @@ export interface TargetEmployerInput {
   notes?: string | null;
 }
 
-export interface RequirementGapOut {
-  requirement: string;
-  type: string;
-}
-
 export interface JobEvaluationOut {
-  hard_filter_result: "PASS" | "FAIL";
-  required_coverage: number;
-  preferred_score: number;
-  domain_alignment: number;
-  seniority_alignment: number;
-  preference_alignment: number;
   overall_score: number;
-  disqualifiers: string[];
-  gaps: RequirementGapOut[];
+  summary: string;
+  gaps: string[];
   model_used?: string | null;
   evaluation_version: string;
 }

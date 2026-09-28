@@ -1,58 +1,81 @@
 """
-Orchestrates all four qualification stages for one job and stores the
-result on JobEvaluation (spec §21-23). Runs automatically once a job is
-added -- scoring is informational and free to redo. Nothing this produces
-triggers tailoring or an application on its own; that only happens once the
-candidate clicks "Proceed with Application" on the Jobs page (see
-Job.application_status and api/jobs.py).
+Qualification (Milestone 4, simplified): one direct LLM comparison of the
+candidate's resume/profile against a job's description. See package
+docstring (__init__.py) for why this replaced the earlier four-stage
+pipeline.
+
+Runs only when the candidate explicitly clicks "Score match" / "Re-score
+match" on the Jobs page (app/api/jobs.py's POST /{job_id}/qualify) --
+never automatically on add.
 """
 
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models.candidate import CandidateAnswer
 from app.models.jobs import Job, JobEvaluation
-from app.models.search import SearchProfile
 from app.repositories.profile_repository import get_current_profile
-from app.services.qualification import evidence_matching
-from app.services.qualification.hard_constraints import evaluate_hard_constraints
-from app.services.qualification.requirement_extraction import extract_requirements, store_requirements
-from app.services.qualification.scoring import score_job
+from app.services.llm.exceptions import LLMError
+from app.services.llm.router import ModelRouter
+from app.services.llm.schemas import ResumeJobMatchResult
+from app.services.qualification.resume_summary import summarize_candidate
+
+
+class QualificationError(RuntimeError):
+    """Scoring couldn't be completed (e.g. no LLM provider configured)."""
 
 
 async def qualify_job(db: Session, job: Job) -> JobEvaluation:
-    search_profiles = db.query(SearchProfile).filter(SearchProfile.enabled.is_(True)).all()
-    candidate_answers = db.query(CandidateAnswer).all()
     profile = get_current_profile(db)
+    resume_text = summarize_candidate(profile)
 
-    hard_result = evaluate_hard_constraints(job, search_profiles, candidate_answers)
+    router = ModelRouter(db)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You compare a candidate's resume/background against a job posting "
+                "and judge how well they fit. Return ONLY JSON matching the provided "
+                "schema. Base the score only on what's actually stated in the resume "
+                "material and the job description -- never assume unstated skills or "
+                "experience. List gaps as specific, concrete things the posting asks "
+                "for that the resume doesn't show, not vague statements."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Candidate background:\n---\n"
+                f"{resume_text or '(no resume or profile on file yet)'}\n---\n\n"
+                f"Job: {job.title} at {job.company}\n\n"
+                "Job description:\n---\n"
+                f"{job.description or '(no description available)'}\n---"
+            ),
+        },
+    ]
 
-    extraction = await extract_requirements(db, job)
-    requirements = store_requirements(db, job, extraction) if extraction is not None else []
-
-    matches = evidence_matching.match_all(requirements, profile)
-    scored = score_job(hard_result, matches)
+    try:
+        result = await router.get_structured(
+            purpose="resume_job_match",
+            prompt_version="v1",
+            messages=messages,
+            response_model=ResumeJobMatchResult,
+        )
+    except LLMError as exc:
+        raise QualificationError(
+            f"Couldn't score this job ({exc}). Check that an LLM provider is configured."
+        ) from exc
 
     evaluation = db.query(JobEvaluation).filter(JobEvaluation.job_id == job.id).first()
     if evaluation is None:
         evaluation = JobEvaluation(job_id=job.id)
         db.add(evaluation)
 
-    evaluation.hard_filter_result = scored["hard_filter_result"]
-    evaluation.required_coverage = scored["required_coverage"]
-    evaluation.preferred_score = scored["preferred_score"]
-    evaluation.domain_alignment = scored["domain_alignment"]
-    evaluation.seniority_alignment = scored["seniority_alignment"]
-    evaluation.preference_alignment = scored["preference_alignment"]
-    evaluation.overall_score = scored["overall_score"]
-    evaluation.disqualifiers = scored["disqualifiers"]
-    evaluation.gaps = scored["gaps"]
-    # ModelRouter doesn't currently surface which specific model succeeded
-    # (FAST vs FALLBACK) back to the caller -- rather than guess, this is
-    # left honest: set only when we know extraction actually ran.
-    evaluation.model_used = "job_requirement_extraction_v1" if extraction is not None else None
-    evaluation.evaluation_version = "1"
+    evaluation.overall_score = round(result.match_percentage / 100, 3)
+    evaluation.summary = result.summary
+    evaluation.gaps = result.gaps
+    evaluation.model_used = "resume_job_match_v1"
+    evaluation.evaluation_version = "2"
 
     db.commit()
     db.refresh(evaluation)

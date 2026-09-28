@@ -17,7 +17,7 @@ from app.models.candidate import (
 )
 from app.models.discovery import TargetEmployer
 from app.models.documents import GeneratedDocument
-from app.models.jobs import Job, JobEvaluation, JobRequirement, JobSource
+from app.models.jobs import Job, JobEvaluation, JobSource
 from app.models.mappings import FieldMapping, QuestionMapping
 from app.models.model_runs import ModelRun
 from app.models.search import SearchProfile
@@ -40,7 +40,6 @@ __all__ = [
     "GeneratedDocument",
     "Job",
     "JobEvaluation",
-    "JobRequirement",
     "JobSource",
     "FieldMapping",
     "QuestionMapping",

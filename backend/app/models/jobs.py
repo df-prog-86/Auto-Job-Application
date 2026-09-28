@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -45,9 +45,6 @@ class Job(Base, TimestampMixin):
     sources: Mapped[list["JobSource"]] = relationship(
         back_populates="job", cascade="all, delete-orphan"
     )
-    requirements: Mapped[list["JobRequirement"]] = relationship(
-        back_populates="job", cascade="all, delete-orphan"
-    )
     evaluations: Mapped[list["JobEvaluation"]] = relationship(
         back_populates="job", cascade="all, delete-orphan"
     )
@@ -75,38 +72,20 @@ class JobSource(Base, TimestampMixin):
     job: Mapped[Job] = relationship(back_populates="sources")
 
 
-class JobRequirement(Base, TimestampMixin):
-    """Each extracted requirement, stored separately (spec §21 Stage 2)."""
-
-    __tablename__ = "job_requirements"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
-    requirement_type: Mapped[str] = mapped_column(String(50))
-    normalized_requirement: Mapped[str] = mapped_column(String(500))
-    is_required: Mapped[bool] = mapped_column(Boolean, default=True)  # False = preferred
-    source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    confidence: Mapped[float] = mapped_column(Float, default=0.0)
-    weight: Mapped[float] = mapped_column(Float, default=1.0)
-
-    job: Mapped[Job] = relationship(back_populates="requirements")
-
-
 class JobEvaluation(Base, TimestampMixin):
-    """Qualification pipeline output for a (job, profile) pair (spec §23)."""
+    """
+    Qualification result for a (job, profile) pair -- a single, direct
+    resume-vs-job-posting comparison (Milestone 4, simplified): one overall
+    score, a plain-language summary of why, and a short list of concrete
+    gaps. Replaces the earlier multi-component weighted score.
+    """
 
     __tablename__ = "job_evaluations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
-    hard_filter_result: Mapped[str] = mapped_column(String(20))  # PASS/FAIL/UNKNOWN
-    required_coverage: Mapped[float] = mapped_column(Float, default=0.0)
-    preferred_score: Mapped[float] = mapped_column(Float, default=0.0)
-    domain_alignment: Mapped[float] = mapped_column(Float, default=0.0)
-    seniority_alignment: Mapped[float] = mapped_column(Float, default=0.0)
-    preference_alignment: Mapped[float] = mapped_column(Float, default=0.0)
     overall_score: Mapped[float] = mapped_column(Float, default=0.0)
-    disqualifiers: Mapped[list[str]] = mapped_column(JSON, default=list)
+    summary: Mapped[str] = mapped_column(Text, default="")
     gaps: Mapped[list[str]] = mapped_column(JSON, default=list)
     model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
     evaluation_version: Mapped[str] = mapped_column(String(20), default="1")

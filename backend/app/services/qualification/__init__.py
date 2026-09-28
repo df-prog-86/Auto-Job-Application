@@ -1,18 +1,19 @@
 """
-Qualification pipeline (spec §21-24, Milestone 4): scores a stored Job
-against the candidate's own verified profile. Four stages, cheapest first:
+Qualification (Milestone 4, simplified): scores a stored Job against the
+candidate's own resume/profile with a single, direct comparison -- one LLM
+call reads the candidate's background and the job description and returns
+a match percentage, a plain-language explanation, and a short list of
+concrete gaps (see resume_summary.py and pipeline.py).
 
-1. hard_constraints  -- free, deterministic PASS/FAIL/UNKNOWN checks.
-2. requirement_extraction -- one cheap LLM call, only for what stage 1
-   didn't already rule out.
-3. evidence_matching -- deterministic comparison of each requirement
-   against the candidate's verified claims/skills/education/certifications.
-4. scoring -- combines 1-3 into an interpretable weighted score, stored on
-   JobEvaluation, with every component visible (spec §23: "The UI must show
-   why a job qualified").
+This replaces an earlier four-stage design (free hard-constraint checks,
+separate structured requirement extraction, deterministic evidence
+matching, and a five-component weighted score) per product direction: the
+score doesn't need to be that elaborate, it just needs to compare the
+resume to the posting.
 
-Runs automatically once a job is added -- ranking a job is informational and
-costs nothing to redo. Nothing past this point (tailoring, application)
-happens without the candidate explicitly clicking "Proceed with
-Application" on the Jobs page; see Job.application_status.
+Only ever runs when the candidate explicitly clicks "Score match" /
+"Re-score match" on the Jobs page (app/api/jobs.py) -- never automatically
+on add, so adding a job never costs an LLM call by itself. Nothing past
+this point (tailoring, application) starts on its own either; that needs
+the candidate to click "Proceed with Application" (Job.application_status).
 """

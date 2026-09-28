@@ -63,36 +63,29 @@ class ResumeExtraction(BaseModel):
     projects: list[ProjectEntry] = Field(default_factory=list)
 
 
-class ExtractedRequirement(BaseModel):
-    """One requirement pulled from a job description (spec §21 Stage 2) --
-    every requirement must carry required-vs-preferred, a confidence, and
-    the exact text it came from, never just a bare string."""
+class ResumeJobMatchResult(BaseModel):
+    """
+    Simple, direct resume-vs-job comparison (Milestone 4, simplified per
+    product direction: "just compare my resume to the job posting").
+    Replaces the earlier multi-stage pipeline (hard constraints, separate
+    requirement extraction, deterministic evidence matching, weighted
+    scoring) with one LLM call that reads the candidate's own background
+    and the job description and judges the fit directly.
+    """
 
-    text: str = Field(description="Normalized requirement, e.g. '5+ years Python'")
-    requirement_type: str = Field(
-        description="One of: skill, education, certification, domain_experience, "
-        "years_experience, travel, other"
+    match_percentage: int = Field(
+        ge=0, le=100, description="Overall fit between the resume and the job, 0-100"
     )
-    is_required: bool
-    confidence: float = Field(ge=0.0, le=1.0)
-    source_text: str = Field(description="Verbatim text from the job description this was extracted from")
-
-
-class JobRequirementsExtraction(BaseModel):
-    """Stage 2 of the qualification pipeline (spec §21): structured
-    requirements extracted from a job description by the cheap model, after
-    Stage 1's free deterministic hard-constraint checks have already run."""
-
-    normalized_title: str | None = None
-    seniority: str | None = None
-    required_years: float | None = None
-    employment_type: str | None = None
-    remote_policy: str | None = None
-    work_authorization_note: str | None = None
-    sponsorship_offered: bool | None = None
-    clearance_required: str | None = None
-    travel_requirement: str | None = None
-    requirements: list[ExtractedRequirement] = Field(default_factory=list)
+    summary: str = Field(
+        description="One or two plain-language sentences explaining the score -- "
+        "what fits well and what's missing. Written for the candidate to read directly."
+    )
+    gaps: list[str] = Field(
+        default_factory=list,
+        description="Short list of specific, concrete qualifications/skills/experience "
+        "the job asks for that don't show up in the resume. Empty if there aren't any. "
+        "Never vague -- e.g. '5+ years of Python' not 'more experience'.",
+    )
 
 
 class JobPostingExtraction(BaseModel):

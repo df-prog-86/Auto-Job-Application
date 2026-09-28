@@ -25,7 +25,7 @@ export function Jobs() {
     <div>
       <PageHeader
         title="Jobs"
-        description="Paste a link to a job posting you found, or use the 'Save this job' button in the browser extension while you're looking at one. Each job gets a match score automatically — nothing else happens until you click Proceed with Application."
+        description="Paste a link to a job posting you found, or use the 'Save this job' button in the browser extension while you're looking at one. Click 'Score match' on a job to see how well it fits — nothing runs automatically, and nothing proceeds toward an application until you click Proceed with Application."
       />
 
       <AddJobByUrl />
@@ -80,7 +80,7 @@ function JobRow({ job }: { job: JobOut }) {
               {Math.round(evaluation.overall_score * 100)}% match
             </span>
           ) : (
-            <span className="text-xs text-slate-400">Not scored yet</span>
+            <span className="text-xs text-slate-400">Not scored</span>
           )}
           <a
             href={job.canonical_application_url}
@@ -107,6 +107,12 @@ function JobRow({ job }: { job: JobOut }) {
       {evaluation && evaluation.gaps.length > 0 && (
         <div className="mt-1 text-xs text-slate-500">Gaps: {evaluation.gaps.join(", ")}</div>
       )}
+      {evaluation && !evaluation.model_used && (
+        <div className="mt-1 text-xs text-amber-600">
+          Reflects only the free checks (location, salary, etc.) — detailed requirement matching
+          didn't run, likely because no LLM provider is configured.
+        </div>
+      )}
 
       <div className="mt-3 flex items-center gap-2">
         {job.application_status === "proceeding" ? (
@@ -125,7 +131,13 @@ function JobRow({ job }: { job: JobOut }) {
           disabled={requalifyMutation.isPending}
           className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
         >
-          {requalifyMutation.isPending ? "Re-scoring…" : "Re-score match"}
+          {requalifyMutation.isPending
+            ? evaluation
+              ? "Re-scoring…"
+              : "Scoring…"
+            : evaluation
+              ? "Re-score match"
+              : "Score match"}
         </button>
       </div>
 

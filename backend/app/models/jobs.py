@@ -35,6 +35,12 @@ class Job(Base, TimestampMixin):
     first_seen: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     last_seen: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(30), default="open")  # open/closed/unknown
+    # Whether the candidate has told the system to move forward with an
+    # application -- deliberately separate from qualification scoring, which
+    # runs automatically. Nothing past this stays "not_started" without the
+    # candidate explicitly clicking "Proceed with Application" (spec-adjacent
+    # design decision: ranking is automatic, acting on a rank never is).
+    application_status: Mapped[str] = mapped_column(String(30), default="not_started")
 
     sources: Mapped[list["JobSource"]] = relationship(
         back_populates="job", cascade="all, delete-orphan"
@@ -45,6 +51,13 @@ class Job(Base, TimestampMixin):
     evaluations: Mapped[list["JobEvaluation"]] = relationship(
         back_populates="job", cascade="all, delete-orphan"
     )
+
+    @property
+    def evaluation(self) -> "JobEvaluation | None":
+        """Convenience accessor for the API layer: the qualification
+        pipeline (services/qualification/pipeline.py) upserts at most one
+        JobEvaluation per job, so there's normally exactly one row here."""
+        return self.evaluations[0] if self.evaluations else None
 
 
 class JobSource(Base, TimestampMixin):

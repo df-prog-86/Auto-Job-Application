@@ -204,6 +204,22 @@ export interface TargetEmployerInput {
   notes?: string | null;
 }
 
+export interface JobEvaluationOut {
+  hard_filter_result: "PASS" | "FAIL";
+  required_coverage: number;
+  preferred_score: number;
+  domain_alignment: number;
+  seniority_alignment: number;
+  preference_alignment: number;
+  overall_score: number;
+  disqualifiers: string[];
+  gaps: string[];
+  model_used?: string | null;
+  evaluation_version: string;
+}
+
+export type ApplicationStatus = "not_started" | "proceeding";
+
 export interface JobOut {
   id: number;
   ats?: string | null;
@@ -216,6 +232,8 @@ export interface JobOut {
   first_seen: string;
   last_seen: string;
   status: string;
+  application_status: ApplicationStatus;
+  evaluation?: JobEvaluationOut | null;
 }
 
 export interface JobDetailOut extends JobOut {

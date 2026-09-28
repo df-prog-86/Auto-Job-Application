@@ -15,8 +15,24 @@ from app.models.jobs import Job
 from app.schemas.discovery import CaptureJobIn, JobDetailOut, JobOut, ManualJobIn
 from app.services.discovery import manual_extraction
 from app.services.discovery.pipeline import ingest_manual_posting
+from app.services.qualification.pipeline import qualify_job
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
+
+
+async def _qualify_best_effort(db: Session, job: Job) -> None:
+    """
+    Qualification (spec §21-23) runs automatically on every newly-added job
+    -- scoring is informational, costs one cheap LLM call at most, and
+    doesn't touch anything else. It must never take down the "add a job"
+    action it rides along with, so a failure here is swallowed: the job
+    stays added, just without a score yet (evaluation stays None until a
+    manual re-run via POST /jobs/{id}/qualify).
+    """
+    try:
+        await qualify_job(db, job)
+    except Exception:
+        db.rollback()
 
 
 @router.get("", response_model=list[JobOut])
@@ -66,6 +82,8 @@ async def add_job_by_url(payload: ManualJobIn, db: Session = Depends(get_db)) ->
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     job = ingest_manual_posting(db, posting, source_label="manual_url")
+    await _qualify_best_effort(db, job)
+    db.refresh(job)
     return JobOut.model_validate(job)
 
 
@@ -91,4 +109,38 @@ async def add_job_from_extension(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     job = ingest_manual_posting(db, posting, source_label="extension_capture")
+    await _qualify_best_effort(db, job)
+    db.refresh(job)
+    return JobOut.model_validate(job)
+
+
+@router.post("/{job_id}/qualify", response_model=JobOut)
+async def requalify_job(job_id: int, db: Session = Depends(get_db)) -> JobOut:
+    """Manually re-run qualification -- useful after updating your profile
+    or search preferences, since scoring is otherwise only run once, when
+    the job is first added."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    await qualify_job(db, job)
+    db.refresh(job)
+    return JobOut.model_validate(job)
+
+
+@router.post("/{job_id}/proceed", response_model=JobOut)
+def proceed_with_application(job_id: int, db: Session = Depends(get_db)) -> JobOut:
+    """
+    The explicit, candidate-initiated gate: qualification scoring is
+    automatic and purely informational, but nothing downstream of it
+    (tailoring, touching a real application) ever starts on its own. This
+    is what the "Proceed with Application" button on the Jobs page calls --
+    right now it only records the decision, since tailoring/application
+    execution (Milestones 5-6) aren't built yet.
+    """
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    job.application_status = "proceeding"
+    db.commit()
+    db.refresh(job)
     return JobOut.model_validate(job)

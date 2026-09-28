@@ -72,6 +72,27 @@ class TargetEmployerOut(TargetEmployerIn):
         from_attributes = True
 
 
+class JobEvaluationOut(BaseModel):
+    """Qualification pipeline output (spec §23) -- every component score is
+    included, not just the overall one, so the UI can show *why* a job
+    scored the way it did."""
+
+    hard_filter_result: str
+    required_coverage: float
+    preferred_score: float
+    domain_alignment: float
+    seniority_alignment: float
+    preference_alignment: float
+    overall_score: float
+    disqualifiers: list[str]
+    gaps: list[str]
+    model_used: str | None
+    evaluation_version: str
+
+    class Config:
+        from_attributes = True
+
+
 class JobOut(BaseModel):
     id: int
     ats: str | None
@@ -84,6 +105,8 @@ class JobOut(BaseModel):
     first_seen: dt.datetime
     last_seen: dt.datetime
     status: str
+    application_status: str
+    evaluation: JobEvaluationOut | None = None
 
     class Config:
         from_attributes = True

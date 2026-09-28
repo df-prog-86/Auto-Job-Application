@@ -113,6 +113,9 @@ export const api = {
   getJob: (id: number) => request<JobDetailOut>(`/jobs/${id}`),
   addJobByUrl: (payload: ManualJobInput) =>
     request<JobOut>("/jobs/manual", { method: "POST", body: JSON.stringify(payload) }),
+  requalifyJob: (id: number) => request<JobOut>(`/jobs/${id}/qualify`, { method: "POST" }),
+  proceedWithApplication: (id: number) =>
+    request<JobOut>(`/jobs/${id}/proceed`, { method: "POST" }),
 };
 
 export { ApiError };

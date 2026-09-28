@@ -101,13 +101,25 @@ class JobPostingExtraction(BaseModel):
     when a page has no schema.org JobPosting structured data to read
     deterministically. Only used as a last resort, per spec §7's
     deterministic-before-generative principle.
+
+    is_job_posting is required and checked BEFORE any other field is
+    trusted: title/company/description are optional so the model has a
+    real way to say "this page isn't a job posting" instead of being forced
+    to invent a plausible-looking title and company for, say, a news
+    article or a company's About page.
     """
 
-    title: str
-    company: str
+    is_job_posting: bool = Field(
+        description="False if the page text clearly is not a single job posting "
+        "(e.g. a news article, a company's About page, a search results page). "
+        "When False, leave the other fields null rather than guessing."
+    )
+    title: str | None = None
+    company: str | None = None
     location: str | None = None
-    description: str = Field(
+    description: str | None = Field(
+        default=None,
         description="The job description/responsibilities/requirements text, "
-        "verbatim from the source page -- do not summarize or paraphrase it."
+        "verbatim from the source page -- do not summarize or paraphrase it.",
     )
     salary_text: str | None = None

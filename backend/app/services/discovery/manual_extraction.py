@@ -209,10 +209,11 @@ async def extract_job_posting(
             "role": "system",
             "content": (
                 "You extract a single job posting's details from a web page's visible "
-                "text. Return ONLY JSON matching the provided schema. Use the job "
-                "description text verbatim from the source -- do not summarize or "
-                "paraphrase it. Never invent a title, company, or details not present "
-                "in the text."
+                "text. Return ONLY JSON matching the provided schema. First decide whether "
+                "this page is actually a single job posting at all -- if it's a news "
+                "article, a company's About/homepage, a search results listing, or "
+                "anything else, set is_job_posting to false and leave the other fields "
+                "null. Never invent a title, company, or details not present in the text."
             ),
         },
         {
@@ -235,6 +236,17 @@ async def extract_job_posting(
             f"Couldn't automatically read a job posting off that page ({exc}). No LLM "
             "provider may be configured, or the page didn't look like a job posting."
         ) from exc
+
+    # is_job_posting is checked before anything else is trusted -- title and
+    # company are optional in the schema specifically so the model can say
+    # "this isn't a job posting" instead of being forced to invent
+    # something plausible-looking for a page that isn't one.
+    if not extraction.is_job_posting or not extraction.title or not extraction.company:
+        raise ManualExtractionError(
+            "That page doesn't look like a job posting -- couldn't find a clear job title "
+            "and company on it. Double-check the link, or use the extension's 'Save this "
+            "job' button while looking directly at the posting."
+        )
 
     return RawJobPosting(
         external_job_id=None,

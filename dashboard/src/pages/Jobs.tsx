@@ -3,12 +3,57 @@ import { useState } from "react";
 
 import { api, ApiError } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
-import type { JobOut } from "@/types/api";
+import type { JobEvaluationOut, JobOut, RequirementGapOut } from "@/types/api";
 
 function matchColor(score: number): string {
   if (score >= 0.75) return "text-emerald-600 bg-emerald-50";
   if (score >= 0.5) return "text-amber-600 bg-amber-50";
   return "text-slate-500 bg-slate-100";
+}
+
+const GAP_TYPE_LABELS: Record<string, string> = {
+  skill: "Skills",
+  education: "Education",
+  certification: "Certifications",
+  domain_experience: "Experience",
+  years_experience: "Experience",
+  travel: "Travel",
+  other: "Other",
+};
+
+const MAX_ITEMS_SHOWN_PER_GROUP = 3;
+
+function groupGaps(gaps: RequirementGapOut[]): { label: string; items: string[] }[] {
+  const groups = new Map<string, string[]>();
+  for (const gap of gaps) {
+    const label = GAP_TYPE_LABELS[gap.type] ?? "Other";
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label)!.push(gap.requirement);
+  }
+  return Array.from(groups.entries())
+    .map(([label, items]) => ({ label, items }))
+    .sort((a, b) => b.items.length - a.items.length);
+}
+
+/** One-line, plain-language reason for the score — the detailed component
+ * breakdown (required/preferred/domain/seniority/preference) stays out of
+ * the UI; this is what actually answers "why did it score this way." */
+function matchSummary(evaluation: JobEvaluationOut): string {
+  const pct = Math.round(evaluation.overall_score * 100);
+  if (evaluation.disqualifiers.length > 0) {
+    return `${pct}% match — ruled out by: ${evaluation.disqualifiers.join(", ")}`;
+  }
+  if (evaluation.gaps.length === 0) {
+    return `${pct}% match — meets every required qualification found`;
+  }
+  const groups = groupGaps(evaluation.gaps);
+  const [top, ...rest] = groups;
+  const restCount = rest.reduce((sum, g) => sum + g.items.length, 0);
+  const detail =
+    restCount > 0
+      ? `mainly ${top.label.toLowerCase()} (${top.items.length}), plus ${restCount} more`
+      : `mainly ${top.label.toLowerCase()} (${top.items.length})`;
+  return `${pct}% match — ${detail}`;
 }
 
 /**
@@ -99,14 +144,12 @@ function JobRow({ job }: { job: JobOut }) {
         {new Date(job.first_seen).toLocaleDateString()}
       </div>
 
-      {evaluation && evaluation.disqualifiers.length > 0 && (
-        <div className="mt-2 text-xs text-red-600">
-          Doesn't meet: {evaluation.disqualifiers.join(", ")}
+      {evaluation && (
+        <div className={`mt-2 text-xs ${evaluation.disqualifiers.length > 0 ? "text-red-600" : "text-slate-600"}`}>
+          {matchSummary(evaluation)}
         </div>
       )}
-      {evaluation && evaluation.gaps.length > 0 && (
-        <div className="mt-1 text-xs text-slate-500">Gaps: {evaluation.gaps.join(", ")}</div>
-      )}
+      {evaluation && evaluation.gaps.length > 0 && <GapDetails gaps={evaluation.gaps} />}
       {evaluation && !evaluation.model_used && (
         <div className="mt-1 text-xs text-amber-600">
           Reflects only the free checks (location, salary, etc.) — detailed requirement matching
@@ -147,6 +190,31 @@ function JobRow({ job }: { job: JobOut }) {
         </p>
       )}
     </li>
+  );
+}
+
+/** Collapsed by default — the one-line matchSummary() above is the answer
+ * to "why this score"; this is the detail for when you want it. */
+function GapDetails({ gaps }: { gaps: RequirementGapOut[] }) {
+  const groups = groupGaps(gaps);
+  return (
+    <details className="mt-1 text-xs text-slate-500">
+      <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-700">
+        See what's missing ({gaps.length})
+      </summary>
+      <ul className="mt-1 space-y-0.5 pl-3">
+        {groups.map((group) => {
+          const shown = group.items.slice(0, MAX_ITEMS_SHOWN_PER_GROUP);
+          const remaining = group.items.length - shown.length;
+          return (
+            <li key={group.label}>
+              <span className="font-medium text-slate-600">{group.label}:</span> {shown.join(", ")}
+              {remaining > 0 ? `, +${remaining} more` : ""}
+            </li>
+          );
+        })}
+      </ul>
+    </details>
   );
 }
 

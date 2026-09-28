@@ -56,8 +56,11 @@ def score_job(hard_result: HardConstraintResult, matches: list[RequirementMatch]
         + WEIGHTS["preference_alignment"] * preference_alignment
     )
 
+    # Structured, not a flattened string -- lets the UI group gaps by
+    # category (skills, experience, education, ...) instead of dumping one
+    # long comma-separated line.
     gaps = [
-        f"{m.requirement.normalized_requirement} ({m.requirement.requirement_type})"
+        {"requirement": m.requirement.normalized_requirement, "type": m.requirement.requirement_type}
         for m in required_matches
         if m.status == "NOT_MET"
     ]

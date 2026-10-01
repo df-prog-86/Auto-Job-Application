@@ -7,7 +7,20 @@
 
   "permissions": ["alarms", "storage", "tabs", "scripting", "notifications", "activeTab"],
 
-  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "host_permissions": [
+    "http://127.0.0.1:8765/*",
+    "https://*.greenhouse.io/*",
+    "https://jobs.ashbyhq.com/*",
+    "https://*.myworkdayjobs.com/*"
+  ],
+
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1:8765/app/*", "http://127.0.0.1:8765/app"],
+      "js": ["content/dashboard-bridge.js"],
+      "run_at": "document_idle"
+    }
+  ],
 
   "background": {
     "service_worker": "service-worker.js"

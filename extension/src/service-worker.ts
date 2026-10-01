@@ -13,6 +13,7 @@
 import { backend, downloadDocumentBase64 } from "@/backend-client";
 import type { ApplyContext, FillReport } from "@/form-engine/types";
 import type { CapturedPage, ExtensionMessage, FillPageResult } from "@/messaging/types";
+import { isSupportedApplicationUrl } from "@/security/ats-hosts";
 import { getStoredToken, setStoredToken } from "@/security/token-store";
 
 const CAPTURE_BODY_TEXT_LIMIT = 12000;
@@ -95,6 +96,60 @@ async function fillApplicationPage(tabId: number, jobId?: number): Promise<FillP
   };
 }
 
+const DASHBOARD_ORIGIN = "http://127.0.0.1:8765";
+
+function notify(title: string, message: string): void {
+  chrome.notifications.create({ type: "basic", iconUrl: "icons/icon128.png", title, message });
+}
+
+function waitForTabComplete(tabId: number, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      clearTimeout(timer);
+      resolve();
+    };
+    const listener = (id: number, info: chrome.tabs.TabChangeInfo) => {
+      if (id === tabId && info.status === "complete") done();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+/**
+ * "Complete application" from the dashboard: opens the posting in a new tab,
+ * waits for the form to appear, then runs the same fill as the popup button.
+ * Still never submits; the person reviews and clicks Submit themselves.
+ */
+async function completeApplication(jobId: number, url: string): Promise<void> {
+  const tab = await chrome.tabs.create({ url, active: true });
+  if (tab.id === undefined) return;
+  const tabId = tab.id;
+  await waitForTabComplete(tabId, 30000);
+
+  // Application forms often render a moment after the page "loads".
+  for (let i = 0; i < 20; i++) {
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => document.querySelectorAll("input, textarea, select").length > 3,
+    });
+    if (res?.result) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  const result = await fillApplicationPage(tabId, jobId);
+  if (!result.ok) {
+    notify("Couldn't fill the application", result.problem ?? result.error ?? "Open the extension on that tab to try again.");
+  } else {
+    const n = result.flagged?.length ?? 0;
+    notify(
+      "Application filled, not submitted",
+      n > 0 ? `${n} field${n === 1 ? "" : "s"} need you. Review the page, then submit it yourself.` : "Review the page, then submit it yourself.",
+    );
+  }
+}
+
 const HEALTH_CHECK_ALARM = "job-agent-health-check";
 
 async function ensureAlarms(): Promise<void> {
@@ -124,8 +179,29 @@ function extensionOrigin(): string {
   return `chrome-extension://${chrome.runtime.id}`;
 }
 
-chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendResponse) => {
   switch (message.type) {
+    case "COMPLETE_APPLICATION": {
+      // Only the dashboard (served from this computer) may ask for this.
+      if (!sender.url || !sender.url.startsWith(`${DASHBOARD_ORIGIN}/app`)) {
+        sendResponse({ ok: false, error: "Not allowed." });
+        return false;
+      }
+      if (!Number.isInteger(message.jobId) || !isSupportedApplicationUrl(message.url)) {
+        sendResponse({
+          ok: false,
+          unsupported: true,
+          error: "This site isn't supported for one-click yet. Open the posting and use the extension's Fill button.",
+        });
+        return false;
+      }
+      void completeApplication(message.jobId, message.url).catch((err: Error) =>
+        notify("Couldn't fill the application", err.message),
+      );
+      sendResponse({ ok: true });
+      return false;
+    }
+
     case "PAIR":
       backend
         .pair(message.pairingSecret, extensionOrigin())

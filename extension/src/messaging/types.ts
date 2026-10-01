@@ -13,7 +13,8 @@ export type ExtensionMessage =
   | { type: "GET_AUTOMATION_STATUS" }
   | { type: "TOGGLE_AUTOMATION" }
   | { type: "CAPTURE_JOB"; tabId: number }
-  | { type: "FILL_PAGE"; tabId: number; jobId?: number };
+  | { type: "FILL_PAGE"; tabId: number; jobId?: number }
+  | { type: "COMPLETE_APPLICATION"; jobId: number; url: string };
 
 export interface PairResult {
   ok: boolean;

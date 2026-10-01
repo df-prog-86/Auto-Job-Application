@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { api, ApiError, documentDownloadUrl } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge, Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
+import { completeApplication } from "@/lib/extensionBridge";
 import type { JobOut, TailorResumeOut } from "@/types/api";
 
 function scoreColor(score: number): string {
@@ -180,6 +181,24 @@ function JobCard({ job }: { job: JobOut }) {
   const changelogDocs = job.documents.filter((d) => d.document_type === "changelog");
   const hasResume = resumeDocs.length > 0;
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [applyState, setApplyState] = useState<{ kind: "idle" | "starting" | "opened" | "problem"; text?: string }>({
+    kind: "idle",
+  });
+
+  const startApplication = async () => {
+    setApplyState({ kind: "starting" });
+    const reply = await completeApplication(job.id, job.canonical_application_url);
+    if (reply === null) {
+      setApplyState({
+        kind: "problem",
+        text: "The browser extension didn't answer. Reload it on the extensions page, then refresh this page.",
+      });
+    } else if (!reply.ok) {
+      setApplyState({ kind: "problem", text: reply.error ?? "Couldn't start the application." });
+    } else {
+      setApplyState({ kind: "opened" });
+    }
+  };
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["jobs"] });
 
@@ -338,6 +357,31 @@ function JobCard({ job }: { job: JobOut }) {
                   {tailorMutation.isPending ? "Creating…" : "Recreate"}
                 </Button>
               </div>
+            </div>
+
+            <div className="mt-4 border-t border-brand-200/40 pt-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <Button variant="primary" onClick={startApplication} disabled={applyState.kind === "starting"}>
+                  {applyState.kind === "starting" ? "Opening…" : "Complete application"}
+                </Button>
+                <span className="text-xs text-ink-500">
+                  Opens the application in a new tab and fills it in. You review it and press Submit yourself.
+                </span>
+              </div>
+              {applyState.kind === "opened" && (
+                <p className="mt-2 text-xs text-ink-600">
+                  Opened in a new tab and filling now. Anything it couldn't answer is highlighted there and listed under
+                  Needs Attention.
+                </p>
+              )}
+              {applyState.kind === "problem" && (
+                <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {applyState.text}{" "}
+                  <a className="font-semibold underline" href={job.canonical_application_url} target="_blank" rel="noreferrer">
+                    Open the posting
+                  </a>
+                </p>
+              )}
             </div>
 
             {tailorMutation.data?.used_original_wording && (

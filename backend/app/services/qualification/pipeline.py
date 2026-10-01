@@ -11,6 +11,9 @@ never automatically on add.
 
 from __future__ import annotations
 
+import json
+import re
+
 from sqlalchemy.orm import Session
 
 from app.models.jobs import Job, JobEvaluation
@@ -23,6 +26,32 @@ from app.services.qualification.resume_summary import summarize_candidate
 
 class QualificationError(RuntimeError):
     """Scoring couldn't be completed (e.g. no LLM provider configured)."""
+
+
+def _salvage_match(raw: str) -> ResumeJobMatchResult | None:
+    """
+    Some models occasionally run on in the summary until they are cut off, which
+    leaves broken JSON. The score itself is normally already written by then, so
+    keep it and a short, clean version of whatever summary text there was.
+    """
+    score = re.search(r'"match_percentage"\s*:\s*(\d{1,3})', raw)
+    if not score or int(score.group(1)) > 100:
+        return None
+    summary = ""
+    text = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)', raw)
+    if text:
+        try:
+            summary = json.loads(f'"{text.group(1)}"')
+        except ValueError:
+            summary = text.group(1)
+        summary = " ".join(summary.split())[:400]
+        cut = summary.rfind(".")
+        summary = summary[: cut + 1] if cut > 40 else summary.rstrip(" ,;") + "..."
+    return ResumeJobMatchResult(
+        match_percentage=int(score.group(1)),
+        summary=summary or "Scored from your resume. The detailed explanation was too long to keep, so re-score for a full summary.",
+        gaps=[],
+    )
 
 
 async def qualify_job(db: Session, job: Job) -> JobEvaluation:
@@ -62,6 +91,11 @@ async def qualify_job(db: Session, job: Job) -> JobEvaluation:
             prompt_version="v1",
             messages=messages,
             response_model=ResumeJobMatchResult,
+            # A score and a short explanation never need more than this; capping it
+            # makes a runaway reply fail fast and cheaply instead of filling 4000 tokens.
+            max_tokens=900,
+            temperature=0.2,
+            salvage=_salvage_match,
         )
     except LLMError as exc:
         raise QualificationError(

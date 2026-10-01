@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Literal, TypeVar
+from typing import Callable, Literal, TypeVar
 
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
@@ -57,6 +57,9 @@ class ModelRouter:
         response_model: type[T],
         primary_role: ModelRole = "FAST",
         fallback_role: ModelRole = "FALLBACK",
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        salvage: Callable[[str], T | None] | None = None,
     ) -> T:
         """
         Runs the retry-then-fallback policy and returns a validated instance
@@ -66,6 +69,7 @@ class ModelRouter:
         in — callers must handle it, not treat it as a bug).
         """
         attempts: list[str] = []
+        last_content = ""
         schema = response_model.model_json_schema()
 
         for role in (primary_role, fallback_role):
@@ -88,8 +92,13 @@ class ModelRouter:
                     )
 
                 try:
+                    extra: dict = {}
+                    if max_tokens is not None:
+                        extra["max_tokens"] = max_tokens
+                    if temperature is not None:
+                        extra["temperature"] = temperature
                     result = await self._client.chat_completion(
-                        model=model_name, messages=attempt_messages, json_schema=schema
+                        model=model_name, messages=attempt_messages, json_schema=schema, **extra
                     )
                 except LLMNotConfiguredError:
                     raise
@@ -100,6 +109,7 @@ class ModelRouter:
                     )
                     continue
 
+                last_content = result.content
                 try:
                     parsed = response_model.model_validate_json(result.content)
                 except (ValidationError, ValueError) as exc:
@@ -127,6 +137,14 @@ class ModelRouter:
                     status="valid",
                 )
                 return parsed
+
+        # Every attempt was unusable. If the caller can safely rescue something
+        # from the last reply (e.g. a score from a reply that ran on and was cut
+        # off), let it; otherwise fail as before.
+        if salvage is not None and last_content:
+            rescued = salvage(last_content)
+            if rescued is not None:
+                return rescued
 
         if not any(_model_for_role(r) for r in (primary_role, fallback_role)):
             raise LLMNotConfiguredError(

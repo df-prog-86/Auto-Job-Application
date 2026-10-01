@@ -28,8 +28,7 @@ from app.schemas.discovery import (
 from app.services.discovery import manual_extraction
 from app.services.discovery.pipeline import ingest_manual_posting
 from app.services.qualification.pipeline import qualify_job
-from app.services.resume.rendering import resume_filename
-from app.services.resume.service import is_safe_document_path, tailor_resume
+from app.services.resume.service import MasterMissingError, is_safe_document_path, tailor_resume
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
@@ -141,9 +140,10 @@ async def requalify_job(job_id: int, db: Session = Depends(get_db)) -> JobOut:
 @router.post("/{job_id}/tailor", response_model=TailorResumeOut)
 async def tailor_resume_for_job(job_id: int, db: Session = Depends(get_db)) -> TailorResumeOut:
     """
-    Milestone 5: builds a tailored resume (PDF + DOCX) from the candidate's
-    approved claims. Only allowed once the candidate has clicked "Proceed with
-    Application" for this job -- same explicit gate as everything downstream.
+    Milestone 5: edits a copy of the candidate's master Word resume into a
+    tailored resume (Word + PDF). Only allowed once the candidate has clicked
+    "Proceed with Application" for this job -- same explicit gate as everything
+    downstream.
     Nothing is submitted anywhere; this only writes files on this computer.
     """
     job = db.get(Job, job_id)
@@ -155,13 +155,10 @@ async def tailor_resume_for_job(job_id: int, db: Session = Depends(get_db)) -> T
             detail="Click 'Proceed with Application' on this job before creating a tailored resume.",
         )
     profile = get_current_profile(db)
-    if profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Upload your resume on the Profile page first.",
-        )
     try:
-        outcome = await tailor_resume(db, job, profile)
+        outcome = await tailor_resume(db, job, profile.name if profile else "Candidate")
+    except MasterMissingError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Couldn't create the tailored resume: {exc}"
@@ -179,14 +176,7 @@ def download_document(document_id: int, db: Session = Depends(get_db)) -> FileRe
     doc = db.get(GeneratedDocument, document_id)
     if doc is None or not is_safe_document_path(doc.local_path) or not Path(doc.local_path).exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
-    job = db.get(Job, doc.job_id)
-    profile = get_current_profile(db)
-    company = job.company if job else "Company"
-    if doc.document_type == "resume":
-        filename = resume_filename(profile.name if profile else "Candidate", company, doc.format)
-    else:
-        filename = f"Tailoring changelog_{company}.{doc.format}"
-    return FileResponse(doc.local_path, filename=filename)
+    return FileResponse(doc.local_path, filename=Path(doc.local_path).name)
 
 
 @router.post("/{job_id}/proceed", response_model=JobOut)

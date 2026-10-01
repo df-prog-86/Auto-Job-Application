@@ -63,36 +63,36 @@ class ResumeExtraction(BaseModel):
     projects: list[ProjectEntry] = Field(default_factory=list)
 
 
-class TailoredBullet(BaseModel):
-    text: str
-    source_claim_ids: list[int] = Field(
-        default_factory=list,
-        description="IDs of the verified claims this bullet is based on. Required, never empty.",
+class PlannedBullet(BaseModel):
+    bullet_id: int
+    text: str = Field(
+        description="The bullet's text. Identical to the original unless a tiny truthful "
+        "swap or light job-language lead-in is made."
     )
 
 
-class TailoredExperience(BaseModel):
-    employment_id: int
-    bullets: list[TailoredBullet] = Field(default_factory=list)
+class PlannedBlock(BaseModel):
+    block_id: int
+    bullets: list[PlannedBullet] = Field(
+        default_factory=list,
+        description="Every bullet of this block exactly once, best fit to the job first.",
+    )
 
 
-class TailoredResumeContent(BaseModel):
+class TailorPlan(BaseModel):
     """
-    Structured resume content the model returns (spec §26). Deliberately has
-    no fields for dates, employer names, titles, education, or certifications:
-    those are rendered straight from the candidate's stored profile, so the
-    model has no way to change them.
+    What the model decides for a tailored resume (spec §25-26, adapted): the
+    order of each role's bullets and any tiny wording changes. It never
+    touches layout, headings, dates, employers, or sections. The edits are
+    applied to a copy of the candidate's own master Word file.
     """
 
-    summary: str = ""
-    summary_source_claim_ids: list[int] = Field(default_factory=list)
-    experience: list[TailoredExperience] = Field(default_factory=list)
-    skills: list[str] = Field(default_factory=list)
+    blocks: list[PlannedBlock] = Field(default_factory=list)
     changelog: list[str] = Field(
         default_factory=list,
         description="Plain notes for the candidate: what was reordered or lightly reworded, "
-        "and every job requirement the candidate's data does not support (missing tools, "
-        "certifications, years below the bar). Gaps are only noted here, never papered over.",
+        "and every job requirement the master resume does not support (missing tools, "
+        "certifications, years under the bar). Gaps are only noted here, never papered over.",
     )
 
 

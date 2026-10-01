@@ -1,23 +1,34 @@
 """
-Orchestrates Milestone 5 for one job: generate validated content, render it
-to PDF and DOCX, and record both files as GeneratedDocument rows. Re-running
-replaces the job's previous tailored resume rather than piling up copies.
+Milestone 5 for one job: copy the master Word resume, reorder/lightly reword
+its bullets per a validated plan, clean dashes and trailing blank paragraphs,
+save as Word, convert to PDF (LibreOffice) when available, and record the
+files plus a changelog. The master file itself is never written to.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from docx import Document
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models.candidate import CandidateProfile
 from app.models.documents import GeneratedDocument
 from app.models.jobs import Job
-from app.services.resume import rendering
-from app.services.resume.generation import generate_tailored_content
+from app.services.resume import docx_editor, pdf_export
+from app.services.resume.generation import generate_plan
+from app.services.resume.master import master_path
+from app.services.resume.naming import resume_filename
+from app.services.resume.validation import plan_to_dict
+
+TEMPLATE_VERSION = "docx-inplace-1"
+
+
+class MasterMissingError(RuntimeError):
+    """No master Word resume has been saved yet."""
 
 
 @dataclass
@@ -44,32 +55,47 @@ def _remove_existing(db: Session, job: Job) -> None:
     db.flush()
 
 
-async def tailor_resume(db: Session, job: Job, profile: CandidateProfile) -> TailorOutcome:
-    result = await generate_tailored_content(db, job, profile)
-    resume = rendering.build_renderable(profile, result.content)
-    digest = rendering.content_hash(resume)
+async def tailor_resume(db: Session, job: Job, candidate_name: str) -> TailorOutcome:
+    master = master_path()
+    if master is None:
+        raise MasterMissingError(
+            "No master Word resume is saved yet. Upload your resume as a Word (.docx) file on the Profile page."
+        )
 
-    claim_ids = sorted(
-        {cid for exp in result.content.experience for b in exp.bullets for cid in b.source_claim_ids}
-        | set(result.content.summary_source_claim_ids)
-    )
+    doc = Document(str(master))  # read-only use of the master; saved elsewhere below
+    blocks = docx_editor.find_blocks(doc)
+    result = await generate_plan(db, job, blocks, docx_editor.full_text(doc))
+    if result.plan is not None:
+        docx_editor.apply_plan(blocks, plan_to_dict(result.plan))
+    docx_editor.clean_dashes(doc)
+    docx_editor.strip_trailing_blank_paragraphs(doc)
 
     out_dir = _documents_dir() / f"job_{job.id}"
-    pdf_path = out_dir / "resume.pdf"
-    docx_path = out_dir / "resume.docx"
-    # Clear the previous version first: the new files reuse the same paths, so
-    # deleting afterwards would delete the files we just wrote.
-    _remove_existing(db, job)
-    pages = rendering.render_pdf(resume, pdf_path)
-    rendering.render_docx(resume, docx_path)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    docx_path = out_dir / resume_filename(candidate_name, job.company, "docx")
 
-    changelog = [rendering.clean_text(note) for note in result.changelog]
-    if pages > rendering.MAX_PAGES:
+    _remove_existing(db, job)
+    doc.save(str(docx_path))
+    changelog = list(result.changelog)
+
+    pdf_path = pdf_export.convert_to_pdf(docx_path, out_dir)
+    if pdf_path is None:
         changelog.append(
-            f"The resume runs {pages} pages, over the {rendering.MAX_PAGES}-page limit. "
-            "Trim older or less relevant bullets from your profile claims and recreate it."
+            "No PDF was made because LibreOffice isn't available (or the conversion failed). "
+            "The Word file is ready; you can also save it as PDF from Word."
         )
-    changelog_path = out_dir / "changelog.txt"
+    else:
+        tailored_pages = pdf_export.page_count(pdf_path)
+        with tempfile.TemporaryDirectory() as tmp:
+            master_pdf = pdf_export.convert_to_pdf(master, Path(tmp))
+            master_pages = pdf_export.page_count(master_pdf) if master_pdf else None
+        if tailored_pages and master_pages and tailored_pages > master_pages:
+            changelog.append(
+                f"The tailored resume is {tailored_pages} pages but your master is {master_pages}. "
+                "Check the Word file before sending."
+            )
+
+    changelog_path = out_dir / f"Tailoring changelog_{job.company}.txt".replace("/", "")
     changelog_path.write_text(
         f"Tailoring changelog: {job.title}, {job.company}\n\n"
         + ("\n".join(f"- {n}" for n in changelog) or "- No notes.")
@@ -78,36 +104,34 @@ async def tailor_resume(db: Session, job: Job, profile: CandidateProfile) -> Tai
     )
 
     now = dt.datetime.now(dt.timezone.utc)
+    files = [("docx", docx_path, "resume")]
+    if pdf_path is not None:
+        files.append(("pdf", pdf_path, "resume"))
+    files.append(("txt", changelog_path, "changelog"))
     docs = [
         GeneratedDocument(
             job_id=job.id,
-            document_type="resume",
+            document_type=kind,
             local_path=str(path),
             format=fmt,
             generated_at=now,
-            template_version=rendering.TEMPLATE_VERSION,
-            source_claim_ids=claim_ids,
-            content_hash=digest,
-        )
-        for fmt, path in (("pdf", pdf_path), ("docx", docx_path))
-    ]
-    docs.append(
-        GeneratedDocument(
-            job_id=job.id,
-            document_type="changelog",
-            local_path=str(changelog_path),
-            format="txt",
-            generated_at=now,
-            template_version=rendering.TEMPLATE_VERSION,
+            template_version=TEMPLATE_VERSION,
             source_claim_ids=[],
-            content_hash=digest,
+            content_hash=_sha256(path),
         )
-    )
+        for fmt, path, kind in files
+    ]
     db.add_all(docs)
     db.commit()
     for d in docs:
         db.refresh(d)
-    return TailorOutcome(docs, result.used_original_wording, result.problems, changelog)
+    return TailorOutcome(docs, result.plan is None, result.problems, changelog)
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def is_safe_document_path(path: str) -> bool:

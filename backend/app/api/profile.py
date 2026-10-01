@@ -18,6 +18,7 @@ from app.schemas.profile import (
 )
 from app.services.llm.exceptions import LLMNotConfiguredError, StructuredOutputError
 from app.services.onboarding.pipeline import ResumeValidationError, parse_resume
+from app.services.resume.master import save_master
 
 router = APIRouter(prefix="/api/v1/profile", tags=["profile"])
 
@@ -28,7 +29,13 @@ async def parse_resume_endpoint(
 ) -> ResumeParseResponse:
     data = await file.read()
     try:
-        return await parse_resume(db, file.filename or "resume", data)
+        response = await parse_resume(db, file.filename or "resume", data)
+        # A Word upload becomes the master that tailored resumes are copied
+        # from (layout preserved). Saved only after it parsed successfully,
+        # and kept on this computer only.
+        if (file.filename or "").lower().endswith(".docx"):
+            save_master(data)
+        return response
     except ResumeValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
     except LLMNotConfiguredError as exc:

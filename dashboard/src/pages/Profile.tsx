@@ -211,6 +211,11 @@ function UploadForm({
 
   return (
     <div className="mt-6 max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+      <p className="mb-3 text-xs text-slate-500">
+        Upload your master resume as a Word (.docx) file. It's saved on this computer and used as the
+        exact layout for every tailored resume. A PDF still builds your profile, but tailored resumes
+        need the Word file.
+      </p>
       <input
         type="file"
         accept=".pdf,.docx"

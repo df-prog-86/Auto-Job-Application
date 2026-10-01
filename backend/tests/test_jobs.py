@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import io
 import json
+from urllib.parse import unquote
 
 import pytest
 from docx import Document
@@ -368,7 +369,8 @@ def test_tailoring_reorders_a_copy_and_leaves_the_master_untouched(app_and_db, m
     resume_doc = next(d for d in body["documents"] if d["document_type"] == "resume")
     download = client.get(f"/api/v1/jobs/documents/{resume_doc['id']}/download")
     assert download.status_code == 200
-    assert "Jane Doe_Resume_Globex_" in download.headers["content-disposition"]
+    # The header is percent-encoded (spaces become %20); browsers decode it back.
+    assert "Jane Doe_Resume_Globex_" in unquote(download.headers["content-disposition"])
     assert _docx_bullets(download.content) == [_BULLETS[2], _BULLETS[0], _BULLETS[1]]
     heading_line = Document(io.BytesIO(download.content)).paragraphs[1].text
     assert "\u2013" not in heading_line and "2020 - Present" in heading_line  # en dash became a hyphen

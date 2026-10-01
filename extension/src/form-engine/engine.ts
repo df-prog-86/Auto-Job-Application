@@ -84,6 +84,8 @@ export async function fillPage(
     }
     if (field.kind === "combobox" && cls.kind === "canonical" && ["sponsorship", "work_authorization", "security_clearance", "phone_country"].includes(cls.key)) {
       options = await readComboboxOptions(field.el as HTMLInputElement);
+      // A dropdown whose choices could not be read is never answered from a bare code.
+      if (options.length === 0 && cls.key === "phone_country") options = ["(unreadable)"];
     }
 
     const value =

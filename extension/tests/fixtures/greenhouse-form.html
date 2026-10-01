@@ -64,16 +64,26 @@
       items.filter(i => i.toLowerCase().includes((q||'').toLowerCase())).forEach(i => {
         const li = document.createElement('li'); li.setAttribute('role','option'); li.textContent = i;
         li.addEventListener('mousedown', e => { e.preventDefault(); });
-        li.addEventListener('click', () => { input.dataset.chosen = i; input.value = i; menu.classList.remove('open'); window.__events.push('chose:'+i); });
+        li.addEventListener('click', () => { input.dataset.chosen = i; input.value = i; menu.classList.remove('open'); input.setAttribute('aria-expanded','false'); input.dataset.pressed = ''; window.__events.push('chose:'+i); });
         menu.appendChild(li);
       });
       menu.classList.add('open');
     };
-    // Like Greenhouse's react-select: typing does nothing until the box has been pressed.
-    input.addEventListener('mousedown', () => {}); input.parentElement.addEventListener('mousedown', () => { input.dataset.pressed = '1'; render(''); });
-    input.addEventListener('input', () => { if (STRICT.has(inputId) && !input.dataset.pressed) return; render(input.value); });
-    input.addEventListener('focus', () => { if (!STRICT.has(inputId)) render(input.value); });
-    input.addEventListener('keydown', e => { if (e.key === 'ArrowDown' && (!STRICT.has(inputId) || input.dataset.pressed)) render(''); if (e.key === 'Escape') menu.classList.remove('open'); });
+    // Like Greenhouse's react-select: typing does nothing until the box has been pressed, a press on
+    // an open box closes it, the list appears a moment after the press, and a scripted Escape is ignored.
+    const strict = STRICT.has(inputId);
+    const setOpen = (open) => { input.setAttribute('aria-expanded', open ? 'true' : 'false'); if (!open) menu.classList.remove('open'); };
+    input.parentElement.addEventListener('mousedown', () => {
+      if (!strict) { render(''); return; }
+      if (input.getAttribute('aria-expanded') === 'true') { setOpen(false); input.dataset.pressed = ''; return; }
+      input.dataset.pressed = '1'; setOpen(true); setTimeout(() => render(input.value), 350);
+    });
+    input.addEventListener('input', () => { if (strict && !input.dataset.pressed) return; render(input.value); setOpen(true); });
+    input.addEventListener('focus', () => { if (!strict) render(input.value); });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' && (!strict || input.dataset.pressed)) render('');
+      if (e.key === 'Escape' && !strict) menu.classList.remove('open');
+    });
   };
   wire('location','loc-menu',['East Boston, Massachusetts, United States','Boston, Massachusetts, United States','Boston, Lincolnshire, United Kingdom','Boston, Arkansas, United States']);
   wire('auth','auth-menu',['Yes','No']);

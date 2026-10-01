@@ -60,7 +60,7 @@ export interface ComboboxHints {
  * ignore typed text until the box has been pressed, so typing alone (even
  * with focus) never brings the menu up.
  */
-function openCombobox(el: HTMLInputElement): void {
+function pressControl(el: HTMLInputElement): void {
   const control = el.closest<HTMLElement>("[class*='control']") ?? el.parentElement;
   if (!control || control.tagName === "BUTTON") return;
   const view = el.ownerDocument.defaultView ?? window;
@@ -70,6 +70,19 @@ function openCombobox(el: HTMLInputElement): void {
   control.dispatchEvent(new PointerEvent("pointerup", init));
   control.dispatchEvent(new MouseEvent("mouseup", init));
   control.dispatchEvent(new MouseEvent("click", init));
+}
+
+const isExpanded = (el: HTMLInputElement) => el.getAttribute("aria-expanded") === "true";
+
+/** Pressing an already open box closes it, so only press a closed one. */
+function openCombobox(el: HTMLInputElement): void {
+  if (!isExpanded(el)) pressControl(el);
+}
+
+function closeCombobox(el: HTMLInputElement): void {
+  el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  if (isExpanded(el)) pressControl(el);
+  el.blur();
 }
 
 async function fillCombobox(el: HTMLInputElement, value: string, hints: ComboboxHints = {}): Promise<boolean> {
@@ -110,12 +123,17 @@ export async function readComboboxOptions(el: HTMLInputElement): Promise<string[
   const doc = el.ownerDocument;
   el.focus();
   openCombobox(el);
-  el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-  await sleep(200);
-  const options = Array.from(doc.querySelectorAll<HTMLElement>("[role='option']")).map((o) => (o.textContent ?? "").trim());
-  el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-  el.blur();
-  return options.filter(Boolean);
+  let options: string[] = [];
+  // The list can take a moment to appear; wait for it rather than reading it empty.
+  for (let i = 0; i < 20 && options.length === 0; i++) {
+    await sleep(100);
+    options = Array.from(doc.querySelectorAll<HTMLElement>("[role='option']"))
+      .map((o) => (o.textContent ?? "").trim())
+      .filter(Boolean);
+  }
+  closeCombobox(el);
+  await sleep(100);
+  return options;
 }
 
 export async function fillField(field: FormField, value: string, hints?: ComboboxHints): Promise<boolean> {

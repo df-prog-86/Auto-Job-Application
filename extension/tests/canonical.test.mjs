@@ -50,3 +50,13 @@ test("phone country resolves to a dial code or the one matching option", () => {
   assert.equal(resolvePhoneCountry(undefined, []), null);
   assert.equal(resolveValue("phone_country", ctx({}), []), null);
 });
+
+test("a 'City, ST' location expands to the full entry a place list shows", async () => {
+  const { expandLocation } = await import(pathToFileURL(out).href);
+  assert.deepEqual(expandLocation("Boston, MA"), {
+    typeText: "Boston",
+    alternates: ["Boston, Massachusetts, United States", "Boston, Massachusetts"],
+  });
+  assert.equal(expandLocation("Boston")?.typeText, undefined);
+  assert.equal(expandLocation("Paris, FR"), null);
+});

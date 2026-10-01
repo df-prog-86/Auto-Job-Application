@@ -8,10 +8,11 @@
  *   4. Never touch voluntary self-identification questions.
  */
 
-import { classifyField, learnedAnswer, normalizeQuestion, phoneCountryName, resolveValue } from "@/form-engine/canonical";
+import { classifyField, expandLocation, learnedAnswer, normalizeQuestion, phoneCountryName, resolveValue } from "@/form-engine/canonical";
 import type { Classification } from "@/form-engine/canonical";
 import { discoverFields } from "@/form-engine/discover";
 import type { FormField } from "@/form-engine/discover";
+import type { ComboboxHints } from "@/form-engine/fill";
 import { base64ToFile, currentValue, fillField, fillFile, readComboboxOptions } from "@/form-engine/fill";
 import { clearMarks, mark, showBanner } from "@/form-engine/highlight";
 import type { ApplyContext, FillReport } from "@/form-engine/types";
@@ -90,8 +91,15 @@ export async function fillPage(
         ? resolveValue(cls.key, ctx, options)
         : learnedAnswer(field.label, ctx, field.kind === "select" || field.kind === "radio" ? options : []);
 
-    const typeText = cls.kind === "canonical" && cls.key === "phone_country" ? phoneCountryName(ctx.answers["phone_country"]) : null;
-    if (value && (await fillField(field, value, typeText ?? undefined))) {
+    let hints: ComboboxHints | undefined;
+    if (cls.kind === "canonical" && cls.key === "phone_country") {
+      const name = phoneCountryName(ctx.answers["phone_country"]);
+      if (name) hints = { typeText: name };
+    } else if (cls.kind === "canonical" && cls.key === "location" && value) {
+      const place = expandLocation(value);
+      if (place) hints = place;
+    }
+    if (value && (await fillField(field, value, hints))) {
       done(report, field);
     } else if (field.required || cls.kind === "canonical") {
       flag(report, field);

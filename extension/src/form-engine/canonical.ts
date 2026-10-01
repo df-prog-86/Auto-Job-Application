@@ -136,6 +136,29 @@ function isYesNoOptions(options: string[]): boolean {
   return options.some((o) => ["yes", "no"].includes(normalizeQuestion(o)));
 }
 
+const US_STATES: Record<string, string> = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut",
+  DE: "Delaware", DC: "District of Columbia", FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois",
+  IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland",
+  MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri", MT: "Montana",
+  NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York",
+  NC: "North Carolina", ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania",
+  RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah",
+  VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+};
+
+/**
+ * "Boston, MA" -> what to type ("Boston") and the full entries a place list
+ * would show ("Boston, Massachusetts, United States"). Anything that is not
+ * "City, <US state code>" gets no help and is matched as written.
+ */
+export function expandLocation(loc: string): { typeText: string; alternates: string[] } | null {
+  const m = /^\s*([^,]+?)\s*,\s*([A-Za-z]{2})\s*(?:,\s*(?:USA?|United States))?\s*$/.exec(loc);
+  const state = m ? US_STATES[m[2].toUpperCase()] : undefined;
+  if (!m || !state) return null;
+  return { typeText: m[1], alternates: [`${m[1]}, ${state}, United States`, `${m[1]}, ${state}`] };
+}
+
 /** "United States (+1)" -> "United States" (used to narrow a long country list). */
 export function phoneCountryName(saved: unknown): string | null {
   return typeof saved === "string" && saved.trim() ? saved.replace(/\(.*\)/, "").trim() : null;

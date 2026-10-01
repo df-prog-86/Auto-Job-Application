@@ -72,7 +72,7 @@
     input.addEventListener('focus', () => render(input.value));
     input.addEventListener('keydown', e => { if (e.key === 'ArrowDown') render(''); if (e.key === 'Escape') menu.classList.remove('open'); });
   };
-  wire('location','loc-menu',['Boston, Massachusetts, United States','Boston, Lincolnshire, United Kingdom']);
+  wire('location','loc-menu',['East Boston, Massachusetts, United States','Boston, Massachusetts, United States','Boston, Lincolnshire, United Kingdom','Boston, Arkansas, United States']);
   wire('auth','auth-menu',['Yes','No']);
   wire('country','cc-menu',['United States +1','Afghanistan +93','Canada +1','United States Minor Outlying Islands +1','United Kingdom +44']);
   // Simulates a framework that only notices real input events.

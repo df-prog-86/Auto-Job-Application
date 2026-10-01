@@ -48,14 +48,23 @@ function matchOption(options: string[], wanted: string): string | null {
   );
 }
 
-async function fillCombobox(el: HTMLInputElement, value: string, typeText?: string): Promise<boolean> {
+export interface ComboboxHints {
+  /** What to type to narrow the list (the exact entry is still what gets picked). */
+  typeText?: string;
+  /** Other spellings of the entry to pick, tried as exact matches. */
+  alternates?: string[];
+}
+
+async function fillCombobox(el: HTMLInputElement, value: string, hints: ComboboxHints = {}): Promise<boolean> {
   const doc = el.ownerDocument;
   el.focus();
   // typeText narrows a long list ("United States") while the exact entry ("United States +1") is what gets picked.
-  setNativeValue(el, typeText ?? value);
+  setNativeValue(el, hints.typeText ?? value);
   const wanted = normalizeQuestion(value);
-  for (let i = 0; i < 12; i++) {
-    await sleep(120);
+  const exactSet = new Set([wanted, ...(hints.alternates ?? []).map(normalizeQuestion)]);
+  // Place lists load over the network, so give them a few seconds.
+  for (let i = 0; i < 40; i++) {
+    await sleep(125);
     const options = Array.from(doc.querySelectorAll<HTMLElement>("[role='option']"));
     // An exact match wins. A partial match is used only when exactly one
     // option fits, so "Boston" is never silently resolved to the wrong Boston.
@@ -63,7 +72,7 @@ async function fillCombobox(el: HTMLInputElement, value: string, typeText?: stri
     const starts = options.filter((o) => norm(o).startsWith(wanted));
     const contains = wanted.length > 2 ? options.filter((o) => norm(o).includes(wanted)) : [];
     const pick =
-      options.find((o) => norm(o) === wanted) ??
+      options.find((o) => exactSet.has(norm(o))) ??
       (starts.length === 1 ? starts[0] : undefined) ??
       (starts.length === 0 && contains.length === 1 ? contains[0] : undefined);
     if (pick && safeClick(pick)) {
@@ -72,6 +81,8 @@ async function fillCombobox(el: HTMLInputElement, value: string, typeText?: stri
     }
   }
   setNativeValue(el, ""); // nothing matched: leave the field as we found it
+  el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  el.blur();
   return false;
 }
 
@@ -87,7 +98,7 @@ export async function readComboboxOptions(el: HTMLInputElement): Promise<string[
   return options.filter(Boolean);
 }
 
-export async function fillField(field: FormField, value: string, typeText?: string): Promise<boolean> {
+export async function fillField(field: FormField, value: string, hints?: ComboboxHints): Promise<boolean> {
   switch (field.kind) {
     case "text":
     case "textarea": {
@@ -110,7 +121,7 @@ export async function fillField(field: FormField, value: string, typeText?: stri
       return radio ? safeClick(radio) : false;
     }
     case "combobox":
-      return fillCombobox(field.el as HTMLInputElement, value, typeText);
+      return fillCombobox(field.el as HTMLInputElement, value, hints);
     default:
       return false;
   }

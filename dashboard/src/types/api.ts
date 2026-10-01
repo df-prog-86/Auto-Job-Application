@@ -312,3 +312,16 @@ export interface ProfileUpdate {
   location?: string | null;
   linkedin_url?: string | null;
 }
+
+export interface PendingQuestionOut {
+  id: number;
+  job_id: number;
+  job_title: string;
+  company: string;
+  label: string;
+  field_type: string;
+  options: string[];
+  required: boolean;
+  status: string;
+  answer_text?: string | null;
+}

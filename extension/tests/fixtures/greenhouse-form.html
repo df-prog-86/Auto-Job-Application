@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Fixture: Greenhouse style application</title>
+<style>.menu{border:1px solid #ccc;display:none}.menu.open{display:block}.menu [role=option]{padding:4px;cursor:pointer}.upload input{display:none}</style>
+</head>
+<body>
+<h1>Analyst, Acme</h1>
+<form id="application-form" onsubmit="window.__submitted = (window.__submitted||0)+1; return false;">
+  <div class="input-wrapper"><label for="first_name" class="label">First Name<span>*</span></label>
+    <input id="first_name" name="first_name" type="text" required aria-required="true"></div>
+  <div class="input-wrapper"><label for="last_name" class="label">Last Name<span>*</span></label>
+    <input id="last_name" name="last_name" type="text" required></div>
+  <div class="input-wrapper"><label for="email" class="label">Email<span>*</span></label>
+    <input id="email" name="email" type="text" required></div>
+  <div class="input-wrapper"><label for="phone" class="label">Phone</label>
+    <input id="phone" name="phone" type="tel"></div>
+  <div class="input-wrapper"><label for="linkedin" class="label">LinkedIn Profile</label>
+    <input id="linkedin" name="question_1" type="text"></div>
+  <div class="input-wrapper"><label for="website" class="label">Website</label>
+    <input id="website" name="question_2" type="text"></div>
+
+  <div class="field upload"><div id="resume-label" class="label">Resume/CV<span>*</span></div>
+    <button type="button" onclick="document.getElementById('resume').click()">Attach</button>
+    <input id="resume" name="resume" type="file" aria-labelledby="resume-label"></div>
+
+  <div class="select__container"><label id="loc-label" class="label select__label" for="location">Location (City)<span>*</span></label>
+    <input id="location" role="combobox" aria-labelledby="loc-label" aria-expanded="false" autocomplete="off" type="text">
+    <ul class="menu" id="loc-menu"></ul></div>
+
+  <div class="select__container"><label id="auth-label" class="label select__label" for="auth">Are you legally authorized to work in the United States?<span>*</span></label>
+    <input id="auth" role="combobox" aria-labelledby="auth-label" aria-expanded="false" autocomplete="off" type="text">
+    <ul class="menu" id="auth-menu"></ul></div>
+
+  <fieldset><legend>Will you now or in the future require visa sponsorship?<span>*</span></legend>
+    <label><input type="radio" name="sponsor" value="Yes" required> Yes</label>
+    <label><input type="radio" name="sponsor" value="No"> No</label></fieldset>
+
+  <div class="input-wrapper"><label for="why" class="label">Why do you want to work here?<span>*</span></label>
+    <textarea id="why" name="question_3" required></textarea></div>
+
+  <div class="input-wrapper"><label for="how" class="label">How did you hear about us?</label>
+    <input id="how" name="question_4" type="text"></div>
+
+  <div class="input-wrapper"><label for="gender" class="label">Gender</label>
+    <select id="gender" name="gender"><option value="">Select</option><option>Female</option><option>Male</option><option>Decline to self identify</option></select></div>
+  <div class="input-wrapper"><label for="veteran" class="label">Veteran Status</label>
+    <select id="veteran" name="veteran"><option value="">Select</option><option>I am a veteran</option><option>I am not a veteran</option></select></div>
+
+  <label><input type="checkbox" id="privacy" required> I agree to the privacy policy<span>*</span></label>
+  <div id="recaptcha"><textarea name="g-recaptcha-response" id="g-recaptcha-response"></textarea></div>
+
+  <button type="submit" id="submit-btn">Submit application</button>
+</form>
+<script>
+  window.__events = [];
+  const wire = (inputId, menuId, items) => {
+    const input = document.getElementById(inputId), menu = document.getElementById(menuId);
+    const render = (q) => {
+      menu.innerHTML = '';
+      items.filter(i => i.toLowerCase().includes((q||'').toLowerCase())).forEach(i => {
+        const li = document.createElement('li'); li.setAttribute('role','option'); li.textContent = i;
+        li.addEventListener('mousedown', e => { e.preventDefault(); });
+        li.addEventListener('click', () => { input.dataset.chosen = i; input.value = i; menu.classList.remove('open'); window.__events.push('chose:'+i); });
+        menu.appendChild(li);
+      });
+      menu.classList.add('open');
+    };
+    input.addEventListener('input', () => render(input.value));
+    input.addEventListener('focus', () => render(input.value));
+    input.addEventListener('keydown', e => { if (e.key === 'ArrowDown') render(''); if (e.key === 'Escape') menu.classList.remove('open'); });
+  };
+  wire('location','loc-menu',['Boston, Massachusetts, United States','Boston, Lincolnshire, United Kingdom']);
+  wire('auth','auth-menu',['Yes','No']);
+  // Simulates a framework that only notices real input events.
+  window.__inputSeen = {};
+  document.querySelectorAll('input[type=text], input[type=tel], textarea').forEach(el => el.addEventListener('input', () => { window.__inputSeen[el.id] = el.value; }));
+  document.getElementById('submit-btn').addEventListener('click', () => { window.__submitClicked = (window.__submitClicked||0)+1; });
+</script>
+</body></html>

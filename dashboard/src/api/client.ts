@@ -11,6 +11,7 @@ import type {
   ManualJobInput,
   MasterRole,
   PairingSecretResponse,
+  PendingQuestionOut,
   PairRequest,
   PairResponse,
   ProfileOut,
@@ -145,6 +146,14 @@ export const api = {
     request<AnswerOut>(`/profile/answers/${key}`, { method: "PUT", body: JSON.stringify(payload) }),
   tailorResume: (id: number) =>
     request<TailorResumeOut>(`/jobs/${id}/tailor`, { method: "POST" }),
+  listNeedsAttention: () => request<PendingQuestionOut[]>("/needs-attention"),
+  answerQuestion: (id: number, answer: string) =>
+    request<PendingQuestionOut>(`/needs-attention/${id}/answer`, {
+      method: "POST",
+      body: JSON.stringify({ answer }),
+    }),
+  dismissQuestion: (id: number) =>
+    request<PendingQuestionOut>(`/needs-attention/${id}/dismiss`, { method: "POST" }),
   proceedWithApplication: (id: number) =>
     request<JobOut>(`/jobs/${id}/proceed`, { method: "POST" }),
 };

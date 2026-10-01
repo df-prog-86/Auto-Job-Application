@@ -21,6 +21,7 @@ import { defineConfig } from "vite";
 const ENTRIES: Record<string, { input: string; output: string }> = {
   "service-worker": { input: "src/service-worker.ts", output: "service-worker.js" },
   popup: { input: "src/popup/popup.ts", output: "popup.js" },
+  "fill-page": { input: "src/content/fill-page.ts", output: "content/fill-page.js" },
   "content-detector": { input: "src/content/detector.ts", output: "content/detector.js" },
 };
 

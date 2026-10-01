@@ -1,5 +1,7 @@
+import { useQuery } from "@tanstack/react-query";
 import { NavLink, Outlet } from "react-router-dom";
 
+import { api } from "@/api/client";
 import { Badge } from "@/components/ui";
 
 interface NavItem {
@@ -12,7 +14,7 @@ const WORK: NavItem[] = [
   { to: "/", label: "Home" },
   { to: "/jobs", label: "Jobs" },
   { to: "/applications", label: "Applications", soon: true },
-  { to: "/needs-attention", label: "Needs Attention", soon: true },
+  { to: "/needs-attention", label: "Needs Attention" },
 ];
 
 const SETUP: NavItem[] = [
@@ -36,6 +38,8 @@ function LogoMark() {
 }
 
 function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
+  const attention = useQuery({ queryKey: ["needs-attention"], queryFn: api.listNeedsAttention, retry: false });
+  const openCount = attention.data?.length ?? 0;
   return (
     <div>
       <div className="mb-1.5 px-3 text-xs font-semibold text-ink-400">{title}</div>
@@ -57,6 +61,7 @@ function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
           >
             {item.label}
             {item.soon && <Badge>Soon</Badge>}
+            {item.to === "/needs-attention" && openCount > 0 && <Badge tone="warning">{openCount}</Badge>}
           </NavLink>
         ))}
       </div>

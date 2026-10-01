@@ -14,7 +14,17 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from app.api import answers, automation, discovery, jobs, profile, search_profiles, system
+from app.api import (
+    answers,
+    apply,
+    automation,
+    discovery,
+    jobs,
+    needs_attention,
+    profile,
+    search_profiles,
+    system,
+)
 from app.config import settings
 from app.services.scheduler import start_scheduler, stop_scheduler
 from app.services.security.middleware import LocalOnlyMiddleware
@@ -61,6 +71,8 @@ def create_app() -> FastAPI:
     app.include_router(search_profiles.router)
     app.include_router(discovery.router)
     app.include_router(jobs.router)
+    app.include_router(apply.router)
+    app.include_router(needs_attention.router)
 
     # Serve the built dashboard, once it exists, at /app (spec §14). Any path
     # that isn't a real built file falls back to index.html so refreshing or

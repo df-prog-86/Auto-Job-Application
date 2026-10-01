@@ -35,6 +35,21 @@ extension token it produces is the thing that persists (in `chrome.storage.local
 readable by a content script (`src/security/token-store.ts` is only ever imported by the service
 worker).
 
+## Filling an application (Milestone 6)
+
+1. In the app, add the job, click **Proceed with Application**, and create its tailored resume.
+2. Open the application page in Chrome, click the extension, then **Fill this application**.
+3. Green outlines are filled. Dashed amber outlines need you; those questions also appear on the
+   dashboard's **Needs Attention** page, and an answer given there is reused next time.
+4. Check everything and submit it yourself. The extension never submits (`src/form-engine/safety.ts`).
+
+Voluntary self-identification questions (gender, race, veteran, disability) are never touched, and
+nothing already typed into a field is overwritten. Scripts are injected only when you click, on the
+current tab (`activeTab`), so no broad site permissions are requested.
+
+Tests run the real engine in Chrome against a form fixture: `npm install && npm test`
+(set `CHROME_PATH` if Chrome is not in its usual place).
+
 ## Structure
 
 - `src/service-worker.ts` — MV3 background service worker. Event-driven only: uses

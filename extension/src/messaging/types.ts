@@ -12,7 +12,8 @@ export type ExtensionMessage =
   | { type: "GET_PAIRING_STATE" }
   | { type: "GET_AUTOMATION_STATUS" }
   | { type: "TOGGLE_AUTOMATION" }
-  | { type: "CAPTURE_JOB"; tabId: number };
+  | { type: "CAPTURE_JOB"; tabId: number }
+  | { type: "FILL_PAGE"; tabId: number; jobId?: number };
 
 export interface PairResult {
   ok: boolean;
@@ -42,4 +43,26 @@ export interface CapturedPage {
   title: string;
   jsonLd: string[];
   bodyText: string;
+}
+
+export interface FillJobChoice {
+  id: number;
+  title: string;
+  company: string;
+}
+
+export interface FillPageResult {
+  ok: boolean;
+  error?: string;
+  /** Why nothing was filled (job not saved, no resume yet, ...). */
+  problem?: string;
+  /** Saved jobs to pick from when the page didn't match one. */
+  choices?: FillJobChoice[];
+  jobTitle?: string;
+  company?: string;
+  filledCount?: number;
+  flagged?: string[];
+  leftBlank?: number;
+  alreadyFilled?: number;
+  voluntarySkipped?: number;
 }

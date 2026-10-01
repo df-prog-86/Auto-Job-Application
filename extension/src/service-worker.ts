@@ -10,8 +10,9 @@
  * and adapter dispatch are Milestone 6.
  */
 
-import { backend } from "@/backend-client";
-import type { CapturedPage, ExtensionMessage } from "@/messaging/types";
+import { backend, downloadDocumentBase64 } from "@/backend-client";
+import type { ApplyContext, FillReport } from "@/form-engine/types";
+import type { CapturedPage, ExtensionMessage, FillPageResult } from "@/messaging/types";
 import { getStoredToken, setStoredToken } from "@/security/token-store";
 
 const CAPTURE_BODY_TEXT_LIMIT = 12000;
@@ -32,6 +33,65 @@ function readJobPostingFromPage(bodyTextLimit: number): CapturedPage {
     title: document.title,
     jsonLd,
     bodyText: (document.body?.innerText || "").slice(0, bodyTextLimit),
+  };
+}
+
+/**
+ * Fills the application page in the given tab. Runs only when the candidate
+ * clicks "Fill this application". Never submits anything: the injected
+ * script has no way to click a submit button (see form-engine/safety.ts).
+ */
+async function fillApplicationPage(tabId: number, jobId?: number): Promise<FillPageResult> {
+  const tab = await chrome.tabs.get(tabId);
+  if (!tab.url || !/^https?:/.test(tab.url)) {
+    return { ok: false, problem: "Open the application page in this tab first." };
+  }
+
+  const ctx = await backend.applyContext(tab.url, jobId);
+  if (!ctx.job || !ctx.candidate || !ctx.resume) {
+    return {
+      ok: false,
+      problem: ctx.problem ?? "Couldn't prepare this application.",
+      choices: ctx.candidates.map((c) => ({ id: c.id, title: c.title, company: c.company })),
+    };
+  }
+
+  const resume = { base64: await downloadDocumentBase64(ctx.resume.document_id), filename: ctx.resume.filename };
+  const applyCtx: ApplyContext = {
+    candidate: ctx.candidate,
+    answers: ctx.answers,
+    learned_answers: ctx.learned_answers,
+  };
+
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["content/fill-page.js"] });
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (c: ApplyContext, r: { base64: string; filename: string }) =>
+      (window as unknown as { __jobAgentFill: (c: ApplyContext, r: unknown) => Promise<FillReport> }).__jobAgentFill(c, r),
+    args: [applyCtx, resume],
+  });
+  const report = results[0]?.result as FillReport | undefined;
+  if (!report) return { ok: false, error: "Couldn't read this page. Reload it and try again." };
+
+  // Only the questions left blank go back to the app (never the filled values),
+  // and the address is sent without its query string.
+  const page = new URL(tab.url);
+  await backend.applyReport({
+    jobId: ctx.job.id,
+    pageUrl: `${page.origin}${page.pathname}`,
+    filledCount: report.filled.length,
+    flagged: report.flagged,
+  });
+
+  return {
+    ok: true,
+    jobTitle: ctx.job.title,
+    company: ctx.job.company,
+    filledCount: report.filled.length,
+    flagged: report.flagged.map((f) => f.label),
+    leftBlank: report.leftBlank,
+    alreadyFilled: report.alreadyFilled,
+    voluntarySkipped: report.voluntarySkipped,
   };
 }
 
@@ -119,6 +179,12 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
             sendResponse({ ok: false, error: (err as Error).message });
           }
         })
+        .catch((err: Error) => sendResponse({ ok: false, error: err.message }));
+      return true;
+
+    case "FILL_PAGE":
+      fillApplicationPage(message.tabId, message.jobId)
+        .then(sendResponse)
         .catch((err: Error) => sendResponse({ ok: false, error: err.message }));
       return true;
 

@@ -20,6 +20,7 @@ from app.models.documents import GeneratedDocument
 from app.models.jobs import Job, JobEvaluation, JobSource
 from app.models.mappings import FieldMapping, QuestionMapping
 from app.models.model_runs import ModelRun
+from app.models.questions import PendingQuestion
 from app.models.search import SearchProfile
 from app.models.system import AutomationState, ExtensionPairing
 
@@ -44,6 +45,7 @@ __all__ = [
     "FieldMapping",
     "QuestionMapping",
     "ModelRun",
+    "PendingQuestion",
     "SearchProfile",
     "ExtensionPairing",
     "AutomationState",

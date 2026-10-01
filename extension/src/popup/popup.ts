@@ -9,6 +9,7 @@ import type {
   AutomationStatusResult,
   CaptureJobResult,
   ExtensionMessage,
+  FillPageResult,
   PairingStateResult,
   PairResult,
 } from "@/messaging/types";
@@ -109,6 +110,64 @@ async function init(): Promise<void> {
       button.disabled = false;
       button.textContent = "Save this job";
     }
+  });
+
+  async function runFill(jobId?: number): Promise<void> {
+    const button = $("fillButton") as HTMLButtonElement;
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) {
+      showError("Couldn't find the current tab.");
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "Filling…";
+    $("fillResult").textContent = "";
+    $("fillChoices").style.display = "none";
+    try {
+      const result = await sendMessage<FillPageResult>({ type: "FILL_PAGE", tabId: activeTab.id, jobId });
+      renderFillResult(result);
+    } catch (err) {
+      showError((err as Error).message);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Fill this application";
+    }
+  }
+
+  function renderFillResult(result: FillPageResult): void {
+    const out = $("fillResult");
+    $("error").textContent = "";
+    if (!result.ok) {
+      if (result.choices && result.choices.length > 0) {
+        const select = $("fillChoiceSelect") as HTMLSelectElement;
+        select.replaceChildren(
+          ...result.choices.map((c) => {
+            const option = document.createElement("option");
+            option.value = String(c.id);
+            option.textContent = `${c.title} at ${c.company}`;
+            return option;
+          }),
+        );
+        $("fillChoices").style.display = "block";
+      }
+      out.style.color = "#b45309";
+      out.textContent = result.problem ?? result.error ?? "Couldn't fill this page.";
+      return;
+    }
+    out.style.color = "#059669";
+    const lines = [`Filled ${result.filledCount} for ${result.jobTitle} at ${result.company}.`];
+    if (result.flagged && result.flagged.length > 0) {
+      lines.push(`${result.flagged.length} need you: ${result.flagged.join("; ")}. They're on Needs Attention too.`);
+    }
+    if (result.voluntarySkipped) lines.push(`Left ${result.voluntarySkipped} self-identification questions for you.`);
+    lines.push("Check everything, then submit it yourself.");
+    out.textContent = lines.join(" ");
+  }
+
+  $("fillButton").addEventListener("click", () => void runFill());
+  $("fillChoiceButton").addEventListener("click", () => {
+    const id = Number(($("fillChoiceSelect") as HTMLSelectElement).value);
+    if (id) void runFill(id);
   });
 
   $("openDashboardButton").addEventListener("click", () => {

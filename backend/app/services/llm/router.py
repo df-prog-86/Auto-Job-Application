@@ -133,7 +133,8 @@ class ModelRouter:
                 f"No model configured for role {primary_role!r} or fallback {fallback_role!r}."
             )
         raise StructuredOutputError(
-            f"Structured output for purpose={purpose!r} failed after exhausting retry budget.",
+            f"Structured output for purpose={purpose!r} failed after exhausting retry budget. "
+            f"Last problem: {(attempts[-1] if attempts else 'none recorded')[:300]}",
             attempts=attempts,
         )
 

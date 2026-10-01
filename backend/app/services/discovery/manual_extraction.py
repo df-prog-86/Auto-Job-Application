@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy.orm import Session
@@ -183,6 +184,51 @@ def _location_from_jsonld(item: dict) -> str | None:
     return "; ".join(parts) if parts else None
 
 
+_GREENHOUSE_TITLE = re.compile(r"^\s*Job Application for\s+(.+)\s+at\s+(.+?)\s*$", re.IGNORECASE)
+_GREENHOUSE_JOB_ID = re.compile(r"/jobs/(\d+)")
+
+
+def extract_from_greenhouse_page(
+    url: str, page_title: str | None, body_text: str
+) -> RawJobPosting | None:
+    """
+    Greenhouse-hosted postings often have no JobPosting markup and show the
+    company only as a logo, so the page text alone can't name it. But the
+    browser tab title is always "Job Application for <role> at <company>",
+    which is deterministic and needs no LLM.
+    """
+    parts = urlsplit(url)
+    id_match = _GREENHOUSE_JOB_ID.search(parts.path)
+    if "greenhouse.io" not in parts.netloc.lower() or not id_match or not page_title:
+        return None
+    title_match = _GREENHOUSE_TITLE.match(page_title)
+    if not title_match:
+        return None
+    title, company = title_match.group(1).strip(), title_match.group(2).strip()
+    if not title or not company:
+        return None
+
+    # The line right under the title is normally the location ("Remote",
+    # "Boston, MA"). Best effort: accept it only if it clearly looks like one.
+    location: str | None = None
+    lines = [line.strip() for line in body_text.splitlines() if line.strip()]
+    for i, line in enumerate(lines[:-1]):
+        if line.lower() == title.lower():
+            candidate = lines[i + 1]
+            if len(candidate) <= 80 and not re.search(r"apply|[.@]|http", candidate, re.IGNORECASE):
+                location = candidate
+            break
+
+    return RawJobPosting(
+        external_job_id=id_match.group(1),
+        title=title,
+        company=company,
+        location=location,
+        description_html=body_text or None,
+        application_url=f"{parts.scheme}://{parts.netloc}{parts.path}",
+    )
+
+
 async def extract_job_posting(
     db: Session,
     *,
@@ -196,6 +242,10 @@ async def extract_job_posting(
     structured = extract_from_structured_data(json_ld_blocks, url)
     if structured is not None:
         return structured
+
+    greenhouse = extract_from_greenhouse_page(url, page_title, body_text)
+    if greenhouse is not None:
+        return greenhouse
 
     if not body_text.strip():
         raise ManualExtractionError(
@@ -213,7 +263,9 @@ async def extract_job_posting(
                 "this page is actually a single job posting at all -- if it's a news "
                 "article, a company's About/homepage, a search results listing, or "
                 "anything else, set is_job_posting to false and leave the other fields "
-                "null. Never invent a title, company, or details not present in the text."
+                "null. The page title is part of the page: use it for the job title and company "
+                "when the text itself doesn't state them. Never invent a title, company, or "
+                "details not present in the text or the title."
             ),
         },
         {

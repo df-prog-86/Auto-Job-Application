@@ -48,6 +48,9 @@ class Job(Base, TimestampMixin):
     evaluations: Mapped[list["JobEvaluation"]] = relationship(
         back_populates="job", cascade="all, delete-orphan"
     )
+    documents: Mapped[list["GeneratedDocument"]] = relationship(  # noqa: F821
+        "GeneratedDocument", cascade="all, delete-orphan", passive_deletes=True
+    )
 
     @property
     def evaluation(self) -> "JobEvaluation | None":

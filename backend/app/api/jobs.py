@@ -7,15 +7,28 @@ compliance concerns that govern the automated per-employer discovery loop."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_extension_auth
+from app.models.documents import GeneratedDocument
 from app.models.jobs import Job
-from app.schemas.discovery import CaptureJobIn, JobDetailOut, JobOut, ManualJobIn
+from app.repositories.profile_repository import get_current_profile
+from app.schemas.discovery import (
+    CaptureJobIn,
+    GeneratedDocumentOut,
+    JobDetailOut,
+    JobOut,
+    ManualJobIn,
+    TailorResumeOut,
+)
 from app.services.discovery import manual_extraction
 from app.services.discovery.pipeline import ingest_manual_posting
 from app.services.qualification.pipeline import qualify_job
+from app.services.resume.service import is_safe_document_path, tailor_resume
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
@@ -122,6 +135,49 @@ async def requalify_job(job_id: int, db: Session = Depends(get_db)) -> JobOut:
         ) from exc
     db.refresh(job)
     return JobOut.model_validate(job)
+
+
+@router.post("/{job_id}/tailor", response_model=TailorResumeOut)
+async def tailor_resume_for_job(job_id: int, db: Session = Depends(get_db)) -> TailorResumeOut:
+    """
+    Milestone 5: builds a tailored resume (PDF + DOCX) from the candidate's
+    approved claims. Only allowed once the candidate has clicked "Proceed with
+    Application" for this job -- same explicit gate as everything downstream.
+    Nothing is submitted anywhere; this only writes files on this computer.
+    """
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    if job.application_status != "proceeding":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Click 'Proceed with Application' on this job before creating a tailored resume.",
+        )
+    profile = get_current_profile(db)
+    if profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Upload your resume on the Profile page first.",
+        )
+    try:
+        outcome = await tailor_resume(db, job, profile)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Couldn't create the tailored resume: {exc}"
+        ) from exc
+    return TailorResumeOut(
+        documents=[GeneratedDocumentOut.model_validate(d) for d in outcome.documents],
+        used_original_wording=outcome.used_original_wording,
+        problems=outcome.problems,
+    )
+
+
+@router.get("/documents/{document_id}/download")
+def download_document(document_id: int, db: Session = Depends(get_db)) -> FileResponse:
+    doc = db.get(GeneratedDocument, document_id)
+    if doc is None or not is_safe_document_path(doc.local_path) or not Path(doc.local_path).exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+    return FileResponse(doc.local_path, filename=f"tailored_resume.{doc.format}")
 
 
 @router.post("/{job_id}/proceed", response_model=JobOut)

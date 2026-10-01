@@ -214,6 +214,19 @@ export interface JobEvaluationOut {
 
 export type ApplicationStatus = "not_started" | "proceeding";
 
+export interface GeneratedDocumentOut {
+  id: number;
+  document_type: string;
+  format: string;
+  generated_at: string;
+}
+
+export interface TailorResumeOut {
+  documents: GeneratedDocumentOut[];
+  used_original_wording: boolean;
+  problems: string[];
+}
+
 export interface JobOut {
   id: number;
   ats?: string | null;
@@ -228,6 +241,7 @@ export interface JobOut {
   status: string;
   application_status: ApplicationStatus;
   evaluation?: JobEvaluationOut | null;
+  documents: GeneratedDocumentOut[];
 }
 
 export interface JobDetailOut extends JobOut {

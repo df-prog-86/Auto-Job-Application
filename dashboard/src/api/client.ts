@@ -11,6 +11,7 @@ import type {
   ProfileOut,
   ResumeExtraction,
   ResumeParseResponse,
+  TailorResumeOut,
   SearchProfile,
   SearchProfileInput,
   TargetEmployer,
@@ -114,8 +115,13 @@ export const api = {
   addJobByUrl: (payload: ManualJobInput) =>
     request<JobOut>("/jobs/manual", { method: "POST", body: JSON.stringify(payload) }),
   requalifyJob: (id: number) => request<JobOut>(`/jobs/${id}/qualify`, { method: "POST" }),
+  tailorResume: (id: number) =>
+    request<TailorResumeOut>(`/jobs/${id}/tailor`, { method: "POST" }),
   proceedWithApplication: (id: number) =>
     request<JobOut>(`/jobs/${id}/proceed`, { method: "POST" }),
 };
+
+export const documentDownloadUrl = (documentId: number) =>
+  `${API_BASE}/jobs/documents/${documentId}/download`;
 
 export { ApiError };

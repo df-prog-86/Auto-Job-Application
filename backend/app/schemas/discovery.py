@@ -89,6 +89,22 @@ class JobEvaluationOut(BaseModel):
         from_attributes = True
 
 
+class GeneratedDocumentOut(BaseModel):
+    id: int
+    document_type: str
+    format: str
+    generated_at: dt.datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TailorResumeOut(BaseModel):
+    documents: list[GeneratedDocumentOut]
+    used_original_wording: bool
+    problems: list[str]
+
+
 class JobOut(BaseModel):
     id: int
     ats: str | None
@@ -103,6 +119,7 @@ class JobOut(BaseModel):
     status: str
     application_status: str
     evaluation: JobEvaluationOut | None = None
+    documents: list[GeneratedDocumentOut] = []
 
     class Config:
         from_attributes = True

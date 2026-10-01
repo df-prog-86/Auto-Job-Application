@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { api, ApiError } from "@/api/client";
+import { api, ApiError, documentDownloadUrl } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
-import type { JobOut } from "@/types/api";
+import type { JobOut, TailorResumeOut } from "@/types/api";
 
 function matchColor(score: number): string {
   if (score >= 0.75) return "text-emerald-600 bg-emerald-50";
@@ -62,6 +62,11 @@ function JobRow({ job }: { job: JobOut }) {
 
   const requalifyMutation = useMutation<JobOut, ApiError, void>({
     mutationFn: () => api.requalifyJob(job.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+
+  const tailorMutation = useMutation<TailorResumeOut, ApiError, void>({
+    mutationFn: () => api.tailorResume(job.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
   });
 
@@ -129,9 +134,48 @@ function JobRow({ job }: { job: JobOut }) {
         </button>
       </div>
 
-      {(proceedMutation.isError || requalifyMutation.isError) && (
+      {job.application_status === "proceeding" && (
+        <div className="mt-3 text-xs text-slate-600">
+          <button
+            onClick={() => tailorMutation.mutate()}
+            disabled={tailorMutation.isPending}
+            className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {tailorMutation.isPending
+              ? "Creating…"
+              : job.documents.length > 0
+                ? "Recreate tailored resume"
+                : "Create tailored resume"}
+          </button>
+          {job.documents.length > 0 && (
+            <span className="ml-3">
+              Download:{" "}
+              {job.documents.map((d) => (
+                <a
+                  key={d.id}
+                  href={documentDownloadUrl(d.id)}
+                  className="mr-2 font-medium text-brand-600 hover:text-brand-700"
+                >
+                  {d.format.toUpperCase()}
+                </a>
+              ))}
+            </span>
+          )}
+          {tailorMutation.data?.used_original_wording && (
+            <p className="mt-1 text-amber-600">
+              The AI's rewording didn't pass the accuracy checks, so this resume uses your original
+              wording. Read it before using it.
+            </p>
+          )}
+          {job.documents.length > 0 && !tailorMutation.data?.used_original_wording && (
+            <p className="mt-1 text-slate-400">Read it over before sending — checks catch invented numbers and skills, not every change in emphasis.</p>
+          )}
+        </div>
+      )}
+
+      {(proceedMutation.isError || requalifyMutation.isError || tailorMutation.isError) && (
         <p className="mt-2 text-xs text-red-600">
-          {(proceedMutation.error ?? requalifyMutation.error)?.message}
+          {(proceedMutation.error ?? requalifyMutation.error ?? tailorMutation.error)?.message}
         </p>
       )}
     </li>

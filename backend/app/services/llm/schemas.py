@@ -63,6 +63,33 @@ class ResumeExtraction(BaseModel):
     projects: list[ProjectEntry] = Field(default_factory=list)
 
 
+class TailoredBullet(BaseModel):
+    text: str
+    source_claim_ids: list[int] = Field(
+        default_factory=list,
+        description="IDs of the verified claims this bullet is based on. Required, never empty.",
+    )
+
+
+class TailoredExperience(BaseModel):
+    employment_id: int
+    bullets: list[TailoredBullet] = Field(default_factory=list)
+
+
+class TailoredResumeContent(BaseModel):
+    """
+    Structured resume content the model returns (spec §26). Deliberately has
+    no fields for dates, employer names, titles, education, or certifications:
+    those are rendered straight from the candidate's stored profile, so the
+    model has no way to change them.
+    """
+
+    summary: str = ""
+    summary_source_claim_ids: list[int] = Field(default_factory=list)
+    experience: list[TailoredExperience] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+
+
 class ResumeJobMatchResult(BaseModel):
     """
     Simple, direct resume-vs-job comparison (Milestone 4, simplified per

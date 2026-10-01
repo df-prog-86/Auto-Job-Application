@@ -74,7 +74,7 @@ export async function fillPage(
     if (field.kind === "combobox" && cls.kind !== "canonical") {
       options = []; // free-text style lookups are tried by typing, not by reading the menu
     }
-    if (field.kind === "combobox" && cls.kind === "canonical" && ["sponsorship", "work_authorization", "security_clearance"].includes(cls.key)) {
+    if (field.kind === "combobox" && cls.kind === "canonical" && ["sponsorship", "work_authorization", "security_clearance", "phone_country"].includes(cls.key)) {
       options = await readComboboxOptions(field.el as HTMLInputElement);
     }
 

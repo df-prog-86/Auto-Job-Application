@@ -1,7 +1,7 @@
 import type { AnswerOut, ProfileOut } from "@/types/api";
 
 /** The three work eligibility answers stored in the candidate answer library. */
-export const ELIGIBILITY_KEYS = ["work_authorization", "sponsorship_required", "security_clearance"] as const;
+export const ELIGIBILITY_KEYS = ["work_authorization", "sponsorship_required", "security_clearance", "phone_country"] as const;
 
 export function answerValue(answers: AnswerOut[] | undefined, key: string): unknown {
   return answers?.find((a) => a.answer_key === key)?.value;
@@ -19,6 +19,7 @@ export function missingItems(profile: ProfileOut | undefined, answers: AnswerOut
   if (!filled(profile.name)) missing.push("Name");
   if (!filled(profile.email)) missing.push("Email");
   if (!filled(profile.phone)) missing.push("Phone");
+  if (!filled(answerValue(answers, "phone_country"))) missing.push("Phone country code");
   if (!filled(profile.location)) missing.push("Location");
   if (!filled(answerValue(answers, "work_authorization"))) missing.push("Work authorization");
   if (!filled(answerValue(answers, "sponsorship_required"))) missing.push("Sponsorship answer");

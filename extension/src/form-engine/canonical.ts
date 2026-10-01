@@ -7,6 +7,8 @@ import type { ApplyContext } from "@/form-engine/types";
 
 export type CanonicalKey =
   | "first_name"
+  | "preferred_name"
+  | "phone_country"
   | "last_name"
   | "full_name"
   | "email"
@@ -60,6 +62,10 @@ export function classifyField(sig: FieldSignature): Classification {
       return { kind: "canonical", key: "full_name" };
     case "email":
       return { kind: "canonical", key: "email" };
+    case "tel-country-code":
+      return { kind: "canonical", key: "phone_country" };
+    case "nickname":
+      return { kind: "canonical", key: "preferred_name" };
     case "tel":
     case "tel-national":
       return { kind: "canonical", key: "phone" };
@@ -85,6 +91,15 @@ export function classifyField(sig: FieldSignature): Classification {
   }
 
   if (/linkedin/.test(text)) return { kind: "canonical", key: "linkedin" };
+  if (/preferred (first )?name|nickname|goes by|what should we call you|what name do you go by/.test(label)) {
+    return { kind: "canonical", key: "preferred_name" };
+  }
+  if (
+    /country (calling )?code|phone country|mobile country|dial(l?ing)? code|country dial/.test(label) ||
+    (/\bcountry\b/.test(label) && /\b(phone|mobile|cell|tel)\b/.test(label))
+  ) {
+    return { kind: "canonical", key: "phone_country" };
+  }
   if (/^(legal |your )?first( name)?$|^given name$|^first_name$/.test(label.trim()) || /\bfirst_name\b/.test(attrs)) {
     return { kind: "canonical", key: "first_name" };
   }
@@ -122,6 +137,30 @@ function isYesNoOptions(options: string[]): boolean {
 }
 
 /**
+ * The saved phone country looks like "United States (+1)". A plain text box
+ * gets the dial code; a list gets the matching entry, or nothing when the
+ * list is ambiguous (several +1 countries and no name match).
+ */
+export function resolvePhoneCountry(saved: unknown, options: string[]): string | null {
+  if (typeof saved !== "string" || !saved.trim()) return null;
+  const dial = /\+(\d+)/.exec(saved)?.[1];
+  const name = saved.replace(/\(.*\)/, "").trim().toLowerCase();
+  if (options.length === 0) return dial ? `+${dial}` : null;
+
+  const dialPattern = dial ? new RegExp(`\\+${dial}(?!\\d)`) : null;
+  let hits = options.filter((o) => o.toLowerCase().includes(name));
+  if (hits.length > 1 && dialPattern) {
+    const narrowed = hits.filter((o) => dialPattern.test(o));
+    if (narrowed.length > 0) hits = narrowed;
+  }
+  if (hits.length > 1) {
+    const exact = hits.filter((o) => o.toLowerCase().replace(/\(.*?\)|\+\d+/g, "").trim() === name);
+    if (exact.length === 1) hits = exact;
+  }
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/**
  * The value for a recognized question, or null when we must NOT guess
  * (the field is then left blank and flagged). `options` is the list of
  * choices for dropdowns and radio groups, empty for free text.
@@ -135,6 +174,10 @@ export function resolveValue(
   switch (key) {
     case "first_name":
       return c.first_name || null;
+    case "preferred_name":
+      return c.preferred_name?.trim() || c.first_name || null;
+    case "phone_country":
+      return resolvePhoneCountry(ctx.answers["phone_country"], options);
     case "last_name":
       return c.last_name || null;
     case "full_name":

@@ -307,6 +307,7 @@ export interface EducationInput {
 
 export interface ProfileUpdate {
   name?: string;
+  preferred_name?: string | null;
   email?: string;
   phone?: string | null;
   location?: string | null;

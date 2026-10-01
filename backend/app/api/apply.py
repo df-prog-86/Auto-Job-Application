@@ -29,7 +29,7 @@ from app.services.apply.questions import normalize_question, urls_match
 
 router = APIRouter(prefix="/api/v1/apply", tags=["apply"], dependencies=[Depends(require_extension_auth)])
 
-ELIGIBILITY_KEYS = ("work_authorization", "sponsorship_required", "security_clearance")
+ELIGIBILITY_KEYS = ("work_authorization", "sponsorship_required", "security_clearance", "phone_country")
 
 
 def _apply_job(job: Job) -> ApplyJob:
@@ -84,6 +84,7 @@ def get_apply_context(payload: ApplyContextIn, db: Session = Depends(get_db)) ->
     first, last = _split_name(profile.name)
     out.candidate = CandidateFacts(
         first_name=first,
+        preferred_name=(profile.preferred_name or "").strip() or None,
         last_name=last,
         full_name=profile.name,
         email=profile.email,

@@ -78,6 +78,8 @@ def test_context_matches_job_and_returns_facts_answers_and_resume(app_and_db):
     client.post("/api/v1/profile/commit", json=_COMMIT)
     client.put("/api/v1/profile/answers/work_authorization", json={"value_type": "str", "value": "US citizen"})
     client.put("/api/v1/profile/answers/sponsorship_required", json={"value_type": "bool", "value": False})
+    client.put("/api/v1/profile/answers/phone_country", json={"value_type": "str", "value": "United States (+1)"})
+    client.patch("/api/v1/profile", json={"preferred_name": "Janie"})
     client.put("/api/v1/profile/answers/q:why do you want this role", json={"value_type": "str", "value": "Mission fit."})
     job_id = _job(SessionLocal)
     headers = _token(client)
@@ -92,7 +94,12 @@ def test_context_matches_job_and_returns_facts_answers_and_resume(app_and_db):
     assert out["candidate"]["first_name"] == "Jane"
     assert out["candidate"]["last_name"] == "Q Doe"
     assert out["candidate"]["email"] == "jane@example.com"
-    assert out["answers"] == {"work_authorization": "US citizen", "sponsorship_required": False}
+    assert out["candidate"]["preferred_name"] == "Janie"
+    assert out["answers"] == {
+        "work_authorization": "US citizen",
+        "sponsorship_required": False,
+        "phone_country": "United States (+1)",
+    }
     assert out["learned_answers"] == {"why do you want this role": "Mission fit."}
     assert out["resume"]["filename"] == "Jane Doe_Resume_Acme_2026.docx"
 

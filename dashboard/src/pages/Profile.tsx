@@ -29,6 +29,18 @@ const CLEARANCE_OPTIONS = ["None", "Public Trust", "Secret", "Top Secret", "Top 
   value: o,
   label: o,
 }));
+const PHONE_COUNTRY_OPTIONS = [
+  "United States (+1)",
+  "Canada (+1)",
+  "United Kingdom (+44)",
+  "Ireland (+353)",
+  "India (+91)",
+  "Australia (+61)",
+  "Germany (+49)",
+  "France (+33)",
+  "Mexico (+52)",
+  "Philippines (+63)",
+].map((o) => ({ value: o, label: o }));
 const SPONSORSHIP_OPTIONS = [
   { value: "no", label: "No" },
   { value: "yes", label: "Yes" },
@@ -174,6 +186,12 @@ export function Profile() {
             required
             bold
             onSave={(v) => applyProfile(api.updateProfile({ name: v }))}
+          />
+          <EditableField
+            label="Preferred first name"
+            value={profile.preferred_name ?? ""}
+            emptyLabel="Same as your first name"
+            onSave={(v) => applyProfile(api.updateProfile({ preferred_name: v || null }))}
           />
           <EditableField
             label="Email"
@@ -332,7 +350,7 @@ function EligibilityCard({ answers, loading }: { answers: AnswerOut[] | undefine
 
   return (
     <Card className="p-6">
-      <h2 className="text-base font-bold text-ink-900">Work eligibility</h2>
+      <h2 className="text-base font-bold text-ink-900">Answers used on every application</h2>
       <p className="mb-4 mt-1 text-xs text-ink-500">
         Saved only on this computer. The app never guesses an answer you haven't given.
       </p>
@@ -353,6 +371,13 @@ function EligibilityCard({ answers, loading }: { answers: AnswerOut[] | undefine
             value={sponsor === true ? "yes" : sponsor === false ? "no" : ""}
             options={SPONSORSHIP_OPTIONS}
             onSave={(v) => save("sponsorship_required", "bool", v)}
+          />
+          <SelectField
+            label="Phone country code"
+            required
+            value={(answerValue(answers, "phone_country") as string | undefined) ?? ""}
+            options={PHONE_COUNTRY_OPTIONS}
+            onSave={(v) => save("phone_country", "str", v)}
           />
           <SelectField
             label="Security clearance (optional)"

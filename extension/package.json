@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "ENTRY=service-worker vite build && ENTRY=popup vite build && ENTRY=content-detector vite build && ENTRY=fill-page vite build && ENTRY=dashboard-bridge vite build",
-    "test": "node --test tests/fill.test.mjs",
+    "test": "node --test tests/canonical.test.mjs tests/fill.test.mjs",
     "dev": "ENTRY=service-worker vite build --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."

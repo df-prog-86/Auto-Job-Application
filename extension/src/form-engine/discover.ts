@@ -164,7 +164,9 @@ export function discoverFields(doc: Document): FormField[] {
     }
 
     const raw = rawLabel(el, doc) || el.getAttribute("placeholder") || "";
-    const label = clean(raw);
+    let label = clean(raw);
+    // A hidden upload input is often unlabeled; its id/name ("resume") still says what it is.
+    if (!label && inputType === "file") label = clean(`${name} ${el.id}`.replace(/[_-]+/g, " ")) || "File upload";
     if (!label) continue; // unlabeled controls (search boxes, country pickers) are not questions
 
     const isCombobox = el.getAttribute("role") === "combobox" && tag === "input";

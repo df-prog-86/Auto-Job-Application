@@ -28,7 +28,12 @@ from app.schemas.discovery import (
 from app.services.discovery import manual_extraction
 from app.services.discovery.pipeline import ingest_manual_posting
 from app.services.qualification.pipeline import qualify_job
-from app.services.resume.service import MasterMissingError, is_safe_document_path, tailor_resume
+from app.services.resume.service import (
+    MasterMissingError,
+    is_safe_document_path,
+    remove_job_documents,
+    tailor_resume,
+)
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
@@ -79,11 +84,13 @@ async def add_job_by_url(payload: ManualJobIn, db: Session = Depends(get_db)) ->
     except manual_extraction.ManualExtractionError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
-    job = ingest_manual_posting(db, posting, source_label="manual_url")
+    job, created = ingest_manual_posting(db, posting, source_label="manual_url")
     # Qualification is not run here -- it costs an LLM call, so it only runs
     # when the candidate asks for it via POST /jobs/{id}/qualify (the
     # "Score match" button on the Jobs page), never automatically.
-    return JobOut.model_validate(job)
+    out = JobOut.model_validate(job)
+    out.already_existed = not created
+    return out
 
 
 @router.post("/capture", response_model=JobOut, status_code=status.HTTP_201_CREATED)
@@ -107,10 +114,12 @@ async def add_job_from_extension(
     except manual_extraction.ManualExtractionError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
-    job = ingest_manual_posting(db, posting, source_label="extension_capture")
+    job, created = ingest_manual_posting(db, posting, source_label="extension_capture")
     # Same as above: no automatic scoring, so capturing a job never calls
     # the LLM by itself either.
-    return JobOut.model_validate(job)
+    out = JobOut.model_validate(job)
+    out.already_existed = not created
+    return out
 
 
 @router.post("/{job_id}/qualify", response_model=JobOut)
@@ -177,6 +186,30 @@ def download_document(document_id: int, db: Session = Depends(get_db)) -> FileRe
     if doc is None or not is_safe_document_path(doc.local_path) or not Path(doc.local_path).exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
     return FileResponse(doc.local_path, filename=Path(doc.local_path).name)
+
+
+@router.post("/{job_id}/unproceed", response_model=JobOut)
+def undo_proceed(job_id: int, db: Session = Depends(get_db)) -> JobOut:
+    """Takes back "Proceed with Application" (e.g. clicked by mistake). Anything
+    already generated for the job is kept; it just goes back to not started."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    job.application_status = "not_started"
+    db.commit()
+    db.refresh(job)
+    return JobOut.model_validate(job)
+
+
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_job(job_id: int, db: Session = Depends(get_db)) -> None:
+    """Removes a job, its score, and any tailored resume files made for it."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    remove_job_documents(db, job)
+    db.delete(job)
+    db.commit()
 
 
 @router.post("/{job_id}/proceed", response_model=JobOut)

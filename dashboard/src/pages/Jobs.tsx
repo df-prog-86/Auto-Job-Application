@@ -65,6 +65,18 @@ function JobRow({ job }: { job: JobOut }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
   });
 
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const undoMutation = useMutation<JobOut, ApiError, void>({
+    mutationFn: () => api.undoProceed(job.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+
+  const deleteMutation = useMutation<void, ApiError, void>({
+    mutationFn: () => api.deleteJob(job.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+
   const tailorMutation = useMutation<TailorResumeOut, ApiError, void>({
     mutationFn: () => api.tailorResume(job.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
@@ -109,7 +121,16 @@ function JobRow({ job }: { job: JobOut }) {
 
       <div className="mt-3 flex items-center gap-2">
         {job.application_status === "proceeding" ? (
-          <span className="text-xs font-medium text-emerald-600">Proceeding with application</span>
+          <span className="text-xs font-medium text-emerald-600">
+            Proceeding with application{" "}
+            <button
+              onClick={() => undoMutation.mutate()}
+              disabled={undoMutation.isPending}
+              className="ml-1 font-normal text-slate-500 underline hover:text-slate-700 disabled:opacity-50"
+            >
+              Undo
+            </button>
+          </span>
         ) : (
           <button
             onClick={() => proceedMutation.mutate()}
@@ -132,6 +153,28 @@ function JobRow({ job }: { job: JobOut }) {
               ? "Re-score match"
               : "Score match"}
         </button>
+        {confirmingDelete ? (
+          <span className="ml-auto flex items-center gap-2 text-xs text-slate-600">
+            Delete this job and its files?
+            <button
+              onClick={() => deleteMutation.mutate()}
+              disabled={deleteMutation.isPending}
+              className="rounded-md bg-red-600 px-3 py-1 font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              {deleteMutation.isPending ? "Deleting…" : "Yes, delete"}
+            </button>
+            <button onClick={() => setConfirmingDelete(false)} className="text-slate-500 underline">
+              Cancel
+            </button>
+          </span>
+        ) : (
+          <button
+            onClick={() => setConfirmingDelete(true)}
+            className="ml-auto text-xs font-medium text-red-600 hover:text-red-700"
+          >
+            Delete
+          </button>
+        )}
       </div>
 
       {job.application_status === "proceeding" && (
@@ -185,9 +228,19 @@ function JobRow({ job }: { job: JobOut }) {
         </div>
       )}
 
-      {(proceedMutation.isError || requalifyMutation.isError || tailorMutation.isError) && (
+      {(proceedMutation.isError ||
+        requalifyMutation.isError ||
+        tailorMutation.isError ||
+        undoMutation.isError ||
+        deleteMutation.isError) && (
         <p className="mt-2 text-xs text-red-600">
-          {(proceedMutation.error ?? requalifyMutation.error ?? tailorMutation.error)?.message}
+          {(
+            proceedMutation.error ??
+            requalifyMutation.error ??
+            tailorMutation.error ??
+            undoMutation.error ??
+            deleteMutation.error
+          )?.message}
         </p>
       )}
     </li>
@@ -262,8 +315,10 @@ function AddJobByUrl() {
         <p className="mt-3 text-sm text-red-600">{addMutation.error.message}</p>
       )}
       {lastAdded && !addMutation.isError && (
-        <p className="mt-3 text-sm text-emerald-600">
-          Added: {lastAdded.title} · {lastAdded.company}
+        <p className={`mt-3 text-sm ${lastAdded.already_existed ? "text-amber-600" : "text-emerald-600"}`}>
+          {lastAdded.already_existed
+            ? `Already in your list: ${lastAdded.title} · ${lastAdded.company}. Nothing new was added.`
+            : `Added: ${lastAdded.title} · ${lastAdded.company}`}
         </p>
       )}
     </div>

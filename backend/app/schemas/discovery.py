@@ -121,6 +121,7 @@ class JobOut(BaseModel):
     application_status: str
     evaluation: JobEvaluationOut | None = None
     documents: list[GeneratedDocumentOut] = []
+    already_existed: bool = False  # set only when adding a job by link
 
     class Config:
         from_attributes = True

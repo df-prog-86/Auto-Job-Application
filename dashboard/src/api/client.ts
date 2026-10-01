@@ -1,4 +1,6 @@
 import type {
+  AnswerOut,
+  AnswerUpsert,
   AutomationStatusResponse,
   DiscoveryRunResult,
   HealthResponse,
@@ -116,6 +118,11 @@ export const api = {
     request<JobOut>("/jobs/manual", { method: "POST", body: JSON.stringify(payload) }),
   requalifyJob: (id: number) => request<JobOut>(`/jobs/${id}/qualify`, { method: "POST" }),
   masterStatus: () => request<{ saved: boolean; updated_at: string | null }>("/profile/master"),
+  undoProceed: (id: number) => request<JobOut>(`/jobs/${id}/unproceed`, { method: "POST" }),
+  deleteJob: (id: number) => request<void>(`/jobs/${id}`, { method: "DELETE" }),
+  listAnswers: () => request<AnswerOut[]>("/profile/answers"),
+  saveAnswer: (key: string, payload: AnswerUpsert) =>
+    request<AnswerOut>(`/profile/answers/${key}`, { method: "PUT", body: JSON.stringify(payload) }),
   tailorResume: (id: number) =>
     request<TailorResumeOut>(`/jobs/${id}/tailor`, { method: "POST" }),
   proceedWithApplication: (id: number) =>

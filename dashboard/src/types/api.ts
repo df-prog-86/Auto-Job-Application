@@ -243,6 +243,7 @@ export interface JobOut {
   application_status: ApplicationStatus;
   evaluation?: JobEvaluationOut | null;
   documents: GeneratedDocumentOut[];
+  already_existed?: boolean;
 }
 
 export interface JobDetailOut extends JobOut {
@@ -263,3 +264,19 @@ export interface DiscoveryRunResult {
   errors: string[];
 }
 
+
+export interface AnswerOut {
+  answer_key: string;
+  value_type: string;
+  value: unknown;
+  explanatory_text?: string | null;
+  provenance?: string | null;
+  user_confirmed: boolean;
+}
+
+export interface AnswerUpsert {
+  value_type: "bool" | "str" | "number" | "date";
+  value: unknown;
+  explanatory_text?: string | null;
+  user_confirmed?: boolean;
+}

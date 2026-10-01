@@ -9,6 +9,7 @@ import { NeedsAttention } from "@/pages/NeedsAttention";
 import { Pairing } from "@/pages/Pairing";
 import { Preferences } from "@/pages/Preferences";
 import { Profile } from "@/pages/Profile";
+import { WorkEligibility } from "@/pages/WorkEligibility";
 
 export function App() {
   return (
@@ -16,6 +17,7 @@ export function App() {
       <Route element={<NavShell />}>
         <Route index element={<Home />} />
         <Route path="profile" element={<Profile />} />
+        <Route path="work-eligibility" element={<WorkEligibility />} />
         <Route path="preferences" element={<Preferences />} />
         <Route path="jobs" element={<Jobs />} />
         <Route path="applications" element={<Applications />} />

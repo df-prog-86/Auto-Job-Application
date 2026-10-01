@@ -41,14 +41,17 @@ def _documents_dir() -> Path:
     return Path(settings.GENERATED_DOCUMENTS_DIR).resolve()
 
 
-def _remove_existing(db: Session, job: Job) -> None:
+def remove_job_documents(db: Session, job: Job) -> None:
+    """Deletes a job's generated files and rows. Only ever deletes files inside
+    the generated-documents folder, whatever a stored path says."""
     for doc in db.query(GeneratedDocument).filter(
         GeneratedDocument.job_id == job.id, GeneratedDocument.document_type.in_(("resume", "changelog"))
     ):
-        try:
-            Path(doc.local_path).unlink(missing_ok=True)
-        except OSError:
-            pass
+        if is_safe_document_path(doc.local_path):
+            try:
+                Path(doc.local_path).unlink(missing_ok=True)
+            except OSError:
+                pass
         db.delete(doc)
     db.flush()
 
@@ -72,7 +75,7 @@ async def tailor_resume(db: Session, job: Job, candidate_name: str) -> TailorOut
     out_dir.mkdir(parents=True, exist_ok=True)
     docx_path = out_dir / resume_filename(candidate_name, job.company, "docx")
 
-    _remove_existing(db, job)
+    remove_job_documents(db, job)
     doc.save(str(docx_path))
     changelog = list(result.changelog)
 

@@ -186,7 +186,7 @@ def _ingest_posting(
     result.jobs_updated += 1
 
 
-def ingest_manual_posting(db: Session, posting: RawJobPosting, *, source_label: str) -> Job:
+def ingest_manual_posting(db: Session, posting: RawJobPosting, *, source_label: str) -> tuple[Job, bool]:
     """
     A single job the user explicitly submitted (pasted URL or extension
     capture -- app/services/discovery/manual_extraction.py), not one an
@@ -195,6 +195,10 @@ def ingest_manual_posting(db: Session, posting: RawJobPosting, *, source_label: 
     added job behaves identically to a discovered one from qualification
     onward -- there is deliberately no search-profile matching step here,
     since the user already chose this posting themselves.
+
+    Returns (job, created): created is False when the same posting was
+    already in the list, so the UI can say so instead of silently showing a
+    job that looks newly added.
     """
     description_text = html_to_text(posting.description_html)
     normalized_company = normalize_company(posting.company)
@@ -214,6 +218,7 @@ def ingest_manual_posting(db: Session, posting: RawJobPosting, *, source_label: 
 
     now = dt.datetime.now(dt.UTC)
     job = db.query(Job).filter(Job.canonical_job_key == canonical_key).first()
+    created = job is None
 
     if job is None:
         job = Job(
@@ -263,4 +268,4 @@ def ingest_manual_posting(db: Session, posting: RawJobPosting, *, source_label: 
             )
 
     db.commit()
-    return job
+    return job, created

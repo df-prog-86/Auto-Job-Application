@@ -39,7 +39,9 @@ async def qualify_job(db: Session, job: Job) -> JobEvaluation:
                 "schema. Base the score only on what's actually stated in the resume "
                 "material and the job description -- never assume unstated skills or "
                 "experience. List gaps as specific, concrete things the posting asks "
-                "for that the resume doesn't show, not vague statements."
+                "for that the resume doesn't show, not vague statements. Be brief: the summary "
+                "is at most two sentences, and list at most 8 gaps of under 15 words each. "
+                "No text outside the JSON."
             ),
         },
         {
@@ -63,7 +65,7 @@ async def qualify_job(db: Session, job: Job) -> JobEvaluation:
         )
     except LLMError as exc:
         raise QualificationError(
-            f"Couldn't score this job ({exc}). Check that an LLM provider is configured."
+            f"Couldn't score this job ({exc}). If this keeps happening, check the AI provider settings."
         ) from exc
 
     evaluation = db.query(JobEvaluation).filter(JobEvaluation.job_id == job.id).first()

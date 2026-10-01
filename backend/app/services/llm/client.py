@@ -54,7 +54,7 @@ class LLMClient:
         messages: list[dict[str, str]],
         json_schema: dict[str, Any] | None = None,
         temperature: float = 0.0,
-        max_tokens: int = 2000,
+        max_tokens: int = 4000,
     ) -> ChatCompletionResult:
         base_url, api_key = self._require_configured()
 

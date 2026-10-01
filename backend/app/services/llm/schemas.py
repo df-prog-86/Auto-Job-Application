@@ -111,13 +111,13 @@ class ResumeJobMatchResult(BaseModel):
     )
     summary: str = Field(
         max_length=700,
-        description="One or two plain-language sentences explaining the score -- "
+        description="At most 300 characters. One or two plain-language sentences explaining the score -- "
         "what fits well and what's missing. Written for the candidate to read directly."
     )
     gaps: list[str] = Field(
         default_factory=list,
         max_length=10,
-        description="Short list of specific, concrete qualifications/skills/experience "
+        description="At most 8 items, each at most 80 characters. Short list of specific, concrete qualifications/skills/experience "
         "the job asks for that don't show up in the resume. Empty if there aren't any. "
         "Never vague -- e.g. '5+ years of Python' not 'more experience'.",
     )

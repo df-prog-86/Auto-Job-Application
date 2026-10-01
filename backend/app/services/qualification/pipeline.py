@@ -68,9 +68,10 @@ async def qualify_job(db: Session, job: Job) -> JobEvaluation:
                 "schema. Base the score only on what's actually stated in the resume "
                 "material and the job description -- never assume unstated skills or "
                 "experience. List gaps as specific, concrete things the posting asks "
-                "for that the resume doesn't show, not vague statements. Be brief: the summary "
-                "is at most two sentences, and list at most 8 gaps of under 15 words each. "
-                "No text outside the JSON."
+                "for that the resume doesn't show, not vague statements. HARD LENGTH LIMITS: "
+                "the summary must be at most 300 characters (two short sentences); list at most 8 "
+                "gaps, each at most 80 characters; the whole reply must stay under 1,200 characters. "
+                "Stop as soon as the JSON is complete. No text outside the JSON."
             ),
         },
         {

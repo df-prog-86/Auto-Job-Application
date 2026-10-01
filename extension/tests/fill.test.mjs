@@ -30,7 +30,7 @@ const candidate = {
 };
 const baseCtx = {
   candidate,
-  answers: { work_authorization: "US citizen", sponsorship_required: false },
+  answers: { work_authorization: "US citizen", sponsorship_required: false, phone_country: "United States (+1)" },
   learned_answers: {},
 };
 const resume = { base64: Buffer.from("fake docx bytes").toString("base64"), filename: "Jane Doe_Resume_Acme_2026.docx" };
@@ -80,6 +80,18 @@ test("fills the recognized fields and uploads the resume", async () => {
   assert.equal(await page.evaluate(() => window.__inputSeen.first_name), "Jane");
   assert.ok(report.filled.length >= 9, `filled ${report.filled.length}`);
   await page.close();
+});
+
+test("the Country box next to Phone gets the saved phone country, and is flagged when none is saved", async () => {
+  const a = await run();
+  assert.equal(await a.page.$eval("#country", (el) => el.dataset.chosen), "United States +1");
+  assert.ok(!a.report.flagged.some((f) => f.label === "Country"));
+  await a.page.close();
+
+  const b = await run({ ...baseCtx, answers: { work_authorization: "US citizen", sponsorship_required: false } });
+  assert.equal(await b.page.$eval("#country", (el) => el.dataset.chosen ?? ""), "");
+  assert.ok(b.report.flagged.some((f) => f.label === "Country"));
+  await b.page.close();
 });
 
 test("never submits, never ticks consent boxes, never touches voluntary questions", async () => {

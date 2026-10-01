@@ -8,7 +8,7 @@
  *   4. Never touch voluntary self-identification questions.
  */
 
-import { classifyField, learnedAnswer, resolveValue } from "@/form-engine/canonical";
+import { classifyField, learnedAnswer, normalizeQuestion, phoneCountryName, resolveValue } from "@/form-engine/canonical";
 import type { Classification } from "@/form-engine/canonical";
 import { discoverFields } from "@/form-engine/discover";
 import type { FormField } from "@/form-engine/discover";
@@ -29,9 +29,16 @@ export async function fillPage(
   clearMarks(doc);
   const report: FillReport = { filled: [], flagged: [], leftBlank: 0, alreadyFilled: 0, voluntarySkipped: 0 };
 
-  for (const field of discoverFields(doc)) {
+  const fields = discoverFields(doc);
+  for (const [index, field] of fields.entries()) {
+    // A bare "Country" box sitting right before the phone box is the phone's country code.
+    const next = fields[index + 1];
+    const beforePhone =
+      !!next &&
+      normalizeQuestion(field.label) === "country" &&
+      (next.inputType === "tel" || /phone|mobile/i.test(`${next.label} ${next.name} ${next.id}`));
     const sig = {
-      label: field.label,
+      label: beforePhone ? "Phone country" : field.label,
       name: field.name,
       id: field.id,
       autocomplete: field.autocomplete,
@@ -83,7 +90,8 @@ export async function fillPage(
         ? resolveValue(cls.key, ctx, options)
         : learnedAnswer(field.label, ctx, field.kind === "select" || field.kind === "radio" ? options : []);
 
-    if (value && (await fillField(field, value))) {
+    const typeText = cls.kind === "canonical" && cls.key === "phone_country" ? phoneCountryName(ctx.answers["phone_country"]) : null;
+    if (value && (await fillField(field, value, typeText ?? undefined))) {
       done(report, field);
     } else if (field.required || cls.kind === "canonical") {
       flag(report, field);

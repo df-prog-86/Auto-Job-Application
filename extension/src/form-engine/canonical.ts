@@ -136,6 +136,11 @@ function isYesNoOptions(options: string[]): boolean {
   return options.some((o) => ["yes", "no"].includes(normalizeQuestion(o)));
 }
 
+/** "United States (+1)" -> "United States" (used to narrow a long country list). */
+export function phoneCountryName(saved: unknown): string | null {
+  return typeof saved === "string" && saved.trim() ? saved.replace(/\(.*\)/, "").trim() : null;
+}
+
 /**
  * The saved phone country looks like "United States (+1)". A plain text box
  * gets the dial code; a list gets the matching entry, or nothing when the

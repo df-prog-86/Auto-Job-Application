@@ -48,10 +48,11 @@ function matchOption(options: string[], wanted: string): string | null {
   );
 }
 
-async function fillCombobox(el: HTMLInputElement, value: string): Promise<boolean> {
+async function fillCombobox(el: HTMLInputElement, value: string, typeText?: string): Promise<boolean> {
   const doc = el.ownerDocument;
   el.focus();
-  setNativeValue(el, value);
+  // typeText narrows a long list ("United States") while the exact entry ("United States +1") is what gets picked.
+  setNativeValue(el, typeText ?? value);
   const wanted = normalizeQuestion(value);
   for (let i = 0; i < 12; i++) {
     await sleep(120);
@@ -86,7 +87,7 @@ export async function readComboboxOptions(el: HTMLInputElement): Promise<string[
   return options.filter(Boolean);
 }
 
-export async function fillField(field: FormField, value: string): Promise<boolean> {
+export async function fillField(field: FormField, value: string, typeText?: string): Promise<boolean> {
   switch (field.kind) {
     case "text":
     case "textarea": {
@@ -109,7 +110,7 @@ export async function fillField(field: FormField, value: string): Promise<boolea
       return radio ? safeClick(radio) : false;
     }
     case "combobox":
-      return fillCombobox(field.el as HTMLInputElement, value);
+      return fillCombobox(field.el as HTMLInputElement, value, typeText);
     default:
       return false;
   }

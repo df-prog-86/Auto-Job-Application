@@ -141,7 +141,7 @@ async def requalify_job(job_id: int, db: Session = Depends(get_db)) -> JobOut:
 async def tailor_resume_for_job(job_id: int, db: Session = Depends(get_db)) -> TailorResumeOut:
     """
     Milestone 5: edits a copy of the candidate's master Word resume into a
-    tailored resume (Word + PDF). Only allowed once the candidate has clicked
+    tailored resume (Word). Only allowed once the candidate has clicked
     "Proceed with Application" for this job -- same explicit gate as everything
     downstream.
     Nothing is submitted anywhere; this only writes files on this computer.

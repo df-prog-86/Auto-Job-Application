@@ -1,14 +1,12 @@
 """
 Milestone 5 for one job: copy the master Word resume, reorder/lightly reword
 its bullets per a validated plan, clean dashes and trailing blank paragraphs,
-save as Word, convert to PDF (LibreOffice) when available, and record the
-files plus a changelog. The master file itself is never written to.
+save as Word, and record the file plus a changelog. The master file itself is never written to.
 """
 
 from __future__ import annotations
 
 import datetime as dt
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.documents import GeneratedDocument
 from app.models.jobs import Job
-from app.services.resume import docx_editor, pdf_export
+from app.services.resume import docx_editor
 from app.services.resume.generation import generate_plan
 from app.services.resume.master import master_path
 from app.services.resume.naming import resume_filename
@@ -78,23 +76,6 @@ async def tailor_resume(db: Session, job: Job, candidate_name: str) -> TailorOut
     doc.save(str(docx_path))
     changelog = list(result.changelog)
 
-    pdf_path = pdf_export.convert_to_pdf(docx_path, out_dir)
-    if pdf_path is None:
-        changelog.append(
-            "No PDF was made because LibreOffice isn't available (or the conversion failed). "
-            "The Word file is ready; you can also save it as PDF from Word."
-        )
-    else:
-        tailored_pages = pdf_export.page_count(pdf_path)
-        with tempfile.TemporaryDirectory() as tmp:
-            master_pdf = pdf_export.convert_to_pdf(master, Path(tmp))
-            master_pages = pdf_export.page_count(master_pdf) if master_pdf else None
-        if tailored_pages and master_pages and tailored_pages > master_pages:
-            changelog.append(
-                f"The tailored resume is {tailored_pages} pages but your master is {master_pages}. "
-                "Check the Word file before sending."
-            )
-
     changelog_path = out_dir / f"Tailoring changelog_{job.company}.txt".replace("/", "")
     changelog_path.write_text(
         f"Tailoring changelog: {job.title}, {job.company}\n\n"
@@ -104,10 +85,7 @@ async def tailor_resume(db: Session, job: Job, candidate_name: str) -> TailorOut
     )
 
     now = dt.datetime.now(dt.timezone.utc)
-    files = [("docx", docx_path, "resume")]
-    if pdf_path is not None:
-        files.append(("pdf", pdf_path, "resume"))
-    files.append(("txt", changelog_path, "changelog"))
+    files = [("docx", docx_path, "resume"), ("txt", changelog_path, "changelog")]
     docs = [
         GeneratedDocument(
             job_id=job.id,

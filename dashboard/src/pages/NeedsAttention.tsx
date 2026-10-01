@@ -1,11 +1,15 @@
-import { Placeholder } from "@/pages/Placeholder";
+import { ComingSoon } from "@/pages/Placeholder";
 
 export function NeedsAttention() {
   return (
-    <Placeholder
+    <ComingSoon
       title="Needs Attention"
-      description="Every case requiring human input: CAPTCHA, MFA, unknown credentials, unresolved questions."
-      milestoneNote="Populated once the extension execution layer and account management land (Milestones 6, 8)."
+      description="The few things only you can answer."
+      points={[
+        "Application questions the app is not sure how to answer for you.",
+        "Anything that needs a quick yes or no before it moves forward.",
+        "Nothing is ever sent without your approval.",
+      ]}
     />
   );
 }

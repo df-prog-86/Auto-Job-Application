@@ -48,6 +48,7 @@ class CommitProfileRequest(BaseModel):
 
 
 class EmploymentHistoryOut(BaseModel):
+    id: int
     employer: str
     title: str
     start_date: dt.date | None
@@ -59,6 +60,7 @@ class EmploymentHistoryOut(BaseModel):
 
 
 class EducationOut(BaseModel):
+    id: int
     institution: str
     degree: str | None
     field: str | None
@@ -70,6 +72,7 @@ class EducationOut(BaseModel):
 
 
 class SkillOut(BaseModel):
+    id: int
     canonical_skill: str
     candidate_confirmed: bool
 
@@ -122,6 +125,35 @@ class ProfileUpdateRequest(BaseModel):
     location: str | None = None
     linkedin_url: str | None = None
     portfolio_urls: list[str] | None = None
+
+
+class EmploymentIn(BaseModel):
+    """Dates are "YYYY-MM" (or "YYYY-MM-DD"); an empty end date means current."""
+
+    employer: str | None = None
+    title: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    location: str | None = None
+
+
+class EducationIn(BaseModel):
+    institution: str | None = None
+    degree: str | None = None
+    field: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+
+
+class SkillIn(BaseModel):
+    canonical_skill: str
+
+
+class MasterRoleOut(BaseModel):
+    """One role's bullets, read from the saved master Word resume (read-only)."""
+
+    context: str
+    bullets: list[str]
 
 
 ResumeParseResponse.model_rebuild()

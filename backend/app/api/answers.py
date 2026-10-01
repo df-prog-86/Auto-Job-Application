@@ -19,7 +19,7 @@ def _require_profile(db: Session):
     if profile is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No profile exists yet — upload and commit a resume first.",
+            detail="No profile exists yet. Upload your resume on the Profile page first.",
         )
     return profile
 

@@ -3,14 +3,18 @@ import type {
   AnswerUpsert,
   AutomationStatusResponse,
   DiscoveryRunResult,
+  EducationInput,
+  EmploymentInput,
   HealthResponse,
   JobDetailOut,
   JobOut,
   ManualJobInput,
+  MasterRole,
   PairingSecretResponse,
   PairRequest,
   PairResponse,
   ProfileOut,
+  ProfileUpdate,
   ResumeExtraction,
   ResumeParseResponse,
   TailorResumeOut,
@@ -96,6 +100,22 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getProfile: () => request<ProfileOut>("/profile"),
+  updateProfile: (payload: ProfileUpdate) =>
+    request<ProfileOut>("/profile", { method: "PATCH", body: JSON.stringify(payload) }),
+  masterRoles: () => request<MasterRole[]>("/profile/master/roles"),
+  addEmployment: (payload: EmploymentInput) =>
+    request<ProfileOut>("/profile/employment", { method: "POST", body: JSON.stringify(payload) }),
+  updateEmployment: (id: number, payload: EmploymentInput) =>
+    request<ProfileOut>(`/profile/employment/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteEmployment: (id: number) => request<ProfileOut>(`/profile/employment/${id}`, { method: "DELETE" }),
+  addEducation: (payload: EducationInput) =>
+    request<ProfileOut>("/profile/education", { method: "POST", body: JSON.stringify(payload) }),
+  updateEducation: (id: number, payload: EducationInput) =>
+    request<ProfileOut>(`/profile/education/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteEducation: (id: number) => request<ProfileOut>(`/profile/education/${id}`, { method: "DELETE" }),
+  addSkill: (canonical_skill: string) =>
+    request<ProfileOut>("/profile/skills", { method: "POST", body: JSON.stringify({ canonical_skill }) }),
+  deleteSkill: (id: number) => request<ProfileOut>(`/profile/skills/${id}`, { method: "DELETE" }),
 
   listSearchProfiles: () => request<SearchProfile[]>("/search-profiles"),
   createSearchProfile: (payload: SearchProfileInput) =>

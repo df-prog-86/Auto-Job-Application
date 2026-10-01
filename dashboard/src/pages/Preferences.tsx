@@ -42,7 +42,7 @@ export function Preferences() {
         <h2 className="mb-2 text-sm font-semibold text-slate-700">Run discovery</h2>
         <p className="mb-3 text-xs text-slate-500">
           Checks every enabled watched employer for postings that match an enabled search profile above. This
-          only reads public job listings — it doesn't apply to anything. Discovery also runs automatically on a
+          only reads public job listings. It doesn't apply to anything. Discovery also runs automatically on a
           schedule in the background.
         </p>
         <button
@@ -145,7 +145,7 @@ function SearchProfilesSection({ profiles, isLoading }: { profiles: SearchProfil
       </div>
 
       <p className="mb-3 text-xs text-slate-500">
-        A search profile is a saved description of the kind of job you want — discovery only keeps postings that
+        A search profile is a saved description of the kind of job you want. Discovery only keeps postings that
         match at least one enabled profile. You can create more than one (e.g. one for "Data Analyst, remote" and
         another for "Data Engineer, Boston hybrid").
       </p>
@@ -203,7 +203,7 @@ function SearchProfilesSection({ profiles, isLoading }: { profiles: SearchProfil
             onChange={(v) => setForm({ ...form, name: v })}
             required
             placeholder="e.g. Data roles, Boston or remote"
-            helpText="Just a label for you — pick anything that helps you tell profiles apart."
+            helpText="Just a label for you. Pick anything that helps you tell profiles apart."
           />
           <ListField
             label="Job titles"
@@ -217,12 +217,12 @@ function SearchProfilesSection({ profiles, isLoading }: { profiles: SearchProfil
             value={form.locations}
             onChange={(v) => setForm({ ...form, locations: v })}
             placeholder="e.g. Boston, New York"
-            helpText="Separate with commas. Ignored for jobs already tagged Remote below — leave blank if you only want remote roles."
+            helpText="Separate with commas. Ignored for jobs already tagged Remote below. Leave blank if you only want remote roles."
           />
           <div>
             <span className="mb-1 block text-sm font-medium text-slate-600">Work arrangement</span>
             <span className="mb-2 block text-xs text-slate-400">
-              Check every arrangement you'd accept — a job is only kept if its type is checked here.
+              Check every arrangement you'd accept. A job is only kept if its type is checked here.
             </span>
             <div className="flex gap-4 text-sm">
               <CheckField label="Remote" checked={form.remote} onChange={(v) => setForm({ ...form, remote: v })} />
@@ -306,7 +306,7 @@ function EmployerWatchlistSection({ employers, isLoading }: { employers: TargetE
       </div>
       <p className="mb-3 text-xs text-slate-500">
         Greenhouse and Lever don't offer site-wide search, so discovery only checks employers listed here. Find
-        an employer's identifier in their careers page URL — e.g. boards.greenhouse.io/<code>acme</code> or
+        an employer's identifier in their careers page URL. For example: boards.greenhouse.io/<code>acme</code> or
         jobs.lever.co/<code>acme</code>.
       </p>
 
@@ -355,7 +355,7 @@ function EmployerWatchlistSection({ employers, isLoading }: { employers: TargetE
             onChange={setName}
             required
             placeholder="e.g. Acme Corp"
-            helpText="Just for display in your list — doesn't need to match anything exactly."
+            helpText="Just for display in your list. It doesn't need to match anything exactly."
           />
           <label className="block text-sm">
             <span className="mb-1 block font-medium text-slate-600">ATS</span>
@@ -379,8 +379,8 @@ function EmployerWatchlistSection({ employers, isLoading }: { employers: TargetE
             placeholder="e.g. acme"
             helpText={
               ats === "greenhouse"
-                ? 'The part after "boards.greenhouse.io/" in their careers page URL — e.g. for boards.greenhouse.io/acme, enter "acme".'
-                : 'The part after "jobs.lever.co/" in their careers page URL — e.g. for jobs.lever.co/acme, enter "acme".'
+                ? 'The part after "boards.greenhouse.io/" in their careers page URL. For example, for boards.greenhouse.io/acme, enter "acme".'
+                : 'The part after "jobs.lever.co/" in their careers page URL. For example, for jobs.lever.co/acme, enter "acme".'
             }
           />
           <button

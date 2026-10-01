@@ -1,3 +1,32 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    @apply bg-canvas font-sans text-ink-900;
+    background-image:
+      radial-gradient(900px 500px at 8% -10%, rgba(127, 123, 255, 0.16), transparent 60%),
+      radial-gradient(700px 450px at 100% 0%, rgba(120, 200, 255, 0.16), transparent 60%);
+    background-attachment: fixed;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand-400 ring-offset-2 ring-offset-white;
+  }
+  ::selection {
+    background: #d3d0ff;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

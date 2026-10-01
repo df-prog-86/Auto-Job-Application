@@ -111,6 +111,7 @@ export interface ResumeParseResponse {
 }
 
 export interface EmploymentHistoryOut {
+  id: number;
   employer: string;
   title: string;
   start_date?: string | null;
@@ -119,6 +120,7 @@ export interface EmploymentHistoryOut {
 }
 
 export interface EducationOut {
+  id: number;
   institution: string;
   degree?: string | null;
   field?: string | null;
@@ -127,6 +129,7 @@ export interface EducationOut {
 }
 
 export interface SkillOut {
+  id: number;
   canonical_skill: string;
   candidate_confirmed: boolean;
 }
@@ -279,4 +282,33 @@ export interface AnswerUpsert {
   value: unknown;
   explanatory_text?: string | null;
   user_confirmed?: boolean;
+}
+
+export interface MasterRole {
+  context: string;
+  bullets: string[];
+}
+
+export interface EmploymentInput {
+  employer?: string | null;
+  title?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  location?: string | null;
+}
+
+export interface EducationInput {
+  institution?: string | null;
+  degree?: string | null;
+  field?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+}
+
+export interface ProfileUpdate {
+  name?: string;
+  email?: string;
+  phone?: string | null;
+  location?: string | null;
+  linkedin_url?: string | null;
 }

@@ -10,9 +10,9 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from app.api import answers, automation, discovery, jobs, profile, search_profiles, system
 from app.config import settings
@@ -62,9 +62,23 @@ def create_app() -> FastAPI:
     app.include_router(discovery.router)
     app.include_router(jobs.router)
 
-    # Serve the built dashboard, once it exists, at /app (spec §14).
+    # Serve the built dashboard, once it exists, at /app (spec §14). Any path
+    # that isn't a real built file falls back to index.html so refreshing or
+    # opening a tab's own address (e.g. /app/jobs) loads the app instead of
+    # showing "Not Found".
     if DASHBOARD_DIST.exists():
-        app.mount("/app", StaticFiles(directory=str(DASHBOARD_DIST), html=True), name="dashboard")
+        dist_root = DASHBOARD_DIST.resolve()
+
+        @app.get("/app", include_in_schema=False)
+        @app.get("/app/{path:path}", include_in_schema=False)
+        def dashboard(path: str = "") -> FileResponse:
+            if path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="Not Found")
+            candidate = (dist_root / path).resolve()
+            # Only serve files that really live inside the built dashboard folder.
+            if path and candidate.is_file() and dist_root in candidate.parents:
+                return FileResponse(candidate)
+            return FileResponse(dist_root / "index.html")
 
     return app
 

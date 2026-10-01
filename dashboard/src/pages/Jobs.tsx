@@ -1,22 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import { api, ApiError, documentDownloadUrl } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
+import { Badge, Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
 import type { JobOut, TailorResumeOut } from "@/types/api";
 
-function matchColor(score: number): string {
-  if (score >= 0.75) return "text-emerald-600 bg-emerald-50";
-  if (score >= 0.5) return "text-amber-600 bg-amber-50";
-  return "text-slate-500 bg-slate-100";
+function scoreColor(score: number): string {
+  if (score >= 0.75) return "#12b76a";
+  if (score >= 0.5) return "#f59e0b";
+  return "#9a99b3";
+}
+
+function scoreLabel(score: number): string {
+  if (score >= 0.75) return "Strong fit";
+  if (score >= 0.5) return "Partial fit";
+  return "Weak fit";
 }
 
 /**
- * Milestone 3: jobs you found yourself (LinkedIn, Indeed, a company site,
- * wherever) and handed off here by pasting the link, plus anything the
- * watchlist-based discovery found. Paste-a-URL is Option 1 from the
- * manual-intake redesign; the "Save this job" button in the browser
- * extension (Option 2) is more reliable on sites that block a plain fetch.
+ * Jobs you found yourself and added by link (or with Save this job in the
+ * browser extension). Nothing runs automatically: scoring, proceeding and
+ * tailoring each happen only when you click.
  */
 export function Jobs() {
   const jobsQuery = useQuery({ queryKey: ["jobs"], queryFn: api.listJobs });
@@ -25,239 +31,368 @@ export function Jobs() {
     <div>
       <PageHeader
         title="Jobs"
-        description="Paste a link to a job posting you found, or use the 'Save this job' button in the browser extension while you're looking at one. Click 'Score match' on a job to see how well it fits — nothing runs automatically, and nothing proceeds toward an application until you click Proceed with Application."
+        description="Save jobs you find, see how well they fit, and tailor your resume for the ones you want."
       />
 
       <AddJobByUrl />
 
-      {jobsQuery.isLoading && <p className="text-sm text-slate-400">Loading…</p>}
+      {jobsQuery.isLoading && <p className="text-sm text-ink-400">Loading…</p>}
+      {jobsQuery.isError && (
+        <p className="text-sm text-red-600">Couldn't load your jobs. Make sure the backend is running, then refresh.</p>
+      )}
 
       {jobsQuery.data && jobsQuery.data.length === 0 && (
-        <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-400">
-          No jobs yet. Paste a link above to add the first one.
-        </div>
+        <Card className="p-10 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-500">
+            <svg viewBox="0 0 24 24" fill="none" className="h-7 w-7" aria-hidden="true">
+              <rect x="3" y="7" width="18" height="13" rx="3" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M9 7V5.5A1.5 1.5 0 0110.5 4h3A1.5 1.5 0 0115 5.5V7" stroke="currentColor" strokeWidth="1.8" />
+            </svg>
+          </div>
+          <h2 className="text-base font-bold text-ink-900">No jobs yet</h2>
+          <p className="mt-1 text-sm text-ink-500">Paste a link above to add your first one.</p>
+        </Card>
       )}
 
       {jobsQuery.data && jobsQuery.data.length > 0 && (
-        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-          <ul className="divide-y divide-slate-100">
-            {jobsQuery.data.map((job) => (
-              <JobRow key={job.id} job={job} />
-            ))}
-          </ul>
+        <ul className="space-y-4">
+          {jobsQuery.data.map((job) => (
+            <JobCard key={job.id} job={job} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function Progress({ job }: { job: JobOut }) {
+  const steps = [
+    { label: "Added", done: true },
+    { label: "Scored", done: !!job.evaluation },
+    { label: "Going after", done: job.application_status === "proceeding" },
+    { label: "Resume ready", done: job.documents.some((d) => d.document_type === "resume") },
+  ];
+  return (
+    <ol className="flex items-center" aria-label="Progress">
+      {steps.map((s, i) => (
+        <li key={s.label} className="flex items-center">
+          <span className="flex items-center gap-1.5">
+            <span
+              className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                s.done ? "bg-emerald-500 text-white" : "bg-ink-900/5 text-transparent"
+              }`}
+            >
+              <CheckIcon className="h-3 w-3" />
+            </span>
+            <span className={`text-xs font-semibold ${s.done ? "text-ink-700" : "text-ink-400"}`}>{s.label}</span>
+          </span>
+          {i < steps.length - 1 && (
+            <span className={`mx-2 h-0.5 w-5 rounded-full sm:w-8 ${steps[i + 1].done ? "bg-emerald-300" : "bg-ink-900/10"}`} />
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function MoreMenu({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        aria-label="More actions"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-8 w-8 items-center justify-center rounded-full text-ink-500 transition hover:bg-brand-50 hover:text-brand-700"
+      >
+        <svg viewBox="0 0 20 20" className="h-5 w-5" fill="currentColor" aria-hidden="true">
+          <circle cx="4" cy="10" r="1.6" />
+          <circle cx="10" cy="10" r="1.6" />
+          <circle cx="16" cy="10" r="1.6" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 z-10 mt-1 w-52 animate-rise rounded-2xl border border-white bg-white p-1.5 shadow-lift"
+          onClick={() => setOpen(false)}
+        >
+          {children}
         </div>
       )}
     </div>
   );
 }
 
-function JobRow({ job }: { job: JobOut }) {
+function MenuItem({
+  children,
+  onClick,
+  href,
+  danger = false,
+  disabled = false,
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  href?: string;
+  danger?: boolean;
+  disabled?: boolean;
+}) {
+  const cls = `block w-full rounded-xl px-3 py-2 text-left text-sm font-medium transition disabled:opacity-50 ${
+    danger ? "text-red-600 hover:bg-red-50" : "text-ink-700 hover:bg-brand-50 hover:text-brand-700"
+  }`;
+  if (href) {
+    return (
+      <a href={href} target="_blank" rel="noreferrer" className={cls}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} className={cls}>
+      {children}
+    </button>
+  );
+}
+
+function JobCard({ job }: { job: JobOut }) {
   const queryClient = useQueryClient();
   const evaluation = job.evaluation;
+  const proceeding = job.application_status === "proceeding";
+  const resumeDocs = job.documents.filter((d) => d.document_type === "resume");
+  const changelogDocs = job.documents.filter((d) => d.document_type === "changelog");
+  const hasResume = resumeDocs.length > 0;
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["jobs"] });
 
   const proceedMutation = useMutation<JobOut, ApiError, void>({
     mutationFn: () => api.proceedWithApplication(job.id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+    onSuccess: refresh,
   });
-
   const requalifyMutation = useMutation<JobOut, ApiError, void>({
     mutationFn: () => api.requalifyJob(job.id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+    onSuccess: refresh,
   });
-
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-
   const undoMutation = useMutation<JobOut, ApiError, void>({
     mutationFn: () => api.undoProceed(job.id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+    onSuccess: refresh,
   });
-
   const deleteMutation = useMutation<void, ApiError, void>({
     mutationFn: () => api.deleteJob(job.id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+    onSuccess: refresh,
   });
-
   const tailorMutation = useMutation<TailorResumeOut, ApiError, void>({
     mutationFn: () => api.tailorResume(job.id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
+    onSuccess: refresh,
   });
 
+  const error =
+    proceedMutation.error ?? requalifyMutation.error ?? tailorMutation.error ?? undoMutation.error ?? deleteMutation.error;
+
+  const scoreButtonLabel = requalifyMutation.isPending
+    ? evaluation
+      ? "Re-scoring…"
+      : "Scoring…"
+    : evaluation
+      ? "Re-score match"
+      : "Score match";
+
   return (
-    <li className="p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm font-medium text-slate-900">
-          {job.title} <span className="font-normal text-slate-500">· {job.company}</span>
+    <li>
+      <Card className="p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="text-lg font-bold leading-snug text-ink-900">{job.title}</h2>
+            <div className="mt-0.5 text-sm font-semibold text-ink-500">{job.company}</div>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-400">
+              <span>{job.location || "Location not listed"}</span>
+              {job.remote_type && <span className="capitalize">{job.remote_type}</span>}
+              <span>Added {new Date(job.first_seen).toLocaleDateString()}</span>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {evaluation ? (
+              <div className="flex items-center gap-3">
+                <div className="hidden text-right sm:block">
+                  <div className="text-sm font-bold" style={{ color: scoreColor(evaluation.overall_score) }}>
+                    {scoreLabel(evaluation.overall_score)}
+                  </div>
+                  <div className="text-xs text-ink-400">match with your resume</div>
+                </div>
+                <Ring value={evaluation.overall_score} size={58} stroke={6} color={scoreColor(evaluation.overall_score)}>
+                  <span className="text-sm font-bold text-ink-900">{Math.round(evaluation.overall_score * 100)}</span>
+                </Ring>
+              </div>
+            ) : (
+              <Badge>Not scored</Badge>
+            )}
+            <MoreMenu>
+              <MenuItem href={job.canonical_application_url}>View posting</MenuItem>
+              {(evaluation || proceeding) && (
+                <MenuItem onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
+                  {evaluation ? "Re-score match" : "Score match"}
+                </MenuItem>
+              )}
+              {proceeding && (
+                <MenuItem onClick={() => undoMutation.mutate()} disabled={undoMutation.isPending}>
+                  Undo proceeding
+                </MenuItem>
+              )}
+              <MenuItem danger onClick={() => setConfirmingDelete(true)}>
+                Delete job
+              </MenuItem>
+            </MoreMenu>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          {evaluation ? (
-            <span
-              className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${matchColor(evaluation.overall_score)}`}
-              title="Qualification match — see gaps below for why"
-            >
-              {Math.round(evaluation.overall_score * 100)}% match
-            </span>
-          ) : (
-            <span className="text-xs text-slate-400">Not scored</span>
-          )}
-          <a
-            href={job.canonical_application_url}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs font-medium text-brand-600 hover:text-brand-700"
-          >
-            View posting ↗
-          </a>
+
+        {evaluation && (
+          <div className="mt-4">
+            <p className="text-sm leading-relaxed text-ink-700">{evaluation.summary}</p>
+            {evaluation.gaps.length > 0 && <GapDetails gaps={evaluation.gaps} />}
+          </div>
+        )}
+
+        <div className="mt-5 border-t border-ink-900/5 pt-4">
+          <Progress job={job} />
         </div>
-      </div>
 
-      <div className="mt-1 text-xs text-slate-500">
-        {job.location || "Location unspecified"}
-        {job.remote_type ? ` · ${job.remote_type}` : ""} · first seen{" "}
-        {new Date(job.first_seen).toLocaleDateString()}
-      </div>
-
-      {evaluation && <div className="mt-2 text-xs text-slate-600">{evaluation.summary}</div>}
-      {evaluation && evaluation.gaps.length > 0 && <GapDetails gaps={evaluation.gaps} />}
-
-      <div className="mt-3 flex items-center gap-2">
-        {job.application_status === "proceeding" ? (
-          <span className="text-xs font-medium text-emerald-600">
-            Proceeding with application{" "}
-            <button
-              onClick={() => undoMutation.mutate()}
-              disabled={undoMutation.isPending}
-              className="ml-1 font-normal text-slate-500 underline hover:text-slate-700 disabled:opacity-50"
-            >
-              Undo
-            </button>
-          </span>
-        ) : (
-          <button
-            onClick={() => proceedMutation.mutate()}
-            disabled={proceedMutation.isPending}
-            className="rounded-md bg-brand-500 px-3 py-1 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-          >
-            {proceedMutation.isPending ? "Starting…" : "Proceed with Application"}
-          </button>
-        )}
-        <button
-          onClick={() => requalifyMutation.mutate()}
-          disabled={requalifyMutation.isPending}
-          className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-        >
-          {requalifyMutation.isPending
-            ? evaluation
-              ? "Re-scoring…"
-              : "Scoring…"
-            : evaluation
-              ? "Re-score match"
-              : "Score match"}
-        </button>
-        {confirmingDelete ? (
-          <span className="ml-auto flex items-center gap-2 text-xs text-slate-600">
-            Delete this job and its files?
-            <button
-              onClick={() => deleteMutation.mutate()}
-              disabled={deleteMutation.isPending}
-              className="rounded-md bg-red-600 px-3 py-1 font-medium text-white hover:bg-red-700 disabled:opacity-50"
-            >
-              {deleteMutation.isPending ? "Deleting…" : "Yes, delete"}
-            </button>
-            <button onClick={() => setConfirmingDelete(false)} className="text-slate-500 underline">
-              Cancel
-            </button>
-          </span>
-        ) : (
-          <button
-            onClick={() => setConfirmingDelete(true)}
-            className="ml-auto text-xs font-medium text-red-600 hover:text-red-700"
-          >
-            Delete
-          </button>
-        )}
-      </div>
-
-      {job.application_status === "proceeding" && (
-        <div className="mt-3 text-xs text-slate-600">
-          <button
-            onClick={() => tailorMutation.mutate()}
-            disabled={tailorMutation.isPending}
-            className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-          >
-            {tailorMutation.isPending
-              ? "Creating…"
-              : job.documents.length > 0
-                ? "Recreate tailored resume"
-                : "Create tailored resume"}
-          </button>
-          {job.documents.length > 0 && (
-            <span className="ml-3">
-              Download:{" "}
-              {job.documents.map((d) => (
-                <a
-                  key={d.id}
-                  href={documentDownloadUrl(d.id)}
-                  className="mr-2 font-medium text-brand-600 hover:text-brand-700"
-                >
-                  {d.document_type === "changelog" ? "Changelog" : d.format.toUpperCase()}
-                </a>
-              ))}
-            </span>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {!evaluation && !proceeding && (
+            <Button variant="primary" onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
+              {scoreButtonLabel}
+            </Button>
           )}
-          {tailorMutation.data && tailorMutation.data.changelog.length > 0 && (
-            <details className="mt-1">
-              <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-700">
-                Changelog and gaps ({tailorMutation.data.changelog.length})
-              </summary>
-              <ul className="mt-1 list-disc space-y-0.5 pl-5">
-                {tailorMutation.data.changelog.map((note, i) => (
-                  <li key={i}>{note}</li>
+          {!proceeding && (
+            <Button
+              variant={evaluation ? "primary" : "secondary"}
+              onClick={() => proceedMutation.mutate()}
+              disabled={proceedMutation.isPending}
+            >
+              {proceedMutation.isPending ? "Starting…" : "Proceed with Application"}
+            </Button>
+          )}
+          {proceeding && !hasResume && (
+            <Button variant="primary" onClick={() => tailorMutation.mutate()} disabled={tailorMutation.isPending}>
+              {tailorMutation.isPending ? "Creating…" : "Create tailored resume"}
+            </Button>
+          )}
+          {requalifyMutation.isPending && evaluation && (
+            <span className="animate-pulse text-xs text-ink-400">Comparing your resume with this job…</span>
+          )}
+          {requalifyMutation.isPending && !evaluation && !proceeding && (
+            <span className="animate-pulse text-xs text-ink-400">Comparing your resume with this job…</span>
+          )}
+        </div>
+
+        {tailorMutation.isPending && (
+          <p className="mt-3 animate-pulse text-xs text-ink-500">Tailoring your resume. This can take a minute.</p>
+        )}
+
+        {proceeding && hasResume && (
+          <div className="mt-4 rounded-2xl bg-brand-50/60 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-bold text-ink-900">Your tailored resume is ready</div>
+                <div className="mt-0.5 text-xs text-ink-500">
+                  Made from your master resume with the same layout. Read it over before you send it.
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {resumeDocs.map((d) => (
+                  <a
+                    key={d.id}
+                    href={documentDownloadUrl(d.id)}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-b from-brand-400 to-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-glow transition hover:from-brand-500 hover:to-brand-600"
+                  >
+                    Download {d.format === "docx" ? "Word file" : d.format.toUpperCase()}
+                  </a>
                 ))}
-              </ul>
-            </details>
-          )}
-          {tailorMutation.data?.used_original_wording && (
-            <p className="mt-1 text-amber-600">
-              The AI's rewording didn't pass the accuracy checks, so this resume uses your original
-              wording. Read it before using it.
-            </p>
-          )}
-          {job.documents.length > 0 && !tailorMutation.data?.used_original_wording && (
-            <p className="mt-1 text-slate-400">Read it over before sending — checks catch invented numbers and skills, not every change in emphasis.</p>
-          )}
-        </div>
-      )}
+                {changelogDocs.map((d) => (
+                  <a
+                    key={d.id}
+                    href={documentDownloadUrl(d.id)}
+                    className="rounded-full border border-ink-300/80 bg-white px-4 py-2 text-sm font-semibold text-ink-700 transition hover:border-brand-400 hover:text-brand-700"
+                  >
+                    What changed
+                  </a>
+                ))}
+                <Button size="sm" variant="ghost" onClick={() => tailorMutation.mutate()} disabled={tailorMutation.isPending}>
+                  {tailorMutation.isPending ? "Creating…" : "Recreate"}
+                </Button>
+              </div>
+            </div>
 
-      {(proceedMutation.isError ||
-        requalifyMutation.isError ||
-        tailorMutation.isError ||
-        undoMutation.isError ||
-        deleteMutation.isError) && (
-        <p className="mt-2 text-xs text-red-600">
-          {(
-            proceedMutation.error ??
-            requalifyMutation.error ??
-            tailorMutation.error ??
-            undoMutation.error ??
-            deleteMutation.error
-          )?.message}
-        </p>
-      )}
+            {tailorMutation.data?.used_original_wording && (
+              <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                The AI's rewording didn't pass the accuracy checks, so this resume uses your original wording.
+              </p>
+            )}
+            {tailorMutation.data && tailorMutation.data.changelog.length > 0 && (
+              <details className="mt-3 text-xs text-ink-500">
+                <summary className="cursor-pointer select-none font-semibold text-ink-700 hover:text-brand-700">
+                  Changes and gaps ({tailorMutation.data.changelog.length})
+                </summary>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {tailorMutation.data.changelog.map((note, i) => (
+                    <li key={i}>{note}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        )}
+
+        {confirmingDelete && (
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800">
+            Delete this job and its files?
+            <span className="flex gap-2">
+              <Button size="sm" variant="danger" onClick={() => deleteMutation.mutate()} disabled={deleteMutation.isPending}>
+                {deleteMutation.isPending ? "Deleting…" : "Yes, delete"}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmingDelete(false)}>
+                Cancel
+              </Button>
+            </span>
+          </div>
+        )}
+
+        {error && <p className="mt-3 text-sm text-red-600">{error.message}</p>}
+      </Card>
     </li>
   );
 }
 
-/** Collapsed by default — the summary line above is the answer to "why
- * this score"; this is the detail for when you want the specifics. */
+/** Collapsed by default. The summary above answers "why this score"; this is the detail. */
 function GapDetails({ gaps }: { gaps: string[] }) {
   return (
-    <details className="mt-1 text-xs text-slate-500">
-      <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-700">
+    <details className="mt-2 text-sm text-ink-500">
+      <summary className="cursor-pointer select-none text-xs font-semibold text-brand-600 hover:text-brand-700">
         See what's missing ({gaps.length})
       </summary>
-      <ul className="mt-1 space-y-0.5 pl-3">
+      <ul className="mt-2 space-y-1.5 pl-1">
         {gaps.map((gap) => (
-          <li key={gap}>{gap}</li>
+          <li key={gap} className="flex gap-2 text-xs leading-relaxed">
+            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+            {gap}
+          </li>
         ))}
       </ul>
     </details>
@@ -274,21 +409,14 @@ function AddJobByUrl() {
     onSuccess: (job) => {
       setLastAdded(job);
       setUrl("");
-      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
   });
 
   return (
-    <div className="mb-6 max-w-2xl rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 className="mb-2 text-sm font-semibold text-slate-700">Add a job by link</h2>
-      <p className="mb-3 text-xs text-slate-500">
-        Paste the URL of a posting you found — on LinkedIn, Indeed, a company's careers page,
-        anywhere. If the site blocks a direct fetch (LinkedIn and Indeed sometimes do, even for
-        one page), use the "Save this job" button in the browser extension instead while you're
-        looking at the posting.
-      </p>
+    <Card className="mb-6 p-5">
       <form
-        className="flex gap-2"
+        className="flex flex-col gap-2 sm:flex-row"
         onSubmit={(e) => {
           e.preventDefault();
           if (url.trim()) addMutation.mutate(url.trim());
@@ -297,30 +425,28 @@ function AddJobByUrl() {
         <input
           type="url"
           required
-          placeholder="https://…"
+          aria-label="Job posting link"
+          placeholder="Paste a job link"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          className={`${inputClass} flex-1 py-2.5`}
         />
-        <button
-          type="submit"
-          disabled={addMutation.isPending || !url.trim()}
-          className="rounded-md bg-brand-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-        >
-          {addMutation.isPending ? "Adding…" : "Add"}
-        </button>
+        <Button type="submit" variant="primary" disabled={addMutation.isPending || !url.trim()}>
+          {addMutation.isPending ? "Adding…" : "Add job"}
+        </Button>
       </form>
+      <p className="mt-2.5 text-xs text-ink-400">
+        If a site blocks the link, open the posting and use Save this job in the browser extension instead.
+      </p>
 
-      {addMutation.isError && (
-        <p className="mt-3 text-sm text-red-600">{addMutation.error.message}</p>
-      )}
+      {addMutation.isError && <p className="mt-3 text-sm text-red-600">{addMutation.error.message}</p>}
       {lastAdded && !addMutation.isError && (
-        <p className={`mt-3 text-sm ${lastAdded.already_existed ? "text-amber-600" : "text-emerald-600"}`}>
+        <p className={`mt-3 text-sm font-medium ${lastAdded.already_existed ? "text-amber-700" : "text-emerald-700"}`}>
           {lastAdded.already_existed
-            ? `Already in your list: ${lastAdded.title} · ${lastAdded.company}. Nothing new was added.`
-            : `Added: ${lastAdded.title} · ${lastAdded.company}`}
+            ? `Already in your list: ${lastAdded.title} at ${lastAdded.company}. Nothing new was added.`
+            : `Added: ${lastAdded.title} at ${lastAdded.company}`}
         </p>
       )}
-    </div>
+    </Card>
   );
 }

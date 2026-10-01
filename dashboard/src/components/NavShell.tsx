@@ -1,42 +1,89 @@
 import { NavLink, Outlet } from "react-router-dom";
 
-const NAV_ITEMS = [
+import { Badge } from "@/components/ui";
+
+interface NavItem {
+  to: string;
+  label: string;
+  soon?: boolean;
+}
+
+const WORK: NavItem[] = [
   { to: "/", label: "Home" },
-  { to: "/profile", label: "Profile" },
-  { to: "/work-eligibility", label: "Work Eligibility" },
   { to: "/jobs", label: "Jobs" },
-  { to: "/applications", label: "Applications" },
-  { to: "/needs-attention", label: "Needs Attention" },
-  { to: "/accounts", label: "Accounts" },
+  { to: "/applications", label: "Applications", soon: true },
+  { to: "/needs-attention", label: "Needs Attention", soon: true },
+];
+
+const SETUP: NavItem[] = [
+  { to: "/profile", label: "Profile" },
+  { to: "/accounts", label: "Accounts", soon: true },
   { to: "/pairing", label: "Pair Extension" },
-] as const;
+];
+
+function LogoMark() {
+  return (
+    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 shadow-glow">
+      <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 text-white" aria-hidden="true">
+        <path
+          d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"
+          fill="currentColor"
+        />
+        <path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z" fill="currentColor" opacity="0.8" />
+      </svg>
+    </div>
+  );
+}
+
+function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
+  return (
+    <div>
+      <div className="mb-1.5 px-3 text-xs font-semibold text-ink-400">{title}</div>
+      <div className="flex flex-col gap-0.5">
+        {items.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.to === "/"}
+            className={({ isActive }) =>
+              `flex items-center justify-between rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                isActive
+                  ? "bg-brand-50 text-brand-700"
+                  : item.soon
+                    ? "text-ink-400 hover:bg-white/70"
+                    : "text-ink-500 hover:bg-white/70 hover:text-ink-900"
+              }`
+            }
+          >
+            {item.label}
+            {item.soon && <Badge>Soon</Badge>}
+          </NavLink>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function NavShell() {
   return (
-    <div className="flex min-h-screen">
-      <aside className="w-56 shrink-0 border-r border-slate-200 bg-white px-4 py-6">
-        <div className="mb-8 px-2 text-lg font-semibold text-brand-600">Job Agent</div>
-        <nav className="flex flex-col gap-1">
-          {NAV_ITEMS.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === "/"}
-              className={({ isActive }) =>
-                `rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                  isActive
-                    ? "bg-brand-50 text-brand-700"
-                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                }`
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
+    <div className="flex min-h-screen flex-col md:flex-row">
+      <aside className="shrink-0 border-b border-white/70 bg-white/60 px-4 py-5 backdrop-blur md:sticky md:top-0 md:h-screen md:w-60 md:border-b-0 md:border-r md:py-7">
+        <div className="mb-5 flex items-center gap-3 px-2 md:mb-9">
+          <LogoMark />
+          <div>
+            <div className="text-base font-bold leading-tight text-ink-900">Job Agent</div>
+            <div className="text-xs text-ink-400">Your job search, organized</div>
+          </div>
+        </div>
+        <nav className="flex gap-6 overflow-x-auto md:flex-col md:gap-7 md:overflow-visible">
+          <NavGroup title="Your search" items={WORK} />
+          <NavGroup title="Setup" items={SETUP} />
         </nav>
       </aside>
-      <main className="flex-1 bg-slate-50 px-8 py-6">
-        <Outlet />
+      <main className="min-w-0 flex-1 px-4 py-8 md:px-10 md:py-10">
+        <div className="mx-auto max-w-4xl">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

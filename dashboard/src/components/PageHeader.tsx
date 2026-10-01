@@ -1,13 +1,19 @@
+import type { ReactNode } from "react";
+
 interface PageHeaderProps {
   title: string;
   description?: string;
+  action?: ReactNode;
 }
 
-export function PageHeader({ title, description }: PageHeaderProps) {
+export function PageHeader({ title, description, action }: PageHeaderProps) {
   return (
-    <div className="mb-6">
-      <h1 className="text-xl font-semibold text-slate-900">{title}</h1>
-      {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
+    <div className="mb-7 flex items-start justify-between gap-4">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-ink-900">{title}</h1>
+        {description && <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-ink-500">{description}</p>}
+      </div>
+      {action}
     </div>
   );
 }

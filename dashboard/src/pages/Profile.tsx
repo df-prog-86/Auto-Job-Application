@@ -1,33 +1,94 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { api, ApiError } from "@/api/client";
+import { EditableField, SelectField } from "@/components/EditableField";
 import { PageHeader } from "@/components/PageHeader";
-import type { DraftClaim, ResumeExtraction, ResumeParseResponse } from "@/types/api";
+import { Badge, Button, Card, CheckIcon, inputClass } from "@/components/ui";
+import { answerValue, missingItems } from "@/lib/completeness";
+import type {
+  AnswerOut,
+  DraftClaim,
+  EducationOut,
+  EmploymentHistoryOut,
+  MasterRole,
+  ProfileOut,
+  ResumeExtraction,
+  ResumeParseResponse,
+} from "@/types/api";
+
+const AUTHORIZATION_OPTIONS = [
+  "US citizen",
+  "Permanent resident (green card)",
+  "Work visa (such as H-1B or OPT)",
+  "Other",
+].map((o) => ({ value: o, label: o }));
+const CLEARANCE_OPTIONS = ["None", "Public Trust", "Secret", "Top Secret", "Top Secret/SCI"].map((o) => ({
+  value: o,
+  label: o,
+}));
+const SPONSORSHIP_OPTIONS = [
+  { value: "no", label: "No" },
+  { value: "yes", label: "Yes" },
+];
+
+/** "2021-04-01" or "2021-04" -> "2021-04" (what a month input wants). */
+function toMonth(value?: string | null): string {
+  return value ? value.slice(0, 7) : "";
+}
+
+function formatMonth(value: string): string {
+  const [y, m] = value.split("-").map(Number);
+  if (!y || !m) return value;
+  return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "short", year: "numeric" });
+}
 
 /**
- * Milestone 2 onboarding flow (spec §4.2, §15 steps 1-3): upload -> review
- * extracted profile + verified claims -> commit. Per spec, the candidate
- * must be able to correct extracted information before automation is
- * enabled — this pass covers contact-field edits and per-claim
- * approve/discard, which is the minimum "correction" surface; richer
- * per-field editing across employment/education entries is a Milestone 10
- * polish item, not required for the onboarding acceptance test.
+ * Pairs each saved role with its bullets from the master resume. Matches on
+ * company (then job title) appearing in the lines above a bullet list, then
+ * falls back to document order when every role is left unmatched and the
+ * counts line up. Anything uncertain shows no bullets rather than the wrong ones.
  */
+function bulletsByRole(jobs: EmploymentHistoryOut[], roles: MasterRole[]): (string[] | null)[] {
+  const used = new Set<number>();
+  const result: (string[] | null)[] = jobs.map(() => null);
+  const find = (needle: string) => {
+    const n = needle.trim().toLowerCase();
+    if (n.length < 3) return -1;
+    return roles.findIndex((r, i) => !used.has(i) && r.context.toLowerCase().includes(n));
+  };
+  jobs.forEach((job, i) => {
+    let idx = find(job.employer);
+    if (idx === -1) idx = find(job.title);
+    if (idx !== -1) {
+      used.add(idx);
+      result[i] = roles[idx].bullets;
+    }
+  });
+  if (used.size === 0 && jobs.length > 0 && jobs.length === roles.length) {
+    return roles.map((r) => r.bullets);
+  }
+  return result;
+}
+
 export function Profile() {
   const queryClient = useQueryClient();
   const [reviewData, setReviewData] = useState<ResumeParseResponse | null>(null);
   const [reviewFilename, setReviewFilename] = useState<string>("resume");
 
-  const profileQuery = useQuery({
-    queryKey: ["profile"],
-    queryFn: api.getProfile,
+  const profileQuery = useQuery({ queryKey: ["profile"], queryFn: api.getProfile, retry: false });
+  const noProfileYet = profileQuery.isError && (profileQuery.error as ApiError)?.status === 404;
+  const profile = noProfileYet ? undefined : profileQuery.data;
+
+  const answersQuery = useQuery({
+    queryKey: ["answers"],
+    queryFn: api.listAnswers,
+    enabled: !!profile,
     retry: false,
   });
-
-  const noProfileYet = profileQuery.isError && (profileQuery.error as ApiError)?.status === 404;
+  const rolesQuery = useQuery({ queryKey: ["master-roles"], queryFn: api.masterRoles, enabled: !!profile });
 
   const parseMutation = useMutation<ResumeParseResponse, ApiError, File>({
     mutationFn: api.parseResume,
@@ -41,7 +102,7 @@ export function Profile() {
     return (
       <div>
         <PageHeader title="Profile" />
-        <p className="text-sm text-slate-400">Loading…</p>
+        <p className="text-sm text-ink-400">Loading…</p>
       </div>
     );
   }
@@ -53,195 +114,574 @@ export function Profile() {
         filename={reviewFilename}
         onDone={() => {
           setReviewData(null);
-          queryClient.invalidateQueries({ queryKey: ["profile"] });
+          void queryClient.invalidateQueries({ queryKey: ["profile"] });
+          void queryClient.invalidateQueries({ queryKey: ["master-status"] });
+          void queryClient.invalidateQueries({ queryKey: ["master-roles"] });
         }}
         onCancel={() => setReviewData(null)}
       />
     );
   }
 
-  if (profileQuery.data && !noProfileYet) {
-    const profile = profileQuery.data;
+  if (profileQuery.isError && !noProfileYet) {
     return (
       <div>
-        <PageHeader title="Profile" description="Your candidate profile, extracted from your resume." />
-        <div className="max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-          <dl className="space-y-2 text-sm">
-            <Row label="Name" value={profile.name} />
-            <Row label="Email" value={profile.email} />
-            <Row label="Phone" value={profile.phone} />
-            <Row label="Location" value={profile.location} />
-            <Row label="LinkedIn" value={profile.linkedin_url} />
-          </dl>
-        </div>
-
-        {profile.employment_history.length > 0 && (
-          <Section title="Experience">
-            <ul className="divide-y divide-slate-100">
-              {profile.employment_history.map((job, i) => (
-                <li key={i} className="py-3">
-                  <div className="text-sm font-medium text-slate-900">
-                    {job.title} · {job.employer}
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    {formatDateRange(job.start_date, job.end_date)}
-                    {job.location ? ` · ${job.location}` : ""}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </Section>
-        )}
-
-        {profile.education.length > 0 && (
-          <Section title="Education">
-            <ul className="divide-y divide-slate-100">
-              {profile.education.map((edu, i) => (
-                <li key={i} className="py-3">
-                  <div className="text-sm font-medium text-slate-900">
-                    {edu.institution}
-                    {edu.degree ? ` — ${edu.degree}` : ""}
-                    {edu.field ? ` in ${edu.field}` : ""}
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    {formatDateRange(edu.start_date, edu.end_date)}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </Section>
-        )}
-
-        {profile.skills.length > 0 && (
-          <Section title="Skills">
-            <div className="flex flex-wrap gap-2">
-              {profile.skills.map((skill, i) => (
-                <span
-                  key={i}
-                  className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700"
-                >
-                  {skill.canonical_skill}
-                </span>
-              ))}
-            </div>
-          </Section>
-        )}
-
-        {profile.certifications.length > 0 && (
-          <Section title="Certifications">
-            <ul className="divide-y divide-slate-100">
-              {profile.certifications.map((cert, i) => (
-                <li key={i} className="py-3">
-                  <div className="text-sm font-medium text-slate-900">{cert.certification}</div>
-                  <div className="text-xs text-slate-500">
-                    {[cert.issuer, cert.date].filter(Boolean).join(" · ")}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </Section>
-        )}
-
-        {profile.verified_claims.length > 0 && (
-          <Section title={`Verified claims (${profile.verified_claims.length})`}>
-            <ul className="divide-y divide-slate-100">
-              {profile.verified_claims.map((claim, i) => (
-                <li key={i} className="py-2 text-sm text-slate-700">
-                  {claim.canonical_text}
-                </li>
-              ))}
-            </ul>
-          </Section>
-        )}
-
-        <UploadForm parseMutation={parseMutation} buttonLabel="Upload a new resume" />
+        <PageHeader title="Profile" />
+        <p className="text-sm text-red-600">{(profileQuery.error as ApiError).message}</p>
       </div>
     );
   }
 
+  if (!profile) {
+    return (
+      <div>
+        <PageHeader
+          title="Profile"
+          description="Start with your resume. We read it and fill in your profile for you to check."
+        />
+        <ResumeDrop parseMutation={parseMutation} hasProfile={false} />
+      </div>
+    );
+  }
+
+  const answers = answersQuery.data;
+  const missing = missingItems(profile, answers);
+  const bullets = bulletsByRole(profile.employment_history, rolesQuery.data ?? []);
+
+  /** Runs a profile edit and puts the fresh profile straight into the cache. */
+  const applyProfile = async (call: Promise<ProfileOut>) => {
+    const updated = await call;
+    queryClient.setQueryData(["profile"], updated);
+  };
+
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader
         title="Profile"
-        description="Upload your resume to build your candidate profile."
+        description="This is what applications are filled out from. Click any field to change it."
       />
-      <UploadForm parseMutation={parseMutation} buttonLabel="Parse resume" />
+
+      <ResumeDrop parseMutation={parseMutation} hasProfile />
+
+      <CompletionBanner missing={missing} />
+
+      <Card className="p-6">
+        <h2 className="mb-4 text-base font-bold text-ink-900">Personal details</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <EditableField
+            label="Name"
+            value={profile.name}
+            required
+            bold
+            onSave={(v) => applyProfile(api.updateProfile({ name: v }))}
+          />
+          <EditableField
+            label="Email"
+            value={profile.email}
+            required
+            type="email"
+            onSave={(v) => applyProfile(api.updateProfile({ email: v }))}
+          />
+          <EditableField
+            label="Phone"
+            value={profile.phone ?? ""}
+            required
+            type="tel"
+            onSave={(v) => applyProfile(api.updateProfile({ phone: v || null }))}
+          />
+          <EditableField
+            label="Location"
+            value={profile.location ?? ""}
+            required
+            onSave={(v) => applyProfile(api.updateProfile({ location: v || null }))}
+          />
+          <EditableField
+            label="LinkedIn"
+            value={profile.linkedin_url ?? ""}
+            type="url"
+            className="sm:col-span-2"
+            onSave={(v) => applyProfile(api.updateProfile({ linkedin_url: v || null }))}
+          />
+        </div>
+      </Card>
+
+      <EligibilityCard answers={answers} loading={answersQuery.isLoading} />
+
+      <section>
+        <SectionTitle
+          title="Experience"
+          action={
+            <Button
+              size="sm"
+              onClick={() => void applyProfile(api.addEmployment({}))}
+            >
+              Add a role
+            </Button>
+          }
+        />
+        <div className="space-y-4">
+          {profile.employment_history.length === 0 && (
+            <EmptyNote>
+              No roles yet. Add one, or upload your resume again to read them from it.
+            </EmptyNote>
+          )}
+          {profile.employment_history.map((job, i) => (
+            <RoleCard key={job.id} job={job} bullets={bullets[i]} onChange={applyProfile} />
+          ))}
+        </div>
+        {rolesQuery.data && rolesQuery.data.length > 0 && (
+          <p className="mt-3 text-xs text-ink-400">
+            Bullets are read from your saved master resume. To change them, upload an updated
+            resume.
+          </p>
+        )}
+      </section>
+
+      <SkillsCard skills={profile.skills} onChange={applyProfile} />
+
+      <section>
+        <SectionTitle
+          title="Education"
+          action={
+            <Button size="sm" onClick={() => void applyProfile(api.addEducation({}))}>
+              Add a school
+            </Button>
+          }
+        />
+        <div className="space-y-4">
+          {profile.education.length === 0 && <EmptyNote>No education yet. Add a school above.</EmptyNote>}
+          {profile.education.map((edu) => (
+            <EducationCard key={edu.id} edu={edu} onChange={applyProfile} />
+          ))}
+        </div>
+      </section>
+
+      {profile.certifications.length > 0 && (
+        <Card className="p-6">
+          <h2 className="mb-3 text-base font-bold text-ink-900">Certifications</h2>
+          <ul className="space-y-2">
+            {profile.certifications.map((cert, i) => (
+              <li key={i} className="text-sm">
+                <span className="font-semibold text-ink-900">{cert.certification}</span>
+                {cert.issuer && <span className="text-ink-500">, {cert.issuer}</span>}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
     </div>
   );
 }
 
-function Row({ label, value }: { label: string; value?: string | null }) {
+function SectionTitle({ title, action }: { title: string; action?: ReactNode }) {
   return (
-    <div className="flex justify-between border-b border-slate-100 py-1 last:border-0">
-      <dt className="text-slate-500">{label}</dt>
-      <dd className="text-slate-900">{value || "—"}</dd>
+    <div className="mb-3 flex items-center justify-between">
+      <h2 className="text-base font-bold text-ink-900">{title}</h2>
+      {action}
     </div>
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function EmptyNote({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-6 max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 className="mb-3 text-sm font-semibold text-slate-700">{title}</h2>
+    <div className="rounded-2xl border border-dashed border-ink-300 bg-white/60 p-6 text-center text-sm text-ink-500">
       {children}
     </div>
   );
 }
 
-function formatDateRange(start?: string | null, end?: string | null): string {
-  const fmt = (d?: string | null) => {
-    if (!d) return null;
-    const parsed = new Date(d);
-    if (Number.isNaN(parsed.getTime())) return d;
-    return parsed.toLocaleDateString(undefined, { year: "numeric", month: "short" });
-  };
-  const startLabel = fmt(start) ?? "Unknown start";
-  const endLabel = fmt(end) ?? "Present";
-  return `${startLabel} – ${endLabel}`;
+function CompletionBanner({ missing }: { missing: string[] }) {
+  if (missing.length === 0) {
+    return (
+      <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3.5 text-sm font-semibold text-emerald-800">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white">
+          <CheckIcon />
+        </span>
+        Your profile is complete.
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+      <div className="text-sm font-bold text-amber-900">
+        {missing.length} {missing.length === 1 ? "thing needs" : "things need"} completion
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {missing.map((m) => (
+          <span key={m} className="rounded-full bg-white px-2.5 py-0.5 text-xs font-medium text-amber-800">
+            {m}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
-function UploadForm({
-  parseMutation,
-  buttonLabel,
-}: {
-  parseMutation: UseMutationResult<ResumeParseResponse, ApiError, File>;
-  buttonLabel: string;
-}) {
-  const [file, setFile] = useState<File | null>(null);
-  const masterQuery = useQuery({ queryKey: ["master-status"], queryFn: api.masterStatus });
+function EligibilityCard({ answers, loading }: { answers: AnswerOut[] | undefined; loading: boolean }) {
+  const queryClient = useQueryClient();
+
+  const save = async (key: string, type: "str" | "bool", value: string) => {
+    await api.saveAnswer(key, {
+      value_type: type,
+      value: type === "bool" ? value === "yes" : value,
+    });
+    await queryClient.invalidateQueries({ queryKey: ["answers"] });
+  };
+
+  const sponsor = answerValue(answers, "sponsorship_required");
 
   return (
-    <div className="mt-6 max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-      <p
-        className={`mb-3 text-xs font-medium ${masterQuery.data?.saved ? "text-emerald-600" : "text-amber-600"}`}
-      >
-        {masterQuery.data?.saved
-          ? `Master resume saved on this computer (last updated ${new Date(masterQuery.data.updated_at ?? "").toLocaleDateString()}). Upload again only when your resume changes.`
-          : "No master resume saved yet. Upload your Word (.docx) resume once and it's kept for every tailored resume."}
+    <Card className="p-6">
+      <h2 className="text-base font-bold text-ink-900">Work eligibility</h2>
+      <p className="mb-4 mt-1 text-xs text-ink-500">
+        Saved only on this computer. The app never guesses an answer you haven't given.
       </p>
-      <p className="mb-3 text-xs text-slate-500">
-        Upload your master resume as a Word (.docx) file. It's saved on this computer and used as the
-        exact layout for every tailored resume. A PDF still builds your profile, but tailored resumes
-        need the Word file.
-      </p>
-      <input
-        type="file"
-        accept=".pdf,.docx"
-        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-        className="mb-4 block w-full text-sm"
-      />
-      <button
-        onClick={() => file && parseMutation.mutate(file)}
-        disabled={!file || parseMutation.isPending}
-        className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-      >
-        {parseMutation.isPending ? "Parsing…" : buttonLabel}
-      </button>
-
-      {parseMutation.isError && (
-        <p className="mt-3 text-sm text-red-600">{parseMutation.error.message}</p>
+      {loading ? (
+        <p className="text-sm text-ink-400">Loading…</p>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <SelectField
+            label="Work authorization"
+            required
+            value={(answerValue(answers, "work_authorization") as string | undefined) ?? ""}
+            options={AUTHORIZATION_OPTIONS}
+            onSave={(v) => save("work_authorization", "str", v)}
+          />
+          <SelectField
+            label="Need visa sponsorship now or later?"
+            required
+            value={sponsor === true ? "yes" : sponsor === false ? "no" : ""}
+            options={SPONSORSHIP_OPTIONS}
+            onSave={(v) => save("sponsorship_required", "bool", v)}
+          />
+          <SelectField
+            label="Security clearance (optional)"
+            value={(answerValue(answers, "security_clearance") as string | undefined) ?? ""}
+            options={CLEARANCE_OPTIONS}
+            onSave={(v) => save("security_clearance", "str", v)}
+          />
+        </div>
       )}
-    </div>
+    </Card>
+  );
+}
+
+function RoleCard({
+  job,
+  bullets,
+  onChange,
+}: {
+  job: EmploymentHistoryOut;
+  bullets: string[] | null;
+  onChange: (call: Promise<ProfileOut>) => Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const edit = (patch: Parameters<typeof api.updateEmployment>[1]) =>
+    onChange(api.updateEmployment(job.id, patch));
+
+  return (
+    <Card className="p-6">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <EditableField label="Job title" value={job.title} required bold onSave={(v) => edit({ title: v })} />
+        <EditableField label="Company" value={job.employer} required onSave={(v) => edit({ employer: v })} />
+        <EditableField
+          label="Start date"
+          value={toMonth(job.start_date)}
+          required
+          type="month"
+          format={formatMonth}
+          onSave={(v) => edit({ start_date: v })}
+        />
+        <EditableField
+          label="End date"
+          value={toMonth(job.end_date)}
+          type="month"
+          emptyLabel="Present"
+          format={formatMonth}
+          onSave={(v) => edit({ end_date: v })}
+        />
+        <EditableField
+          label="Location"
+          value={job.location ?? ""}
+          className="sm:col-span-2"
+          onSave={(v) => edit({ location: v })}
+        />
+      </div>
+
+      {bullets && bullets.length > 0 ? (
+        <ul className="mt-5 space-y-2 border-t border-ink-900/5 pt-4">
+          {bullets.map((b, i) => (
+            <li key={i} className="flex gap-2.5 text-sm leading-relaxed text-ink-700">
+              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-400" />
+              {b}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-5 border-t border-ink-900/5 pt-4 text-xs text-ink-400">
+          No bullets found for this role in your saved resume.
+        </p>
+      )}
+
+      <div className="mt-4 flex justify-end">
+        {confirming ? (
+          <span className="flex items-center gap-2 text-xs text-ink-500">
+            Remove this role from your profile?
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={() => void onChange(api.deleteEmployment(job.id))}
+            >
+              Remove
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+          </span>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={() => setConfirming(true)}>
+            Remove role
+          </Button>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function EducationCard({
+  edu,
+  onChange,
+}: {
+  edu: EducationOut;
+  onChange: (call: Promise<ProfileOut>) => Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const edit = (patch: Parameters<typeof api.updateEducation>[1]) =>
+    onChange(api.updateEducation(edu.id, patch));
+
+  return (
+    <Card className="p-6">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <EditableField
+          label="School"
+          value={edu.institution}
+          required
+          bold
+          onSave={(v) => edit({ institution: v })}
+        />
+        <EditableField label="Degree" value={edu.degree ?? ""} required onSave={(v) => edit({ degree: v })} />
+        <EditableField label="Field of study" value={edu.field ?? ""} onSave={(v) => edit({ field: v })} />
+        <EditableField
+          label="Graduated"
+          value={toMonth(edu.end_date)}
+          type="month"
+          emptyLabel="Add date"
+          format={formatMonth}
+          onSave={(v) => edit({ end_date: v })}
+        />
+      </div>
+      <div className="mt-4 flex justify-end">
+        {confirming ? (
+          <span className="flex items-center gap-2 text-xs text-ink-500">
+            Remove this school from your profile?
+            <Button size="sm" variant="danger" onClick={() => void onChange(api.deleteEducation(edu.id))}>
+              Remove
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+          </span>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={() => setConfirming(true)}>
+            Remove school
+          </Button>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function SkillsCard({
+  skills,
+  onChange,
+}: {
+  skills: ProfileOut["skills"];
+  onChange: (call: Promise<ProfileOut>) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function add() {
+    const name = draft.trim();
+    if (!name) return;
+    setError(null);
+    try {
+      await onChange(api.addSkill(name));
+      setDraft("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't add that skill.");
+    }
+  }
+
+  return (
+    <Card className="p-6">
+      <h2 className="mb-4 text-base font-bold text-ink-900">Skills</h2>
+      {skills.length === 0 && <p className="mb-3 text-sm text-ink-400">No skills yet. Add your first one below.</p>}
+      <div className="mb-4 flex flex-wrap gap-2">
+        {skills.map((skill) => (
+          <span
+            key={skill.id}
+            className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 py-1 pl-3 pr-1.5 text-xs font-semibold text-brand-700"
+          >
+            {skill.canonical_skill}
+            <button
+              type="button"
+              aria-label={`Remove ${skill.canonical_skill}`}
+              onClick={() => void onChange(api.deleteSkill(skill.id))}
+              className="flex h-5 w-5 items-center justify-center rounded-full text-brand-600 transition hover:bg-brand-100"
+            >
+              <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none" aria-hidden="true">
+                <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </button>
+          </span>
+        ))}
+      </div>
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void add();
+        }}
+      >
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Add a skill"
+          className={`${inputClass} max-w-xs`}
+        />
+        <Button type="submit" size="sm" disabled={!draft.trim()}>
+          Add
+        </Button>
+      </form>
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+    </Card>
+  );
+}
+
+function ResumeDrop({
+  parseMutation,
+  hasProfile,
+}: {
+  parseMutation: UseMutationResult<ResumeParseResponse, ApiError, File>;
+  hasProfile: boolean;
+}) {
+  const masterQuery = useQuery({ queryKey: ["master-status"], queryFn: api.masterStatus });
+  const [pending, setPending] = useState<File | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const saved = !!masterQuery.data?.saved;
+
+  function choose(file: File | undefined) {
+    if (!file) return;
+    // The first upload starts right away. Replacing a saved resume asks first.
+    if (saved) {
+      setPending(file);
+    } else {
+      parseMutation.mutate(file);
+    }
+  }
+
+  const busy = parseMutation.isPending;
+
+  return (
+    <Card className="p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-base font-bold text-ink-900">Master resume</h2>
+        {saved ? (
+          <Badge tone="success">
+            <CheckIcon className="h-3 w-3" />
+            Saved{masterQuery.data?.updated_at ? ` on ${new Date(masterQuery.data.updated_at).toLocaleDateString()}` : ""}
+          </Badge>
+        ) : (
+          <Badge tone="warning">Not saved yet</Badge>
+        )}
+      </div>
+
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          choose(e.dataTransfer.files?.[0]);
+        }}
+        className={`mt-4 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed text-center transition ${
+          hasProfile ? "px-6 py-5" : "px-6 py-12"
+        } ${dragging ? "border-brand-400 bg-brand-50" : "border-brand-200 bg-brand-50/40"}`}
+      >
+        {busy ? (
+          <div className="animate-pulse text-sm font-semibold text-brand-700">
+            Reading your resume… this can take a minute.
+          </div>
+        ) : pending ? (
+          <div className="space-y-3">
+            <p className="text-sm text-ink-700">
+              Replace your saved resume with <span className="font-semibold">{pending.name}</span>?
+            </p>
+            <div className="flex justify-center gap-2">
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  parseMutation.mutate(pending);
+                  setPending(null);
+                }}
+              >
+                Replace and read it
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setPending(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <p className="text-sm font-semibold text-ink-900">
+              {hasProfile ? "Drop an updated resume here" : "Drop your resume here"}
+            </p>
+            <p className="mt-1 max-w-md text-xs text-ink-500">
+              Use a Word (.docx) file. It is saved once on this computer and every tailored resume is
+              made from it with the same layout. A PDF will build your profile, but tailored resumes
+              need the Word file.
+            </p>
+            <Button
+              variant={hasProfile ? "secondary" : "primary"}
+              size="sm"
+              className="mt-4"
+              onClick={() => inputRef.current?.click()}
+            >
+              Choose a file
+            </Button>
+          </>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".pdf,.docx"
+          className="hidden"
+          onChange={(e) => {
+            choose(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
+      </div>
+
+      {parseMutation.isError && <p className="mt-3 text-sm text-red-600">{parseMutation.error.message}</p>}
+    </Card>
   );
 }
 
@@ -279,78 +719,55 @@ function ReviewAndCommit({
   return (
     <div>
       <PageHeader
-        title="Review your profile"
-        description="Correct anything that looks wrong, uncheck any claim you don't want used, then confirm."
+        title="Check what we found"
+        description="Correct anything that looks wrong, uncheck any fact you don't want used, then save. You can edit everything later on your profile."
       />
 
       {data.used_ocr && (
-        <div className="mb-4 rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-700">
-          This file needed OCR to read — double-check the extracted text carefully below.
+        <div className="mb-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This file had to be read as an image, so double-check the details below carefully.
         </div>
       )}
 
-      <div className="mb-6 max-w-lg rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold text-slate-700">Contact information</h2>
-        <div className="space-y-3">
-          <LabeledInput
-            label="Name"
-            value={extraction.contact.name}
-            onChange={(v) => updateContact("name", v)}
-          />
-          <LabeledInput
-            label="Email"
-            value={extraction.contact.email ?? ""}
-            onChange={(v) => updateContact("email", v)}
-          />
-          <LabeledInput
-            label="Phone"
-            value={extraction.contact.phone ?? ""}
-            onChange={(v) => updateContact("phone", v)}
-          />
+      <Card className="mb-6 p-6">
+        <h2 className="mb-4 text-base font-bold text-ink-900">Contact information</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <LabeledInput label="Name" value={extraction.contact.name} onChange={(v) => updateContact("name", v)} />
+          <LabeledInput label="Email" value={extraction.contact.email ?? ""} onChange={(v) => updateContact("email", v)} />
+          <LabeledInput label="Phone" value={extraction.contact.phone ?? ""} onChange={(v) => updateContact("phone", v)} />
           <LabeledInput
             label="Location"
             value={extraction.contact.location ?? ""}
             onChange={(v) => updateContact("location", v)}
           />
         </div>
-      </div>
+      </Card>
 
-      <div className="mb-6 rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold text-slate-700">
-          Verified claims ({data.draft_claims.length})
-        </h2>
-        <p className="mb-3 text-xs text-slate-500">
-          These are the atomic facts your tailored resumes and application answers will draw
-          from later. Uncheck anything inaccurate or that you'd rather not use.
+      <Card className="mb-6 p-6">
+        <h2 className="text-base font-bold text-ink-900">Facts from your resume ({data.draft_claims.length})</h2>
+        <p className="mb-3 mt-1 text-xs text-ink-500">
+          Short statements the app can rely on later. Uncheck anything inaccurate or that you'd rather
+          not use.
         </p>
-        <ul className="divide-y divide-slate-100">
+        <ul className="divide-y divide-ink-900/5">
           {data.draft_claims.map((claim, i) => (
             <ClaimRow
               key={i}
               claim={claim}
               approved={approved[i]}
-              onToggle={() =>
-                setApproved((prev) => prev.map((v, j) => (j === i ? !v : v)))
-              }
+              onToggle={() => setApproved((prev) => prev.map((v, j) => (j === i ? !v : v)))}
             />
           ))}
         </ul>
-      </div>
+      </Card>
 
       <div className="flex gap-3">
-        <button
-          onClick={() => commitMutation.mutate()}
-          disabled={commitMutation.isPending}
-          className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-        >
-          {commitMutation.isPending ? "Saving…" : "Confirm and save profile"}
-        </button>
-        <button
-          onClick={onCancel}
-          className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-        >
+        <Button variant="primary" onClick={() => commitMutation.mutate()} disabled={commitMutation.isPending}>
+          {commitMutation.isPending ? "Saving…" : "Save profile"}
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
       </div>
 
       {commitMutation.isError && (
@@ -371,13 +788,8 @@ function LabeledInput({
 }) {
   return (
     <label className="block text-sm">
-      <span className="mb-1 block text-slate-600">{label}</span>
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border border-slate-300 px-3 py-1.5"
-      />
+      <span className="mb-1 block text-xs font-semibold text-ink-500">{label}</span>
+      <input type="text" value={value} onChange={(e) => onChange(e.target.value)} className={inputClass} />
     </label>
   );
 }
@@ -393,19 +805,12 @@ function ClaimRow({
 }) {
   return (
     <li className="flex items-start gap-3 py-3">
-      <input
-        type="checkbox"
-        checked={approved}
-        onChange={onToggle}
-        className="mt-1 h-4 w-4 accent-brand-500"
-      />
+      <input type="checkbox" checked={approved} onChange={onToggle} className="mt-1 h-4 w-4 accent-brand-500" />
       <div>
-        <div className={`text-sm ${approved ? "text-slate-900" : "text-slate-400 line-through"}`}>
+        <div className={`text-sm ${approved ? "text-ink-900" : "text-ink-400 line-through"}`}>
           {claim.canonical_text}
         </div>
-        <div className="text-xs text-slate-400">
-          {claim.category} · from: "{claim.source_text}"
-        </div>
+        <div className="text-xs text-ink-400">From your resume: "{claim.source_text}"</div>
       </div>
     </li>
   );

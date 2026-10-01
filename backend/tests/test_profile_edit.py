@@ -137,7 +137,7 @@ def test_dashboard_refresh_falls_back_to_index(tmp_path, monkeypatch):
     from app import main
 
     monkeypatch.setattr(main, "DASHBOARD_DIST", dist)
-    client = TestClient(main.create_app())
+    client = TestClient(main.create_app(), base_url="http://127.0.0.1")  # the local-only guard rejects other hosts
     assert "app shell" in client.get("/app/jobs").text  # refresh on a tab address
     assert "app shell" in client.get("/app").text
     assert client.get("/app/assets/x.js").text == "console.log(1)"  # real files still served

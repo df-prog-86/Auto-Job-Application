@@ -56,6 +56,7 @@
 </form>
 <script>
   window.__events = [];
+  const STRICT = new Set(['location','country']);
   const wire = (inputId, menuId, items) => {
     const input = document.getElementById(inputId), menu = document.getElementById(menuId);
     const render = (q) => {
@@ -68,9 +69,11 @@
       });
       menu.classList.add('open');
     };
-    input.addEventListener('input', () => render(input.value));
-    input.addEventListener('focus', () => render(input.value));
-    input.addEventListener('keydown', e => { if (e.key === 'ArrowDown') render(''); if (e.key === 'Escape') menu.classList.remove('open'); });
+    // Like Greenhouse's react-select: typing does nothing until the box has been pressed.
+    input.addEventListener('mousedown', () => {}); input.parentElement.addEventListener('mousedown', () => { input.dataset.pressed = '1'; render(''); });
+    input.addEventListener('input', () => { if (STRICT.has(inputId) && !input.dataset.pressed) return; render(input.value); });
+    input.addEventListener('focus', () => { if (!STRICT.has(inputId)) render(input.value); });
+    input.addEventListener('keydown', e => { if (e.key === 'ArrowDown' && (!STRICT.has(inputId) || input.dataset.pressed)) render(''); if (e.key === 'Escape') menu.classList.remove('open'); });
   };
   wire('location','loc-menu',['East Boston, Massachusetts, United States','Boston, Massachusetts, United States','Boston, Lincolnshire, United Kingdom','Boston, Arkansas, United States']);
   wire('auth','auth-menu',['Yes','No']);

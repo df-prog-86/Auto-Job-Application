@@ -55,9 +55,28 @@ export interface ComboboxHints {
   alternates?: string[];
 }
 
+/**
+ * Opens a react-select style box the way a mouse does. Greenhouse's lists
+ * ignore typed text until the box has been pressed, so typing alone (even
+ * with focus) never brings the menu up.
+ */
+function openCombobox(el: HTMLInputElement): void {
+  const control = el.closest<HTMLElement>("[class*='control']") ?? el.parentElement;
+  if (!control || control.tagName === "BUTTON") return;
+  const view = el.ownerDocument.defaultView ?? window;
+  const init = { bubbles: true, cancelable: true, button: 0, view };
+  control.dispatchEvent(new PointerEvent("pointerdown", init));
+  control.dispatchEvent(new MouseEvent("mousedown", init));
+  control.dispatchEvent(new PointerEvent("pointerup", init));
+  control.dispatchEvent(new MouseEvent("mouseup", init));
+  control.dispatchEvent(new MouseEvent("click", init));
+}
+
 async function fillCombobox(el: HTMLInputElement, value: string, hints: ComboboxHints = {}): Promise<boolean> {
   const doc = el.ownerDocument;
   el.focus();
+  openCombobox(el);
+  await sleep(150);
   // typeText narrows a long list ("United States") while the exact entry ("United States +1") is what gets picked.
   setNativeValue(el, hints.typeText ?? value);
   const wanted = normalizeQuestion(value);
@@ -90,6 +109,7 @@ async function fillCombobox(el: HTMLInputElement, value: string, hints: Combobox
 export async function readComboboxOptions(el: HTMLInputElement): Promise<string[]> {
   const doc = el.ownerDocument;
   el.focus();
+  openCombobox(el);
   el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
   await sleep(200);
   const options = Array.from(doc.querySelectorAll<HTMLElement>("[role='option']")).map((o) => (o.textContent ?? "").trim());

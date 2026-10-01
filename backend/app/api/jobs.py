@@ -28,6 +28,7 @@ from app.schemas.discovery import (
 from app.services.discovery import manual_extraction
 from app.services.discovery.pipeline import ingest_manual_posting
 from app.services.qualification.pipeline import qualify_job
+from app.services.resume.rendering import resume_filename
 from app.services.resume.service import is_safe_document_path, tailor_resume
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
@@ -169,6 +170,7 @@ async def tailor_resume_for_job(job_id: int, db: Session = Depends(get_db)) -> T
         documents=[GeneratedDocumentOut.model_validate(d) for d in outcome.documents],
         used_original_wording=outcome.used_original_wording,
         problems=outcome.problems,
+        changelog=outcome.changelog,
     )
 
 
@@ -177,7 +179,14 @@ def download_document(document_id: int, db: Session = Depends(get_db)) -> FileRe
     doc = db.get(GeneratedDocument, document_id)
     if doc is None or not is_safe_document_path(doc.local_path) or not Path(doc.local_path).exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
-    return FileResponse(doc.local_path, filename=f"tailored_resume.{doc.format}")
+    job = db.get(Job, doc.job_id)
+    profile = get_current_profile(db)
+    company = job.company if job else "Company"
+    if doc.document_type == "resume":
+        filename = resume_filename(profile.name if profile else "Candidate", company, doc.format)
+    else:
+        filename = f"Tailoring changelog_{company}.{doc.format}"
+    return FileResponse(doc.local_path, filename=filename)
 
 
 @router.post("/{job_id}/proceed", response_model=JobOut)

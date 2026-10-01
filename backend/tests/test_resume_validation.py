@@ -69,3 +69,20 @@ def test_summary_needs_claims():
 
 def test_original_wording_fallback_is_valid():
     assert _problems(original_wording_content(claims=CLAIMS, employment=EMPLOYMENT, candidate_skills=SKILLS)) == []
+
+
+def test_heavily_reworded_bullet_rejected():
+    # Soft rephrase only: a bullet must keep most of the cited claim's words.
+    assert _problems(_one_bullet("Drove efficiency gains in reporting", [1]))
+
+
+def test_light_leadin_and_swap_allowed():
+    assert _problems(_one_bullet("Streamlined reporting: reduced report time by 40% using SQL", [1])) == []
+
+
+def test_no_dashes_and_filename_rules():
+    from app.services.resume.rendering import clean_text, resume_filename
+
+    assert clean_text("Led team — grew revenue – fast") == "Led team - grew revenue - fast"
+    assert resume_filename("Jane Doe", "Mass General Brigham", "pdf", 2026) == "Jane Doe_Resume_Mass General Brigham_2026.pdf"
+    assert resume_filename("Jane Doe", "A/B: Co", "docx", 2026) == "Jane Doe_Resume_AB Co_2026.docx"

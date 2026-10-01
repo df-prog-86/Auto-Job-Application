@@ -103,6 +103,7 @@ class TailorResumeOut(BaseModel):
     documents: list[GeneratedDocumentOut]
     used_original_wording: bool
     problems: list[str]
+    changelog: list[str]
 
 
 class JobOut(BaseModel):

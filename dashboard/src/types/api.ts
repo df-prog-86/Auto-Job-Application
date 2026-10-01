@@ -225,6 +225,7 @@ export interface TailorResumeOut {
   documents: GeneratedDocumentOut[];
   used_original_wording: boolean;
   problems: string[];
+  changelog: string[];
 }
 
 export interface JobOut {

@@ -88,6 +88,12 @@ class TailoredResumeContent(BaseModel):
     summary_source_claim_ids: list[int] = Field(default_factory=list)
     experience: list[TailoredExperience] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    changelog: list[str] = Field(
+        default_factory=list,
+        description="Plain notes for the candidate: what was reordered or lightly reworded, "
+        "and every job requirement the candidate's data does not support (missing tools, "
+        "certifications, years below the bar). Gaps are only noted here, never papered over.",
+    )
 
 
 class ResumeJobMatchResult(BaseModel):

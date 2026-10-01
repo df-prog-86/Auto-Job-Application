@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import re
 from dataclasses import dataclass, field
 from html import escape
 from pathlib import Path
@@ -16,7 +17,24 @@ from pathlib import Path
 from app.models.candidate import CandidateProfile
 from app.services.llm.schemas import TailoredResumeContent
 
-TEMPLATE_VERSION = "1"
+TEMPLATE_VERSION = "2"
+MAX_PAGES = 2
+
+_DASHES = re.compile(r"\s*[\u2013\u2014]\s*")
+_UNSAFE_FILENAME = re.compile(r'[\\/:*?"<>|]')
+
+
+def clean_text(text: str) -> str:
+    """House rule: no em or en dashes anywhere in the resume body."""
+    return _DASHES.sub(" - ", text)
+
+
+def resume_filename(candidate_name: str, company: str, fmt: str, year: int | None = None) -> str:
+    """`First Last_Resume_<Company>_YYYY.pdf`, spaces kept in names."""
+    year = year or dt.date.today().year
+    name = _UNSAFE_FILENAME.sub("", candidate_name).strip() or "Candidate"
+    firm = _UNSAFE_FILENAME.sub("", company).strip() or "Company"
+    return f"{name}_Resume_{firm}_{year}.{fmt}"
 
 
 @dataclass
@@ -64,14 +82,17 @@ def build_renderable(profile: CandidateProfile, content: TailoredResumeContent) 
     certs = [c.certification + (f" ({c.issuer})" if c.issuer else "") for c in profile.certifications]
     contact = " | ".join(p for p in [profile.email, profile.phone, profile.location] if p)
 
+    for job in jobs:
+        job.heading = clean_text(job.heading)
+        job.bullets = [clean_text(b) for b in job.bullets]
     return RenderableResume(
         name=profile.name,
         contact_line=contact,
-        summary=content.summary,
+        summary=clean_text(content.summary),
         jobs=jobs,
-        education=education,
-        certifications=certs,
-        skills=content.skills,
+        education=[clean_text(x) for x in education],
+        certifications=[clean_text(x) for x in certs],
+        skills=[clean_text(x) for x in content.skills],
     )
 
 
@@ -137,7 +158,7 @@ def _resume_html(resume: RenderableResume) -> str:
     if resume.jobs:
         parts.append("<h2>Experience</h2>")
         for job in resume.jobs:
-            parts.append(f'<p class="job">{e(job.heading)} &#8211; {e(job.dates)}</p><ul>')
+            parts.append(f'<p class="job">{e(job.heading)} - {e(job.dates)}</p><ul>')
             parts.extend(f"<li>{e(b)}</li>" for b in job.bullets)
             parts.append("</ul>")
     if resume.education:
@@ -149,20 +170,34 @@ def _resume_html(resume: RenderableResume) -> str:
     return "".join(parts)
 
 
-def render_pdf(resume: RenderableResume, path: Path) -> None:
-    # PyMuPDF is already a dependency (resume parsing); its Story API lays out
-    # simple HTML across pages, so no extra PDF library is needed.
+def _write_pdf(resume: RenderableResume, path: Path, css: str) -> int:
     import fitz
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    story = fitz.Story(html=_resume_html(resume), user_css=_CSS)
+    story = fitz.Story(html=_resume_html(resume), user_css=css)
     writer = fitz.DocumentWriter(str(path))
     page_rect = fitz.paper_rect("letter")
     content_rect = page_rect + (54, 54, -54, -54)
+    pages = 0
     more = True
     while more:
         device = writer.begin_page(page_rect)
         more, _ = story.place(content_rect)
         story.draw(device)
         writer.end_page()
+        pages += 1
     writer.close()
+    return pages
+
+
+def render_pdf(resume: RenderableResume, path: Path) -> int:
+    """
+    PyMuPDF is already a dependency (resume parsing); its Story API lays out
+    simple HTML across pages, so no extra PDF library is needed. Stays within
+    MAX_PAGES: if the first pass runs long it retries once with smaller type.
+    Returns the final page count (the caller reports it if still over).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pages = _write_pdf(resume, path, _CSS)
+    if pages > MAX_PAGES:
+        pages = _write_pdf(resume, path, _CSS.replace("10pt", "9pt").replace("18pt", "16pt"))
+    return pages

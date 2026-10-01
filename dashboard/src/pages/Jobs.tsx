@@ -156,10 +156,22 @@ function JobRow({ job }: { job: JobOut }) {
                   href={documentDownloadUrl(d.id)}
                   className="mr-2 font-medium text-brand-600 hover:text-brand-700"
                 >
-                  {d.format.toUpperCase()}
+                  {d.document_type === "changelog" ? "Changelog" : d.format.toUpperCase()}
                 </a>
               ))}
             </span>
+          )}
+          {tailorMutation.data && tailorMutation.data.changelog.length > 0 && (
+            <details className="mt-1">
+              <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-700">
+                Changelog and gaps ({tailorMutation.data.changelog.length})
+              </summary>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                {tailorMutation.data.changelog.map((note, i) => (
+                  <li key={i}>{note}</li>
+                ))}
+              </ul>
+            </details>
           )}
           {tailorMutation.data?.used_original_wording && (
             <p className="mt-1 text-amber-600">

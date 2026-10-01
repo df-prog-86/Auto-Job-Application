@@ -20,6 +20,12 @@ from dataclasses import dataclass
 from app.services.llm.schemas import TailoredResumeContent
 
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?%?")
+_WORD = re.compile(r"[a-z0-9]+")
+
+# Soft rephrase: a bullet must keep most of the words of the claim(s) it cites.
+# Anything rewritten more heavily than this is rejected and the retry/fallback
+# path keeps the candidate's own wording.
+MIN_WORDS_KEPT = 0.6
 
 
 @dataclass(frozen=True)
@@ -56,7 +62,9 @@ def validate_content(
     if content.summary:
         if not content.summary_source_claim_ids:
             problems.append("summary cites no claims")
-        problems.extend(_check_text(content.summary, content.summary_source_claim_ids, claims_by_id, "summary"))
+        problems.extend(
+            _check_text(content.summary, content.summary_source_claim_ids, claims_by_id, "summary", closeness=False)
+        )
 
     seen_employment: set[int] = set()
     for exp in content.experience:
@@ -89,7 +97,13 @@ def validate_content(
     return problems
 
 
-def _check_text(text: str, claim_ids: list[int], claims_by_id: dict[int, ClaimRef], label: str) -> list[str]:
+def _words(text: str) -> set[str]:
+    return set(_WORD.findall(text.lower()))
+
+
+def _check_text(
+    text: str, claim_ids: list[int], claims_by_id: dict[int, ClaimRef], label: str, closeness: bool = True
+) -> list[str]:
     problems: list[str] = []
     missing = [cid for cid in claim_ids if cid not in claims_by_id]
     if missing:
@@ -102,6 +116,14 @@ def _check_text(text: str, claim_ids: list[int], claims_by_id: dict[int, ClaimRe
     introduced = _numbers(text) - allowed_numbers
     if introduced:
         problems.append(f"{label} introduces numbers not in its cited claims: {sorted(introduced)}")
+
+    claim_words: set[str] = set()
+    for cid in claim_ids:
+        claim_words |= _words(claims_by_id[cid].text)
+    if closeness and claim_words:
+        kept = len(claim_words & _words(text)) / len(claim_words)
+        if kept < MIN_WORDS_KEPT:
+            problems.append(f"{label} rewords its cited claims too heavily (keeps {kept:.0%} of their words)")
     return problems
 
 

@@ -38,3 +38,13 @@ def save_master(data: bytes) -> Path:
         if os.path.exists(tmp):
             os.unlink(tmp)
     return directory / MASTER_NAME
+
+
+def master_status() -> dict:
+    """Whether a master is saved and when it was last replaced (for the Profile page)."""
+    import datetime as dt
+
+    path = master_path()
+    if path is None:
+        return {"saved": False, "updated_at": None}
+    return {"saved": True, "updated_at": dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc).isoformat()}

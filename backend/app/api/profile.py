@@ -18,7 +18,7 @@ from app.schemas.profile import (
 )
 from app.services.llm.exceptions import LLMNotConfiguredError, StructuredOutputError
 from app.services.onboarding.pipeline import ResumeValidationError, parse_resume
-from app.services.resume.master import save_master
+from app.services.resume.master import master_status, save_master
 
 router = APIRouter(prefix="/api/v1/profile", tags=["profile"])
 
@@ -51,6 +51,11 @@ async def parse_resume_endpoint(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Couldn't extract structured data from this resume after retrying: {exc}",
         ) from exc
+
+
+@router.get("/master")
+def get_master_status() -> dict:
+    return master_status()
 
 
 @router.post("/commit", response_model=ProfileOut)

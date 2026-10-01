@@ -115,6 +115,7 @@ export const api = {
   addJobByUrl: (payload: ManualJobInput) =>
     request<JobOut>("/jobs/manual", { method: "POST", body: JSON.stringify(payload) }),
   requalifyJob: (id: number) => request<JobOut>(`/jobs/${id}/qualify`, { method: "POST" }),
+  masterStatus: () => request<{ saved: boolean; updated_at: string | null }>("/profile/master"),
   tailorResume: (id: number) =>
     request<TailorResumeOut>(`/jobs/${id}/tailor`, { method: "POST" }),
   proceedWithApplication: (id: number) =>

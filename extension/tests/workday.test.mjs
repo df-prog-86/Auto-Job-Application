@@ -73,3 +73,23 @@ test("questionnaire dropdowns are read from their legend: work authorization ans
   assert.ok(report.flagged.some((f) => f.label.startsWith("Will you authorize such an investigation")));
   await page.close();
 });
+
+test("voluntary disclosures: left alone unless chosen, then matched to Workday's exact wording", async () => {
+  let r = await run();
+  for (const id of ["gen", "rac", "vet"]) assert.equal(await r.page.$eval(`#${id}`, (b) => b.textContent), "Select One");
+  await r.page.close();
+  r = await run(ctx({ eeo_gender: "male", eeo_race: "hispanic", eeo_veteran: "not_protected" }));
+  assert.equal(await r.page.$eval("#gen", (b) => b.textContent), "Male");
+  assert.equal(await r.page.$eval("#rac", (b) => b.textContent), "Hispanic or Latino (United States of America)");
+  assert.equal(await r.page.$eval("#vet", (b) => b.textContent), "o I am not a protected veteran in any of the categories above.");
+  await r.page.close();
+  r = await run(ctx({ eeo_gender: "decline", eeo_race: "decline", eeo_veteran: "decline" }));
+  assert.equal(await r.page.$eval("#gen", (b) => b.textContent), "Prefer Not to Identify");
+  assert.equal(await r.page.$eval("#rac", (b) => b.textContent), "Prefer Not to Identify (United States of America)");
+  assert.equal(await r.page.$eval("#vet", (b) => b.textContent), "o I choose not to self-identity as a protected veteran.");
+  await r.page.close();
+  r = await run(ctx({ eeo_race: "asian", eeo_veteran: "protected" }));
+  assert.equal(await r.page.$eval("#rac", (b) => b.textContent), "Asian (Not Hispanic or Latino) (United States of America)");
+  assert.equal(await r.page.$eval("#vet", (b) => b.textContent), "o I identify as one or more of the classifications of protected veterans listed above.");
+  await r.page.close();
+});

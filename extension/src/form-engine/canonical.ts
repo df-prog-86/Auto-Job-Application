@@ -325,7 +325,7 @@ export function resolveVoluntary(topic: VoluntaryTopic, answers: Record<string, 
     const v = saved("eeo_veteran");
     if (!v) return null;
     if (v === "decline") return only(options, DECLINE);
-    if (v === "not_protected") return only(options, /\bnot\b.*\bveteran\b|\bnon-?veteran\b|\bi am not\b/i);
+    if (v === "not_protected") return only(options, /\bi am not\b|\bnot an? (protected )?veteran\b|\bnon-?veteran\b/i);
     return only(options, /identify as one or more|\b(am|is) a (protected )?veteran\b|^yes\b/i);
   }
   if (topic === "hispanic") {
@@ -337,7 +337,7 @@ export function resolveVoluntary(topic: VoluntaryTopic, answers: Record<string, 
     if (!race) return null;
     if (race === "decline") return only(options, DECLINE);
     const patterns: Record<string, RegExp> = {
-      hispanic: /hispanic|latino/i,
+      hispanic: /^hispanic|^latino/i,
       white: /^white/i,
       black: /black|african american/i,
       pacific: /pacific|hawaiian/i,

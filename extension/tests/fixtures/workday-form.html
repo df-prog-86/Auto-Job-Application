@@ -19,6 +19,12 @@
     <button id="q1" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label=" Select One Required">Select One</button></fieldset></div>
   <div data-automation-id="formField-q2"><fieldset><legend><b>Will you authorize such an investigation?<abbr title="required">*</abbr></b></legend>
     <button id="q2" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label=" Select One Required">Select One</button></fieldset></div>
+  <div data-automation-id="formField-gen"><fieldset><legend><b>Gender</b></legend>
+    <button id="gen" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label=" Select One Required">Select One</button></fieldset></div>
+  <div data-automation-id="formField-rac"><fieldset><legend><b>Race</b></legend>
+    <button id="rac" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label=" Select One Required">Select One</button></fieldset></div>
+  <div data-automation-id="formField-vet"><fieldset><legend><b>Veteran Status</b></legend>
+    <button id="vet" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label=" Select One Required">Select One</button></fieldset></div>
   <div class="footer"><button type="button" data-automation-id="pageFooterNextButton" id="next">Save and Continue</button></div>
 </form>
 <ul role="listbox" id="pop" hidden></ul>
@@ -30,6 +36,9 @@
     pdt: ['Home', 'Mobile', 'Work'],
     cpc: ['Afghanistan (+93)', 'United Kingdom (+44)', 'United States of America (+1)'],
     st: ['Massachusetts', 'New York'],
+    gen: ['Select One','Female','Male','Prefer Not to Identify'],
+    rac: ['Select One','American Indian or Alaska Native (Not Hispanic or Latino) (United States of America)','Asian (Not Hispanic or Latino) (United States of America)','Black or African American (Not Hispanic or Latino) (United States of America)','Hispanic or Latino (United States of America)','Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino) (United States of America)','Prefer Not to Identify (United States of America)','Two or More Races (Not Hispanic or Latino) (United States of America)','White (Not Hispanic or Latino) (United States of America)'],
+    vet: ['Select One','o I identify as one or more of the classifications of protected veterans listed above.','o I am not a protected veteran in any of the categories above.','o I choose not to self-identity as a protected veteran.'],
     q1: ['Yes', 'No'],
     q2: ['Yes', 'No'],
   };

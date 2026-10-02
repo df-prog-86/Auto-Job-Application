@@ -34,6 +34,8 @@ export async function fillPage(
   const report: FillReport = { filled: [], flagged: [], leftBlank: 0, alreadyFilled: 0, voluntarySkipped: 0 };
 
   const fields = discoverFields(doc);
+  // The federal disability form (CC-305) is signed by the person: its name and date are never filled.
+  const disabilityForm = /self-identification of disability/i.test(doc.body?.innerText ?? "");
   for (const [index, field] of fields.entries()) {
     // A bare "Country" box sitting right before the phone box is the phone's country code.
     const next = fields[index + 1];
@@ -49,6 +51,12 @@ export async function fillPage(
       inputType: field.inputType,
     };
     const cls: Classification = classifyField(sig);
+
+    if (disabilityForm && field.kind !== "dropdown" && currentValue(field) === "") {
+      if (field.required) flag(report, field);
+      else report.leftBlank++;
+      continue;
+    }
 
     if (cls.kind === "voluntary") {
       // Only ever answered from what the person chose on their Profile; otherwise left alone.

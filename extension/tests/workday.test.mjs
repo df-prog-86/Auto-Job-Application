@@ -93,3 +93,16 @@ test("voluntary disclosures: left alone unless chosen, then matched to Workday's
   assert.equal(await r.page.$eval("#vet", (b) => b.textContent), "o I identify as one or more of the classifications of protected veterans listed above.");
   await r.page.close();
 });
+
+test("the federal disability form: name, date and boxes are left for the person", async () => {
+  const page = await browser.newPage();
+  await page.goto(pathToFileURL(resolve(here, "fixtures/workday-disability.html")).href);
+  await page.evaluate(bundle);
+  const report = await page.evaluate(([x, r]) => window.__jobAgentFill(x, r), [ctx(), resume]);
+  assert.equal(await page.$eval("#nm", (el) => el.value), "");
+  assert.equal(await page.$eval("#dt", (el) => el.value), "");
+  assert.equal(await page.$$eval("input[type=checkbox]:checked", (n) => n.length), 0);
+  assert.ok(report.flagged.some((f) => f.label === "Name"));
+  assert.ok(report.flagged.some((f) => f.label === "Date"));
+  await page.close();
+});

@@ -37,4 +37,7 @@ export interface FillReport {
   alreadyFilled: number;
   /** Voluntary self-identification questions, never touched. */
   voluntarySkipped: number;
+  /** Workday only: pages moved past automatically, and why it stopped. */
+  pagesAdvanced?: number;
+  stoppedBecause?: string;
 }

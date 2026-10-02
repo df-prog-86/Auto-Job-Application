@@ -66,4 +66,6 @@ export interface FillPageResult {
   leftBlank?: number;
   alreadyFilled?: number;
   voluntarySkipped?: number;
+  pagesAdvanced?: number;
+  stoppedBecause?: string;
 }

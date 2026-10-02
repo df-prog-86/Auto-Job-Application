@@ -106,3 +106,44 @@ test("the federal disability form: name, date and boxes are left for the person"
   assert.ok(report.flagged.some((f) => f.label === "Date"));
   await page.close();
 });
+
+const flowUrl = "https://test.myworkdayjobs.com/flow";
+async function runFlow(page, c = ctx()) {
+  const html = (await import("node:fs")).readFileSync(resolve(here, "fixtures/workday-flow.html"), "utf8");
+  await page.route("https://test.myworkdayjobs.com/**", (route) => route.fulfill({ contentType: "text/html", body: html }));
+  await page.goto(`${flowUrl}${page.__start ?? ""}`);
+  await page.evaluate(bundle);
+  return page.evaluate(([x, r]) => window.__jobAgentFill(x, r), [c, resume]);
+}
+
+test("Workday: moves past a finished page, then stops at the page that needs a tick", async () => {
+  const page = await browser.newPage();
+  const report = await runFlow(page);
+  assert.equal(await page.$eval("h2", (h) => h.textContent), "Voluntary Disclosures");
+  assert.equal(report.pagesAdvanced, 1);
+  assert.match(report.stoppedBecause, /consent|tick|needs you/i);
+  assert.deepEqual(await page.evaluate(() => window.__clicks), ["Save and Continue"]);
+  assert.equal(await page.$eval("#agree", (el) => el.checked), false, "consent is never ticked");
+  await page.close();
+});
+
+test("Workday: a page with a missing required answer is not advanced", async () => {
+  const c = ctx(); c.candidate.last_name = "";
+  const page = await browser.newPage();
+  const report = await runFlow(page, c);
+  assert.equal(report.pagesAdvanced, 0);
+  assert.deepEqual(await page.evaluate(() => window.__clicks), []);
+  assert.equal(await page.$eval("h2", (h) => h.textContent), "My Information");
+  await page.close();
+});
+
+test("Workday: the Review page and its Submit button are never pressed", async () => {
+  const page = await browser.newPage();
+  page.__start = "?page=review";
+  const report = await runFlow(page);
+  assert.equal(report.pagesAdvanced, 0);
+  assert.deepEqual(await page.evaluate(() => window.__clicks), []);
+  assert.equal(await page.evaluate(() => window.__submits), 0);
+  assert.match(report.stoppedBecause, /last step|Review/i);
+  await page.close();
+});

@@ -1,0 +1,25 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Workday flow</title></head><body>
+<div id="root"></div>
+<script>
+  window.__clicks = []; window.__submits = 0;
+  const start = new URLSearchParams(location.search).get('page') || 'info';
+  const pages = {
+    info: { h: 'My Information', next: 'Save and Continue', html: `
+      <div data-automation-id="formField-a"><label for="fn">First Name<abbr>*</abbr></label><input id="fn" type="text" aria-required="true"></div>
+      <div data-automation-id="formField-b"><label for="ln">Last Name<abbr>*</abbr></label><input id="ln" type="text" aria-required="true"></div>`, to: 'terms' },
+    terms: { h: 'Voluntary Disclosures', next: 'Save and Continue', html: `
+      <div data-automation-id="formField-c"><label><input type="checkbox" id="agree" aria-required="true"> Yes, I have read and consent to the terms and conditions<abbr>*</abbr></label></div>`, to: 'review' },
+    review: { h: 'Review', next: 'Submit', html: '<p>Check everything.</p>', to: null },
+  };
+  function show(name) {
+    const p = pages[name];
+    document.getElementById('root').innerHTML = '<h2>' + p.h + '</h2>' + p.html +
+      '<div data-automation-id="pageFooter"><button type="button" data-automation-id="pageFooterBackButton">Back</button>' +
+      '<button type="button" data-automation-id="pageFooterNextButton" id="next">' + p.next + '</button></div>';
+    document.getElementById('next').addEventListener('click', () => {
+      window.__clicks.push(p.next);
+      if (p.to) setTimeout(() => show(p.to), 150); else window.__submits++;
+    });
+  }
+  show(start);
+</script></body></html>

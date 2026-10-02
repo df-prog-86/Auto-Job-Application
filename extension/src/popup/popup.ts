@@ -159,6 +159,8 @@ async function init(): Promise<void> {
     if (result.flagged && result.flagged.length > 0) {
       lines.push(`${result.flagged.length} need you: ${result.flagged.join("; ")}. They're on Needs Attention too.`);
     }
+    if (result.pagesAdvanced) lines.push(`Moved ahead ${result.pagesAdvanced} page${result.pagesAdvanced === 1 ? "" : "s"}.`);
+    if (result.stoppedBecause) lines.push(`Stopped: ${result.stoppedBecause}`);
     if (result.voluntarySkipped) lines.push(`Left ${result.voluntarySkipped} self-identification questions for you.`);
     lines.push("Check everything, then submit it yourself.");
     out.textContent = lines.join(" ");

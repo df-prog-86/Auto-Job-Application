@@ -93,6 +93,8 @@ async function fillApplicationPage(tabId: number, jobId?: number): Promise<FillP
     leftBlank: report.leftBlank,
     alreadyFilled: report.alreadyFilled,
     voluntarySkipped: report.voluntarySkipped,
+    pagesAdvanced: report.pagesAdvanced,
+    stoppedBecause: report.stoppedBecause,
   };
 }
 
@@ -154,7 +156,9 @@ async function completeApplication(jobId: number, url: string): Promise<void> {
     const n = result.flagged?.length ?? 0;
     notify(
       "Application filled, not submitted",
-      n > 0 ? `${n} field${n === 1 ? "" : "s"} need you. Review the page, then submit it yourself.` : "Review the page, then submit it yourself.",
+      result.stoppedBecause
+        ? `Moved ahead ${result.pagesAdvanced ?? 0} page${result.pagesAdvanced === 1 ? "" : "s"}. Stopped: ${result.stoppedBecause}`
+        : n > 0 ? `${n} field${n === 1 ? "" : "s"} need you. Review the page, then submit it yourself.` : "Review the page, then submit it yourself.",
     );
   }
 }

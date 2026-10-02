@@ -15,7 +15,7 @@ let bundle;
 
 const ctx = (answers = {}) => ({
   candidate: { first_name: "Jane", last_name: "Doe", full_name: "Jane Doe", email: "jane@example.com", phone: "555-0100", location: "Boston, MA" },
-  answers: { phone_country: "United States (+1)", ...answers },
+  answers: { phone_country: "United States (+1)", work_authorization: "US citizen", ...answers },
   learned_answers: {},
 });
 const resume = { base64: Buffer.from("fake docx").toString("base64"), filename: "Jane Doe_Resume.docx" };
@@ -63,5 +63,13 @@ test("a missing phone code answer leaves that dropdown for the person", async ()
   const c = ctx(); delete c.answers.phone_country;
   const { page } = await run(c);
   assert.equal(await page.$eval("#cpc", (b) => b.textContent), "Select One");
+  await page.close();
+});
+
+test("questionnaire dropdowns are read from their legend: work authorization answered, background check consent never", async () => {
+  const { page, report } = await run();
+  assert.equal(await page.$eval("#q1", (b) => b.textContent), "Yes");
+  assert.equal(await page.$eval("#q2", (b) => b.textContent), "Select One", "consenting to an investigation is the person's own choice");
+  assert.ok(report.flagged.some((f) => f.label.startsWith("Will you authorize such an investigation")));
   await page.close();
 });

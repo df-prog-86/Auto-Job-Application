@@ -13,7 +13,12 @@
   <div><label for="ph">Phone Number<abbr title="required">*</abbr></label><input id="ph" type="tel" data-automation-id="phone-number" aria-required="true"></div>
   <div><label id="stl" for="st">State<abbr title="required">*</abbr></label>
     <button id="st" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="State Select One Required" data-automation-id="addressSection_countryRegion">Select One</button></div>
-  <div data-automation-id="resumeSection"><input type="file" id="rf" data-automation-id="file-upload-input-ref"></div>
+  <h2>Resume/CV</h2>
+  <div><div data-automation-id="attachments-FileUpload"><input type="file" id="rf" data-automation-id="file-upload-input-ref"></div></div>
+  <div data-automation-id="formField-q1"><fieldset><legend><b>Are you authorized to work legally in the United States?<abbr title="required">*</abbr></b></legend>
+    <button id="q1" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label=" Select One Required">Select One</button></fieldset></div>
+  <div data-automation-id="formField-q2"><fieldset><legend><b>Will you authorize such an investigation?<abbr title="required">*</abbr></b></legend>
+    <button id="q2" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label=" Select One Required">Select One</button></fieldset></div>
   <div class="footer"><button type="button" data-automation-id="pageFooterNextButton" id="next">Save and Continue</button></div>
 </form>
 <ul role="listbox" id="pop" hidden></ul>
@@ -25,6 +30,8 @@
     pdt: ['Home', 'Mobile', 'Work'],
     cpc: ['Afghanistan (+93)', 'United Kingdom (+44)', 'United States of America (+1)'],
     st: ['Massachusetts', 'New York'],
+    q1: ['Yes', 'No'],
+    q2: ['Yes', 'No'],
   };
   const pop = document.getElementById('pop'); let open = null;
   function close() { if (open) open.setAttribute('aria-expanded', 'false'); pop.hidden = true; pop.innerHTML = ''; open = null; }

@@ -45,8 +45,11 @@ export function currentValue(field: FormField): string {
       const text = (field.el.textContent ?? "").replace(/\s+/g, " ").trim();
       return /^select one$/i.test(text) ? "" : text;
     }
-    case "file":
-      return ((field.el as HTMLInputElement).files?.length ?? 0) > 0 ? "file" : "";
+    case "file": {
+      if ((field.el as HTMLInputElement).files?.length) return "file";
+      // Workday clears the box once a file is accepted and shows "Successfully Uploaded" instead.
+      return field.el.closest("[data-automation-id='attachments-FileUpload']")?.parentElement?.querySelector("[data-automation-id='file-upload-successful']") ? "file" : "";
+    }
     default:
       return "";
   }
@@ -186,6 +189,12 @@ async function fillCombobox(el: HTMLInputElement, value: string, hints: Combobox
   await sleep(150);
   // typeText narrows a long list ("United States") while the exact entry ("United States +1") is what gets picked.
   setNativeValue(el, hints.typeText ?? value);
+  // Workday's search boxes list their matches only after Enter.
+  if (el.getAttribute("data-uxi-widget-type") === "selectinput") {
+    for (const type of ["keydown", "keypress", "keyup"]) {
+      el.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", keyCode: 13, bubbles: true }));
+    }
+  }
   const wanted = normalizeQuestion(value);
   const exactSet = new Set([wanted, ...(hints.alternates ?? []).map(normalizeQuestion)]);
   // Place lists load over the network, so give them a few seconds.

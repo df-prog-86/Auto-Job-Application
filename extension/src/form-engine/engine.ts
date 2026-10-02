@@ -18,7 +18,7 @@ import { clearMarks, mark, showBanner } from "@/form-engine/highlight";
 import type { ApplyContext, FillReport } from "@/form-engine/types";
 
 /** Questions that grant consent or accept terms are never answered for the candidate. */
-const CONSENT = /\b(terms|privacy|agree|agreement|consent|acknowledg\w*|certif\w*|authori[sz]e us|policy)\b/i;
+const CONSENT = /\b(terms|privacy|agree|agreement|consent|acknowledg\w*|certif\w*|authori[sz]e us|authori[sz]e such|investigation|background check|policy)\b/i;
 
 export interface ResumePayload {
   base64: string;

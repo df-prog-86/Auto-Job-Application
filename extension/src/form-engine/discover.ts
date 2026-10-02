@@ -179,10 +179,17 @@ export function discoverFields(doc: Document): FormField[] {
     let label = clean(raw);
     // A hidden upload input is often unlabeled; its id/name ("resume") still says what it is.
     if (!label && inputType === "file" && el.closest("[data-automation-id*='resume' i]")) label = "Resume";
+    // Workday's upload box has no label of its own; the section heading above it ("Resume/CV") names it.
+    if (!label && inputType === "file" && el.getAttribute("data-automation-id") === "file-upload-input-ref") {
+      const heads = Array.from(doc.querySelectorAll("h2, h3, h4")).filter(
+        (h) => h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+      label = clean(heads[heads.length - 1]?.textContent);
+    }
     if (!label && inputType === "file") label = clean(`${name} ${el.id}`.replace(/[_-]+/g, " ")) || "File upload";
     if (!label) continue; // unlabeled controls (search boxes, country pickers) are not questions
 
-    const isCombobox = el.getAttribute("role") === "combobox" && tag === "input";
+    const isCombobox = tag === "input" && (el.getAttribute("role") === "combobox" || el.getAttribute("data-uxi-widget-type") === "selectinput");
     let kind: FieldKind = "text";
     let options: string[] = [];
     if (inputType === "file") kind = "file";
@@ -255,6 +262,8 @@ export function discoverFields(doc: Document): FormField[] {
     let label = clean(raw).replace(/\s*required\s*$/i, "").trim();
     if (shown) label = label.replace(new RegExp(`\\s*${shown.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i"), "");
     label = label.replace(/\s*select one\s*$/i, "").trim();
+    // Questionnaire dropdowns carry only "Select One Required"; the question itself is the fieldset's legend.
+    if (!label) label = clean(btn.closest("fieldset")?.querySelector("legend")?.textContent);
     if (!label) continue;
     fields.push({
       kind: "dropdown",

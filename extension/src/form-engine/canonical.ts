@@ -22,9 +22,11 @@ export type CanonicalKey =
   | "sponsorship"
   | "security_clearance";
 
+export type VoluntaryTopic = "gender" | "race" | "hispanic" | "veteran" | "other";
+
 export type Classification =
   | { kind: "canonical"; key: CanonicalKey }
-  | { kind: "voluntary" }
+  | { kind: "voluntary"; topic: VoluntaryTopic }
   | { kind: "unknown" };
 
 export interface FieldSignature {
@@ -48,12 +50,22 @@ export function normalizeQuestion(label: string): string {
 const VOLUNTARY =
   /\b(gender|race|ethnic\w*|hispanic|latino|latinx|veteran|disabilit\w*|sexual orientation|lgbt\w*|transgender|self[- ]identif\w*|protected class|pronouns?)\b/i;
 
+function voluntaryTopic(label: string): VoluntaryTopic {
+  if (/transgender|sexual orientation|lgbt|pronoun|disabilit|protected class/.test(label)) return "other";
+  if (/\bveteran\b/.test(label)) return "veteran";
+  if (/\brace\b/.test(label)) return "race";
+  if (/hispanic|latino|latinx/.test(label)) return "hispanic";
+  if (/ethnic/.test(label)) return "race";
+  if (/\bgender\b/.test(label)) return "gender";
+  return "other";
+}
+
 export function classifyField(sig: FieldSignature): Classification {
   const label = sig.label.toLowerCase();
   const attrs = `${sig.name} ${sig.id}`.toLowerCase();
   const text = `${label} ${attrs}`;
 
-  if (VOLUNTARY.test(label)) return { kind: "voluntary" };
+  if (VOLUNTARY.test(label)) return { kind: "voluntary", topic: voluntaryTopic(label) };
 
   switch (sig.autocomplete) {
     case "given-name":
@@ -262,6 +274,64 @@ export function resolveValue(
       return options.find((o) => normalizeQuestion(o) === normalizeQuestion(level)) ?? null;
     }
   }
+}
+
+const DECLINE = /decline|prefer not|do not wish|don't wish|choose not|not to (say|answer|disclose)/i;
+
+function only(options: string[], test: RegExp): string | null {
+  const hits = options.filter((o) => test.test(o));
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/**
+ * The choice on a voluntary self-identification question that matches what the
+ * person saved on their Profile, or null when nothing was saved, they chose to
+ * skip it, or the form's wording does not clearly match (never guessed).
+ * Saved codes: gender male|female|decline; race hispanic|white|black|pacific|
+ * asian|native|two_or_more|decline; veteran protected|not_protected|decline.
+ */
+export function resolveVoluntary(topic: VoluntaryTopic, answers: Record<string, unknown>, options: string[]): string | null {
+  if (options.length === 0) return null;
+  const saved = (key: string) => {
+    const v = answers[key];
+    return typeof v === "string" && v && v !== "skip" ? v : null;
+  };
+  const race = saved("eeo_race");
+
+  if (topic === "gender") {
+    const g = saved("eeo_gender");
+    if (!g) return null;
+    if (g === "decline") return only(options, DECLINE);
+    return only(options, g === "male" ? /^(male|man)$/i : /^(female|woman)$/i);
+  }
+  if (topic === "veteran") {
+    const v = saved("eeo_veteran");
+    if (!v) return null;
+    if (v === "decline") return only(options, DECLINE);
+    if (v === "not_protected") return only(options, /\bnot\b.*\bveteran\b|\bnon-?veteran\b|\bi am not\b/i);
+    return only(options, /identify as one or more|\b(am|is) a (protected )?veteran\b|^yes\b/i);
+  }
+  if (topic === "hispanic") {
+    if (!race) return null;
+    if (race === "decline") return only(options, DECLINE);
+    return yesNo(options, race === "hispanic");
+  }
+  if (topic === "race") {
+    if (!race) return null;
+    if (race === "decline") return only(options, DECLINE);
+    const patterns: Record<string, RegExp> = {
+      hispanic: /hispanic|latino/i,
+      white: /^white/i,
+      black: /black|african american/i,
+      pacific: /pacific|hawaiian/i,
+      asian: /^asian/i,
+      native: /american indian|alaska/i,
+      two_or_more: /two or more|multiracial|more than one/i,
+    };
+    const pattern = patterns[race];
+    return pattern ? only(options, pattern) : null;
+  }
+  return null;
 }
 
 /** The candidate's own saved answer for this exact question, if they gave one. */

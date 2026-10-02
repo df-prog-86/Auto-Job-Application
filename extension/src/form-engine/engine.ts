@@ -8,7 +8,7 @@
  *   4. Never touch voluntary self-identification questions.
  */
 
-import { classifyField, expandLocation, learnedAnswer, normalizeQuestion, phoneCountryName, resolveValue } from "@/form-engine/canonical";
+import { classifyField, expandLocation, learnedAnswer, normalizeQuestion, phoneCountryName, resolveValue, resolveVoluntary } from "@/form-engine/canonical";
 import type { Classification } from "@/form-engine/canonical";
 import { discoverFields } from "@/form-engine/discover";
 import type { FormField } from "@/form-engine/discover";
@@ -51,6 +51,17 @@ export async function fillPage(
     const cls: Classification = classifyField(sig);
 
     if (cls.kind === "voluntary") {
+      // Only ever answered from what the person chose on their Profile; otherwise left alone.
+      const known = ["gender", "race", "hispanic", "veteran"].includes(cls.topic);
+      if (known && field.kind !== "checkbox" && currentValue(field) === "") {
+        let choices = field.options;
+        if (field.kind === "combobox") choices = await readComboboxOptions(field.el as HTMLInputElement);
+        const pick = resolveVoluntary(cls.topic, ctx.answers, choices);
+        if (pick && (await fillField(field, pick))) {
+          done(report, field);
+          continue;
+        }
+      }
       report.voluntarySkipped++;
       continue;
     }

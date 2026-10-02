@@ -62,11 +62,11 @@ test("fills an Ashby form: text fields, recent role, location, Yes/No buttons, r
 test("pressing Yes/No never submits the form, and nothing else is touched", async () => {
   const { page, report } = await run();
   assert.equal(await page.evaluate(() => window.__submitted), 0);
-  assert.equal(await page.$$eval("input[name=pron]:checked, input[name=gender]:checked", (n) => n.length), 0);
+  assert.equal(await page.$$eval("input[name=pron]:checked, input[name=gender]:checked, input[name=race]:checked, input[name=vet]:checked", (n) => n.length), 0);
   assert.equal(await page.$eval("#q-employed button[data-option=yes]", (b) => b.getAttribute("aria-pressed")), "false");
   assert.equal(await page.$eval("#q-employed button[data-option=no]", (b) => b.getAttribute("aria-pressed")), "false");
   assert.ok(report.flagged.some((f) => f.label.startsWith("Have you ever been employed")), "unknown required question is flagged");
-  assert.ok(report.voluntarySkipped >= 2, "pronouns and gender are voluntary");
+  assert.ok(report.voluntarySkipped >= 4, "pronouns, gender, race and veteran are voluntary");
   // Agreeing to terms is never done for the person, even when it is a Yes/No button, and it is flagged instead.
   const terms = await page.$$eval("#q-terms button", (bs) => bs.map((b) => b.getAttribute("aria-pressed")));
   assert.deepEqual(terms, ["false", "false"]);
@@ -80,4 +80,27 @@ test("a missing sponsorship answer leaves that question for the person", async (
   assert.equal(await page.$eval("#q-sponsor button[data-option=no]", (b) => b.getAttribute("aria-pressed")), "false");
   assert.ok(report.flagged.some((f) => f.label.startsWith("Will you now or in the future")));
   await page.close();
+});
+
+const checkedLabel = (page, name) => page.$eval(`input[name=${name}]:checked`, (el) => document.querySelector(`label[for="${el.id}"]`).textContent.trim()).catch(() => null);
+
+test("saved gender, race and veteran choices are filled; pronouns stay untouched", async () => {
+  const { page } = await run(ctx({ eeo_gender: "male", eeo_race: "asian", eeo_veteran: "not_protected" }));
+  assert.equal(await checkedLabel(page, "gender"), "Male");
+  assert.equal(await checkedLabel(page, "race"), "Asian (Not Hispanic or Latino)");
+  assert.equal(await checkedLabel(page, "vet"), "I am not a protected veteran");
+  assert.equal(await page.$$eval("input[name=pron]:checked", (n) => n.length), 0);
+  assert.equal(await page.evaluate(() => window.__submitted), 0);
+  await page.close();
+});
+
+test("decline choices are filled, and skip leaves the fields alone", async () => {
+  let r = await run(ctx({ eeo_gender: "decline", eeo_race: "decline", eeo_veteran: "decline" }));
+  assert.equal(await checkedLabel(r.page, "gender"), "Decline to self-identify");
+  assert.equal(await checkedLabel(r.page, "race"), "Decline to self-identify");
+  assert.equal(await checkedLabel(r.page, "vet"), "I decline to self-identify for protected veteran status");
+  await r.page.close();
+  r = await run(ctx({ eeo_gender: "skip", eeo_race: "skip", eeo_veteran: "skip" }));
+  assert.equal(await r.page.$$eval("input[name=gender]:checked, input[name=race]:checked, input[name=vet]:checked", (n) => n.length), 0);
+  await r.page.close();
 });

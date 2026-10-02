@@ -30,7 +30,16 @@ from app.services.apply.questions import normalize_question, urls_match
 
 router = APIRouter(prefix="/api/v1/apply", tags=["apply"], dependencies=[Depends(require_extension_auth)])
 
-ELIGIBILITY_KEYS = ("work_authorization", "sponsorship_required", "security_clearance", "phone_country")
+ELIGIBILITY_KEYS = (
+    "work_authorization",
+    "sponsorship_required",
+    "security_clearance",
+    "phone_country",
+    # Voluntary self-identification: only present if the person chose an answer on their Profile.
+    "eeo_gender",
+    "eeo_race",
+    "eeo_veteran",
+)
 
 
 def _apply_job(job: Job) -> ApplyJob:

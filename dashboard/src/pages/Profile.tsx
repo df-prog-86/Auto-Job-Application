@@ -41,6 +41,30 @@ const PHONE_COUNTRY_OPTIONS = [
   "Mexico (+52)",
   "Philippines (+63)",
 ].map((o) => ({ value: o, label: o }));
+const SKIP = { value: "skip", label: "Don't fill this in" };
+const GENDER_OPTIONS = [
+  { value: "male", label: "Male" },
+  { value: "female", label: "Female" },
+  { value: "decline", label: "Decline to self-identify" },
+  SKIP,
+];
+const RACE_OPTIONS = [
+  { value: "hispanic", label: "Hispanic or Latino" },
+  { value: "white", label: "White (Not Hispanic or Latino)" },
+  { value: "black", label: "Black or African American (Not Hispanic or Latino)" },
+  { value: "pacific", label: "Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)" },
+  { value: "asian", label: "Asian (Not Hispanic or Latino)" },
+  { value: "native", label: "American Indian or Alaska Native (Not Hispanic or Latino)" },
+  { value: "two_or_more", label: "Two or More Races (Not Hispanic or Latino)" },
+  { value: "decline", label: "Decline to self-identify" },
+  SKIP,
+];
+const VETERAN_OPTIONS = [
+  { value: "protected", label: "I identify as one or more of the classifications of protected veteran" },
+  { value: "not_protected", label: "I am not a protected veteran" },
+  { value: "decline", label: "I decline to self-identify for protected veteran status" },
+  SKIP,
+];
 const SPONSORSHIP_OPTIONS = [
   { value: "no", label: "No" },
   { value: "yes", label: "Yes" },
@@ -225,6 +249,8 @@ export function Profile() {
 
       <EligibilityCard answers={answers} loading={answersQuery.isLoading} />
 
+      <SelfIdCard answers={answers} loading={answersQuery.isLoading} />
+
       <section>
         <SectionTitle
           title="Experience"
@@ -384,6 +410,49 @@ function EligibilityCard({ answers, loading }: { answers: AnswerOut[] | undefine
             value={(answerValue(answers, "security_clearance") as string | undefined) ?? ""}
             options={CLEARANCE_OPTIONS}
             onSave={(v) => save("security_clearance", "str", v)}
+          />
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function SelfIdCard({ answers, loading }: { answers: AnswerOut[] | undefined; loading: boolean }) {
+  const queryClient = useQueryClient();
+
+  const save = async (key: string, value: string) => {
+    await api.saveAnswer(key, { value_type: "str", value });
+    await queryClient.invalidateQueries({ queryKey: ["answers"] });
+  };
+
+  return (
+    <Card className="p-6">
+      <h2 className="text-base font-bold text-ink-900">Voluntary self-identification (optional)</h2>
+      <p className="mb-4 mt-1 text-xs text-ink-500">
+        Many applications ask these. They are only filled in if you choose an answer here, and they are saved only on
+        this computer. Leave one blank, or pick "Don't fill this in", and it stays yours to answer on each form.
+      </p>
+      {loading ? (
+        <p className="text-sm text-ink-400">Loading…</p>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <SelectField
+            label="Gender"
+            value={(answerValue(answers, "eeo_gender") as string | undefined) ?? ""}
+            options={GENDER_OPTIONS}
+            onSave={(v) => save("eeo_gender", v)}
+          />
+          <SelectField
+            label="Race"
+            value={(answerValue(answers, "eeo_race") as string | undefined) ?? ""}
+            options={RACE_OPTIONS}
+            onSave={(v) => save("eeo_race", v)}
+          />
+          <SelectField
+            label="Veteran status"
+            value={(answerValue(answers, "eeo_veteran") as string | undefined) ?? ""}
+            options={VETERAN_OPTIONS}
+            onSave={(v) => save("eeo_veteran", v)}
           />
         </div>
       )}

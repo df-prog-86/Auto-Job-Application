@@ -250,7 +250,11 @@ export function discoverFields(doc: Document): FormField[] {
   for (const btn of Array.from(doc.querySelectorAll<HTMLElement>("button[aria-haspopup='listbox']"))) {
     if (!isVisible(btn) || (btn as HTMLButtonElement).disabled) continue;
     const raw = rawLabel(btn, doc);
-    const label = clean(raw).replace(/\s*select one\s*$/i, "").trim();
+    // Workday's aria-label reads "State Select One Required" or "Country United States of America Required".
+    const shown = clean(btn.textContent);
+    let label = clean(raw).replace(/\s*required\s*$/i, "").trim();
+    if (shown) label = label.replace(new RegExp(`\\s*${shown.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i"), "");
+    label = label.replace(/\s*select one\s*$/i, "").trim();
     if (!label) continue;
     fields.push({
       kind: "dropdown",

@@ -26,8 +26,15 @@ export function currentValue(field: FormField): string {
   switch (field.kind) {
     case "text":
     case "textarea":
-    case "combobox":
-      return (field.el as HTMLInputElement).value.trim();
+    case "combobox": {
+      const input = field.el as HTMLInputElement;
+      // Workday search boxes keep the choice in a hidden note, not in the box itself.
+      if (input.getAttribute("data-uxi-widget-type") === "selectinput") {
+        const note = input.closest("[data-automation-id='multiSelectContainer']")?.querySelector("[data-automation-id='promptAriaInstruction']")?.textContent ?? "";
+        return /^\s*[1-9]\d* items? selected/i.test(note) ? "selected" : input.value.trim();
+      }
+      return input.value.trim();
+    }
     case "select":
       return (field.el as HTMLSelectElement).value.trim();
     case "radio":
@@ -184,7 +191,7 @@ async function fillCombobox(el: HTMLInputElement, value: string, hints: Combobox
   // Place lists load over the network, so give them a few seconds.
   for (let i = 0; i < 40; i++) {
     await sleep(125);
-    const options = Array.from(doc.querySelectorAll<HTMLElement>("[role='option']"));
+    const options = Array.from(doc.querySelectorAll<HTMLElement>("[role='option']:not([data-automation-id='selectedItem'])"));
     // An exact match wins. A partial match is used only when exactly one
     // option fits, so "Boston" is never silently resolved to the wrong Boston.
     const norm = (o: HTMLElement) => normalizeQuestion(o.textContent ?? "");

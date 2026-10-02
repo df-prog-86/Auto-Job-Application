@@ -42,6 +42,7 @@ test("fills a Workday page: names, email, phone code, resume, and never presses 
   assert.equal(await v("#ln"), "Doe");
   assert.equal(await v("#em"), "jane@example.com");
   assert.equal(await v("#ph"), "555-0100");
+  assert.equal(await v("#ct"), "Boston");
   assert.equal(await page.$eval("#cpc", (b) => b.textContent), "United States of America (+1)");
   assert.equal(await page.$eval("#rf", (el) => el.files[0]?.name), "Jane Doe_Resume.docx");
   assert.equal(await page.evaluate(() => window.__nextClicks), 0, "Save and Continue is never pressed");
@@ -50,11 +51,11 @@ test("fills a Workday page: names, email, phone code, resume, and never presses 
   await page.close();
 });
 
-test("dropdowns that cannot be answered for certain are left alone and flagged", async () => {
+test("State comes from the saved location; dropdowns that cannot be answered for certain are left alone and flagged", async () => {
   const { page, report } = await run();
-  assert.equal(await page.$eval("#st", (b) => b.textContent), "Select One");
+  assert.equal(await page.$eval("#st", (b) => b.textContent), "Massachusetts");
   assert.equal(await page.$eval("#pdt", (b) => b.textContent), "Select One");
-  assert.ok(report.flagged.some((f) => f.label.startsWith("State")), "required State is flagged");
+  assert.ok(report.flagged.some((f) => f.label.startsWith("Phone Device Type")), "required Phone Device Type is flagged");
   await page.close();
 });
 

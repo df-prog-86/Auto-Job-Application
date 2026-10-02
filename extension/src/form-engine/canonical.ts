@@ -16,6 +16,8 @@ export type CanonicalKey =
   | "email"
   | "phone"
   | "location"
+  | "city"
+  | "state"
   | "linkedin"
   | "resume"
   | "work_authorization"
@@ -103,6 +105,9 @@ export function classifyField(sig: FieldSignature): Classification {
   ) {
     return { kind: "canonical", key: "work_authorization" };
   }
+
+  if (/^\s*city\s*\*?\s*$/.test(label)) return { kind: "canonical", key: "city" };
+  if (/^\s*state(\s*\/\s*province)?\s*\*?\s*$/.test(label)) return { kind: "canonical", key: "state" };
 
   if (/linkedin/.test(text)) return { kind: "canonical", key: "linkedin" };
   if (/most recent (job )?title|current (job )?title|current position|present title/.test(label)) {
@@ -238,6 +243,18 @@ export function resolveValue(
       return c.email || null;
     case "phone":
       return c.phone || null;
+    case "city": {
+      const m = /^\s*([^,]+?)\s*,\s*[A-Za-z]{2}\b/.exec(c.location ?? "");
+      return m ? m[1] : null;
+    }
+    case "state": {
+      const m = /,\s*([A-Za-z]{2})\b/.exec(c.location ?? "");
+      const name = m ? US_STATES[m[1].toUpperCase()] : undefined;
+      if (!name) return null;
+      if (options.length === 0) return name;
+      const hits = options.filter((o) => o.trim().toLowerCase() === name.toLowerCase());
+      return hits.length === 1 ? hits[0] : null;
+    }
     case "location":
       return c.location || null;
     case "linkedin":

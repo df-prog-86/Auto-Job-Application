@@ -13,7 +13,7 @@ import type { Classification } from "@/form-engine/canonical";
 import { discoverFields } from "@/form-engine/discover";
 import type { FormField } from "@/form-engine/discover";
 import type { ComboboxHints } from "@/form-engine/fill";
-import { base64ToFile, currentValue, fillField, fillFile, readComboboxOptions } from "@/form-engine/fill";
+import { base64ToFile, currentValue, fillField, fillFile, readComboboxOptions, readDropdownOptions } from "@/form-engine/fill";
 import { clearMarks, mark, showBanner } from "@/form-engine/highlight";
 import type { ApplyContext, FillReport } from "@/form-engine/types";
 
@@ -55,6 +55,7 @@ export async function fillPage(
       const known = ["gender", "race", "hispanic", "veteran"].includes(cls.topic);
       if (known && field.kind !== "checkbox" && currentValue(field) === "") {
         let choices = field.options;
+        if (field.kind === "dropdown") choices = await readDropdownOptions(field.el);
         if (field.kind === "combobox") choices = await readComboboxOptions(field.el as HTMLInputElement);
         const pick = resolveVoluntary(cls.topic, ctx.answers, choices);
         if (pick && (await fillField(field, pick))) {
@@ -101,6 +102,11 @@ export async function fillPage(
     if (field.kind === "combobox" && cls.kind !== "canonical") {
       options = []; // free-text style lookups are tried by typing, not by reading the menu
     }
+    if (field.kind === "dropdown") {
+      // Dropdown buttons only show their choices once opened; read them so a value is matched exactly, never guessed.
+      options = cls.kind === "canonical" || cls.kind === "unknown" ? await readDropdownOptions(field.el) : [];
+      if (options.length === 0 && cls.kind === "canonical" && cls.key === "phone_country") options = ["(unreadable)"];
+    }
     if (field.kind === "combobox" && cls.kind === "canonical" && ["sponsorship", "work_authorization", "security_clearance", "phone_country"].includes(cls.key)) {
       options = await readComboboxOptions(field.el as HTMLInputElement);
       // A dropdown whose choices could not be read is never answered from a bare code.
@@ -110,7 +116,7 @@ export async function fillPage(
     const value =
       cls.kind === "canonical"
         ? resolveValue(cls.key, ctx, options)
-        : learnedAnswer(field.label, ctx, field.kind === "select" || field.kind === "radio" || field.kind === "yesno" ? options : []);
+        : learnedAnswer(field.label, ctx, field.kind === "select" || field.kind === "radio" || field.kind === "yesno" || field.kind === "dropdown" ? options : []);
 
     let hints: ComboboxHints | undefined;
     if (cls.kind === "canonical" && cls.key === "phone_country") {

@@ -4,7 +4,7 @@
  * values are written here.
  */
 
-export type FieldKind = "text" | "textarea" | "select" | "combobox" | "radio" | "checkbox" | "file" | "yesno";
+export type FieldKind = "text" | "textarea" | "select" | "combobox" | "radio" | "checkbox" | "file" | "yesno" | "dropdown";
 
 export interface FormField {
   kind: FieldKind;
@@ -123,7 +123,7 @@ export function discoverFields(doc: Document): FormField[] {
     const inputType = tag === "input" ? ((el as HTMLInputElement).type || "text").toLowerCase() : tag;
     if (tag === "input" && SKIP_TYPES.has(inputType)) continue;
     if ((el as HTMLInputElement).disabled || (el as HTMLInputElement).readOnly) continue;
-    const name = el.getAttribute("name") ?? "";
+    const name = el.getAttribute("name") || el.getAttribute("data-automation-id") || "";
     if (/recaptcha|captcha|honeypot/i.test(`${name} ${el.id}`)) continue;
     if (inputType !== "file" && !isVisible(el)) continue;
     // react-select keeps a hidden "requiredInput" twin next to every combobox.
@@ -178,6 +178,7 @@ export function discoverFields(doc: Document): FormField[] {
     const raw = rawLabel(el, doc) || el.getAttribute("placeholder") || "";
     let label = clean(raw);
     // A hidden upload input is often unlabeled; its id/name ("resume") still says what it is.
+    if (!label && inputType === "file" && el.closest("[data-automation-id*='resume' i]")) label = "Resume";
     if (!label && inputType === "file") label = clean(`${name} ${el.id}`.replace(/[_-]+/g, " ")) || "File upload";
     if (!label) continue; // unlabeled controls (search boxes, country pickers) are not questions
 
@@ -243,6 +244,26 @@ export function discoverFields(doc: Document): FormField[] {
       inputType: "yesno",
       required: /required/i.test(entry?.querySelector("label")?.className ?? ""),
       options: buttons.map((b) => clean(b.textContent)),
+    });
+  }
+  // Workday drawn dropdowns: a button that opens a list of options. The list is read and picked later.
+  for (const btn of Array.from(doc.querySelectorAll<HTMLElement>("button[aria-haspopup='listbox']"))) {
+    if (!isVisible(btn) || (btn as HTMLButtonElement).disabled) continue;
+    const raw = rawLabel(btn, doc);
+    const label = clean(raw).replace(/\s*select one\s*$/i, "").trim();
+    if (!label) continue;
+    fields.push({
+      kind: "dropdown",
+      el: btn,
+      group: [],
+      outlineEl: btn,
+      label,
+      name: btn.getAttribute("data-automation-id") ?? "",
+      id: btn.id,
+      autocomplete: "",
+      inputType: "dropdown",
+      required: btn.getAttribute("aria-required") === "true" || /\*|required/i.test(raw),
+      options: [],
     });
   }
   return fields;

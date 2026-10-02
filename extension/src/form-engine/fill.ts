@@ -34,6 +34,10 @@ export function currentValue(field: FormField): string {
       return field.group.some((r) => r.checked) ? "checked" : "";
     case "yesno":
       return field.buttons?.some((b) => b.getAttribute("aria-pressed") === "true") ? "pressed" : "";
+    case "dropdown": {
+      const text = (field.el.textContent ?? "").replace(/\s+/g, " ").trim();
+      return /^select one$/i.test(text) ? "" : text;
+    }
     case "file":
       return ((field.el as HTMLInputElement).files?.length ?? 0) > 0 ? "file" : "";
     default:
@@ -71,6 +75,64 @@ async function pressYesNo(button: HTMLElement): Promise<boolean> {
     form?.removeEventListener("submit", block, true);
   }
   return button.getAttribute("aria-pressed") === "true";
+}
+
+
+const optionNodes = (doc: Document) => Array.from(doc.querySelectorAll<HTMLElement>("[role='option'], [data-automation-id='promptOption']"));
+
+/** Opens a Workday style dropdown button like a mouse would, without ever letting it submit the form. */
+async function openDropdown(btn: HTMLElement): Promise<void> {
+  if (btn.getAttribute("aria-expanded") === "true") return;
+  const form = btn.closest("form");
+  const block = (e: Event) => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  form?.addEventListener("submit", block, true);
+  try {
+    const view = btn.ownerDocument.defaultView ?? window;
+    const init = { bubbles: true, cancelable: true, button: 0, view };
+    btn.dispatchEvent(new PointerEvent("pointerdown", init));
+    btn.dispatchEvent(new MouseEvent("mousedown", init));
+    btn.dispatchEvent(new PointerEvent("pointerup", init));
+    btn.dispatchEvent(new MouseEvent("mouseup", init));
+    btn.click();
+    await sleep(150);
+  } finally {
+    form?.removeEventListener("submit", block, true);
+  }
+}
+
+async function closeDropdown(btn: HTMLElement): Promise<void> {
+  btn.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await sleep(80);
+}
+
+/** Reads a dropdown button's choices without choosing anything. */
+export async function readDropdownOptions(btn: HTMLElement): Promise<string[]> {
+  await openDropdown(btn);
+  let options: string[] = [];
+  for (let i = 0; i < 20 && options.length === 0; i++) {
+    await sleep(100);
+    options = optionNodes(btn.ownerDocument).map((o) => (o.textContent ?? "").trim()).filter(Boolean);
+  }
+  await closeDropdown(btn);
+  return options;
+}
+
+async function fillDropdown(btn: HTMLElement, value: string): Promise<boolean> {
+  await openDropdown(btn);
+  const wanted = normalizeQuestion(value);
+  for (let i = 0; i < 24; i++) {
+    await sleep(125);
+    const exact = optionNodes(btn.ownerDocument).filter((o) => normalizeQuestion(o.textContent ?? "") === wanted);
+    if (exact.length === 1 && safeClick(exact[0])) {
+      await sleep(80);
+      return true;
+    }
+  }
+  await closeDropdown(btn);
+  return false;
 }
 
 export interface ComboboxHints {
@@ -188,6 +250,8 @@ export async function fillField(field: FormField, value: string, hints?: Combobo
       const button = field.buttons?.find((b) => normalizeQuestion(b.textContent ?? "") === wanted);
       return button ? pressYesNo(button) : false;
     }
+    case "dropdown":
+      return fillDropdown(field.el, value);
     case "combobox":
       return fillCombobox(field.el as HTMLInputElement, value, hints);
     default:

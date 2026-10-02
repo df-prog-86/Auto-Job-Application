@@ -33,7 +33,7 @@ export function isSubmitLike(el: Element): boolean {
 export function safeClick(el: HTMLElement): boolean {
   if (isSubmitLike(el)) return false;
   const role = el.getAttribute("role");
-  const isOption = role === "option" || el.tagName.toLowerCase() === "li";
+  const isOption = role === "option" || el.tagName.toLowerCase() === "li" || el.getAttribute("data-automation-id") === "promptOption";
   const isRadio = el instanceof HTMLInputElement && el.type === "radio";
   if (!isOption && !isRadio) return false;
   const opts = { bubbles: true, cancelable: true, view: window };

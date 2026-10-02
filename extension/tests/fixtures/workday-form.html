@@ -1,0 +1,37 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Workday fixture</title></head><body>
+<form id="app" data-automation-id="applyFlowPage">
+  <div data-automation-id="formField-legalNameSection_firstName"><label for="fn">First Name<abbr title="required">*</abbr></label>
+    <input id="fn" type="text" data-automation-id="legalNameSection_firstName" aria-required="true"></div>
+  <div><label for="ln">Last Name<abbr title="required">*</abbr></label>
+    <input id="ln" type="text" data-automation-id="legalNameSection_lastName" aria-required="true"></div>
+  <div><label for="em">Email Address</label><input id="em" type="text" data-automation-id="email"></div>
+  <div><label id="dtl" for="pdt">Phone Device Type<abbr title="required">*</abbr></label>
+    <button id="pdt" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="dtl" data-automation-id="phone-device-type">Select One</button></div>
+  <div><label id="cpl" for="cpc">Country Phone Code<abbr title="required">*</abbr></label>
+    <button id="cpc" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="cpl" data-automation-id="countryPhoneCode">Select One</button></div>
+  <div><label for="ph">Phone Number<abbr title="required">*</abbr></label><input id="ph" type="tel" data-automation-id="phone-number" aria-required="true"></div>
+  <div><label id="stl" for="st">State<abbr title="required">*</abbr></label>
+    <button id="st" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="stl" data-automation-id="addressSection_countryRegion">Select One</button></div>
+  <div data-automation-id="resumeSection"><input type="file" id="rf" data-automation-id="file-upload-input-ref"></div>
+  <div class="footer"><button type="button" data-automation-id="pageFooterNextButton" id="next">Save and Continue</button></div>
+</form>
+<ul role="listbox" id="pop" hidden></ul>
+<script>
+  window.__nextClicks = 0; window.__submitted = 0;
+  document.getElementById('next').addEventListener('click', () => window.__nextClicks++);
+  document.getElementById('app').addEventListener('submit', e => { e.preventDefault(); window.__submitted++; });
+  const sets = {
+    pdt: ['Home', 'Mobile', 'Work'],
+    cpc: ['Afghanistan (+93)', 'United Kingdom (+44)', 'United States of America (+1)'],
+    st: ['Massachusetts', 'New York'],
+  };
+  const pop = document.getElementById('pop'); let open = null;
+  function close() { if (open) open.setAttribute('aria-expanded', 'false'); pop.hidden = true; pop.innerHTML = ''; open = null; }
+  document.querySelectorAll('button[aria-haspopup]').forEach(b => b.addEventListener('click', () => {
+    if (open === b) return close(); close(); open = b; b.setAttribute('aria-expanded', 'true');
+    sets[b.id].forEach(t => { const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = t;
+      li.addEventListener('click', () => { b.textContent = t; close(); }); pop.appendChild(li); });
+    pop.hidden = false;
+  }));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+</script></body></html>

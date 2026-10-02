@@ -32,6 +32,8 @@ export function currentValue(field: FormField): string {
       return (field.el as HTMLSelectElement).value.trim();
     case "radio":
       return field.group.some((r) => r.checked) ? "checked" : "";
+    case "yesno":
+      return field.buttons?.some((b) => b.getAttribute("aria-pressed") === "true") ? "pressed" : "";
     case "file":
       return ((field.el as HTMLInputElement).files?.length ?? 0) > 0 ? "file" : "";
     default:
@@ -46,6 +48,29 @@ function matchOption(options: string[], wanted: string): string | null {
     options.find((o) => normalizeQuestion(o).includes(w) && w.length > 2) ??
     null
   );
+}
+
+/**
+ * Presses a Yes or No toggle. These buttons have no type attribute, which
+ * browsers treat as "submit" inside a form, so the form's submit is blocked for
+ * the instant of the press: answering a question must never send the application.
+ */
+async function pressYesNo(button: HTMLElement): Promise<boolean> {
+  const text = (button.textContent ?? "").trim().toLowerCase();
+  if ((text !== "yes" && text !== "no") || !button.hasAttribute("aria-pressed")) return false;
+  const form = button.closest("form");
+  const block = (e: Event) => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  form?.addEventListener("submit", block, true);
+  try {
+    button.click();
+    await sleep(80);
+  } finally {
+    form?.removeEventListener("submit", block, true);
+  }
+  return button.getAttribute("aria-pressed") === "true";
 }
 
 export interface ComboboxHints {
@@ -157,6 +182,11 @@ export async function fillField(field: FormField, value: string, hints?: Combobo
       const index = field.options.findIndex((o) => normalizeQuestion(o) === normalizeQuestion(value));
       const radio = index >= 0 ? field.group[index] : undefined;
       return radio ? safeClick(radio) : false;
+    }
+    case "yesno": {
+      const wanted = normalizeQuestion(value);
+      const button = field.buttons?.find((b) => normalizeQuestion(b.textContent ?? "") === wanted);
+      return button ? pressYesNo(button) : false;
     }
     case "combobox":
       return fillCombobox(field.el as HTMLInputElement, value, hints);

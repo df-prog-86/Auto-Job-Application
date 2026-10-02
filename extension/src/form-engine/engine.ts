@@ -17,6 +17,9 @@ import { base64ToFile, currentValue, fillField, fillFile, readComboboxOptions } 
 import { clearMarks, mark, showBanner } from "@/form-engine/highlight";
 import type { ApplyContext, FillReport } from "@/form-engine/types";
 
+/** Questions that grant consent or accept terms are never answered for the candidate. */
+const CONSENT = /\b(terms|privacy|agree|agreement|consent|acknowledg\w*|certif\w*|authori[sz]e us|policy)\b/i;
+
 export interface ResumePayload {
   base64: string;
   filename: string;
@@ -56,6 +59,11 @@ export async function fillPage(
       if (field.required) flag(report, field);
       continue;
     }
+    if (field.kind === "yesno" && CONSENT.test(field.label)) {
+      // Agreeing to terms is always the candidate's own click, even when it is drawn as Yes/No buttons.
+      if (field.required) flag(report, field);
+      continue;
+    }
     if (currentValue(field) !== "") {
       report.alreadyFilled++;
       continue;
@@ -91,7 +99,7 @@ export async function fillPage(
     const value =
       cls.kind === "canonical"
         ? resolveValue(cls.key, ctx, options)
-        : learnedAnswer(field.label, ctx, field.kind === "select" || field.kind === "radio" ? options : []);
+        : learnedAnswer(field.label, ctx, field.kind === "select" || field.kind === "radio" || field.kind === "yesno" ? options : []);
 
     let hints: ComboboxHints | undefined;
     if (cls.kind === "canonical" && cls.key === "phone_country") {

@@ -180,3 +180,21 @@ def test_deleting_a_job_removes_its_questions(app_and_db):
     assert len(client.get("/api/v1/needs-attention").json()) == 1
     assert client.delete(f"/api/v1/jobs/{job_id}").status_code == 204
     assert client.get("/api/v1/needs-attention").json() == []
+
+
+def test_ashby_posting_and_application_urls_match_and_recent_role_is_returned(app_and_db):
+    from app.services.apply.questions import urls_match
+
+    posting = "https://jobs.ashbyhq.com/chartis/5abc9d3f-9ade-4a3e-a8c6-0d76c98b3fa4"
+    assert urls_match(posting + "/application?utm=x", posting)
+    assert not urls_match("https://jobs.ashbyhq.com/chartis/other-id/application", posting)
+
+    client, SessionLocal = app_and_db
+    client.post("/api/v1/profile/commit", json=_COMMIT)
+    client.post("/api/v1/profile/employment", json={"employer": "Old Co", "title": "Analyst", "start_date": "2015-01", "end_date": "2018-06"})
+    client.post("/api/v1/profile/employment", json={"employer": "Huron", "title": "Manager", "start_date": "2019-03"})
+    _job(SessionLocal, url=posting)
+    out = client.post("/api/v1/apply/context", json={"url": posting + "/application"}, headers=_token(client)).json()
+    assert out["problem"] is None
+    assert out["candidate"]["recent_title"] == "Manager"
+    assert out["candidate"]["recent_employer"] == "Huron"

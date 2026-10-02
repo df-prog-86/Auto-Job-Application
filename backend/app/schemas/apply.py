@@ -15,6 +15,8 @@ class ApplyContextIn(BaseModel):
 class CandidateFacts(BaseModel):
     first_name: str
     preferred_name: str | None = None
+    recent_title: str | None = None
+    recent_employer: str | None = None
     last_name: str
     full_name: str
     email: str

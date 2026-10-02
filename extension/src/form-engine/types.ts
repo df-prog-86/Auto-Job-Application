@@ -3,6 +3,8 @@
 export interface ApplyCandidate {
   first_name: string;
   preferred_name?: string | null;
+  recent_title?: string | null;
+  recent_employer?: string | null;
   last_name: string;
   full_name: string;
   email: string;

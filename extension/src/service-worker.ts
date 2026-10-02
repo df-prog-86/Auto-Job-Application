@@ -122,8 +122,17 @@ function waitForTabComplete(tabId: number, timeoutMs: number): Promise<void> {
  * waits for the form to appear, then runs the same fill as the popup button.
  * Still never submits; the person reviews and clicks Submit themselves.
  */
+/** Ashby shows the posting first; its form lives at ".../application". */
+function applicationUrlFor(raw: string): string {
+  const url = new URL(raw);
+  if (url.hostname === "jobs.ashbyhq.com" && !/\/application\/?$/.test(url.pathname)) {
+    url.pathname = `${url.pathname.replace(/\/$/, "")}/application`;
+  }
+  return url.toString();
+}
+
 async function completeApplication(jobId: number, url: string): Promise<void> {
-  const tab = await chrome.tabs.create({ url, active: true });
+  const tab = await chrome.tabs.create({ url: applicationUrlFor(url), active: true });
   if (tab.id === undefined) return;
   const tabId = tab.id;
   await waitForTabComplete(tabId, 30000);

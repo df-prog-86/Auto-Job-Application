@@ -7,6 +7,7 @@ questions for the Needs Attention page; it never submits anything.
 
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -82,9 +83,17 @@ def get_apply_context(payload: ApplyContextIn, db: Session = Depends(get_db)) ->
         return out
 
     first, last = _split_name(profile.name)
+    # Most recent role: a current one (no end date) first, otherwise the latest end/start date.
+    recent = max(
+        profile.employment_history,
+        key=lambda r: (r.end_date is None, r.end_date or dt.date.min, r.start_date or dt.date.min),
+        default=None,
+    )
     out.candidate = CandidateFacts(
         first_name=first,
         preferred_name=(profile.preferred_name or "").strip() or None,
+        recent_title=recent.title if recent else None,
+        recent_employer=recent.employer if recent else None,
         last_name=last,
         full_name=profile.name,
         email=profile.email,

@@ -26,7 +26,12 @@ def answer_key_for(question_key: str) -> str:
 
 def normalize_url(url: str) -> str:
     parts = urlsplit(url.strip())
-    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{parts.path.rstrip('/')}"
+    path = parts.path.rstrip("/")
+    host = parts.netloc.lower()
+    # An Ashby posting and its application form are the same job: ".../<id>" and ".../<id>/application".
+    if host.endswith("ashbyhq.com") and path.lower().endswith("/application"):
+        path = path[: -len("/application")]
+    return f"{parts.scheme.lower()}://{host}{path}"
 
 
 _GH_ID = re.compile(r"(?:/jobs/|[?&](?:gh_jid|token)=)(\d+)")

@@ -4,7 +4,7 @@
  * values are written here.
  */
 
-export type FieldKind = "text" | "textarea" | "select" | "combobox" | "radio" | "checkbox" | "file";
+export type FieldKind = "text" | "textarea" | "select" | "combobox" | "radio" | "checkbox" | "file" | "yesno";
 
 export interface FormField {
   kind: FieldKind;
@@ -12,6 +12,8 @@ export interface FormField {
   el: HTMLElement;
   /** Every radio in the group (radio kind only). */
   group: HTMLInputElement[];
+  /** The Yes and No buttons (yesno kind only). */
+  buttons?: HTMLElement[];
   /** The element to outline on the page. */
   outlineEl: HTMLElement;
   label: string;
@@ -63,7 +65,16 @@ function rawLabel(el: HTMLElement, doc: Document): string {
   if (clean(aria)) return aria as string;
   const wrapping = el.closest("label");
   if (wrapping && clean(labelText(wrapping))) return labelText(wrapping);
+  // Some forms (Ashby) wrap each question in a field entry whose label is not linked to the box.
+  const entryLabel = el.closest("[class*='field-entry'], [class*='fieldEntry']")?.querySelector("label");
+  if (entryLabel && clean(labelText(entryLabel))) return labelText(entryLabel);
   return "";
+}
+
+/** True when the question's own label is styled as required (the star is often CSS, not text). */
+function entryRequired(el: HTMLElement): boolean {
+  const label = el.closest("[class*='field-entry'], [class*='fieldEntry']")?.querySelector("label");
+  return !!label && /required/i.test(label.className);
 }
 
 function groupLabel(first: HTMLElement, doc: Document): string {
@@ -93,6 +104,7 @@ function isVisible(el: HTMLElement): boolean {
 
 function looksRequired(el: HTMLElement, raw: string, groupEl?: Element | null): boolean {
   if ((el as HTMLInputElement).required || el.getAttribute("aria-required") === "true") return true;
+  if (entryRequired(el)) return true;
   if (/\*|✱|\(\s*required\s*\)/i.test(raw)) return true;
   if (groupEl && /\*|\(\s*required\s*\)/i.test(groupEl.textContent ?? "") && groupEl.querySelector("legend, label")) {
     const heading = groupEl.querySelector("legend, label");
@@ -200,6 +212,37 @@ export function discoverFields(doc: Document): FormField[] {
       inputType,
       required: looksRequired(el, raw),
       options,
+    });
+  }
+
+  // Yes/No questions drawn as a pair of toggle buttons (the real checkbox behind them is hidden).
+  const seenGroups = new Set<HTMLElement>();
+  for (const btn of Array.from(doc.querySelectorAll<HTMLElement>("button[aria-pressed]"))) {
+    const text = clean(btn.textContent).toLowerCase();
+    if (text !== "yes" && text !== "no") continue;
+    const container = btn.parentElement;
+    if (!container || seenGroups.has(container)) continue;
+    const buttons = Array.from(container.querySelectorAll<HTMLElement>("button[aria-pressed]")).filter((b) =>
+      ["yes", "no"].includes(clean(b.textContent).toLowerCase()),
+    );
+    if (buttons.length !== 2 || !isVisible(buttons[0])) continue;
+    seenGroups.add(container);
+    const entry = container.closest("[class*='field-entry'], [class*='fieldEntry']");
+    const raw = entry?.querySelector("label")?.textContent ?? "";
+    if (!clean(raw)) continue;
+    fields.push({
+      kind: "yesno",
+      el: buttons[0],
+      group: [],
+      buttons,
+      outlineEl: container,
+      label: clean(raw),
+      name: "",
+      id: "",
+      autocomplete: "",
+      inputType: "yesno",
+      required: /required/i.test(entry?.querySelector("label")?.className ?? ""),
+      options: buttons.map((b) => clean(b.textContent)),
     });
   }
   return fields;

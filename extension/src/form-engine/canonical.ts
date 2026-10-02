@@ -8,6 +8,8 @@ import type { ApplyContext } from "@/form-engine/types";
 export type CanonicalKey =
   | "first_name"
   | "preferred_name"
+  | "recent_title"
+  | "recent_employer"
   | "phone_country"
   | "last_name"
   | "full_name"
@@ -44,7 +46,7 @@ export function normalizeQuestion(label: string): string {
 
 /** Voluntary self-identification (EEO) questions are never filled automatically. */
 const VOLUNTARY =
-  /\b(gender|race|ethnic\w*|hispanic|latino|latinx|veteran|disabilit\w*|sexual orientation|lgbt\w*|transgender|self[- ]identif\w*|protected class)\b/i;
+  /\b(gender|race|ethnic\w*|hispanic|latino|latinx|veteran|disabilit\w*|sexual orientation|lgbt\w*|transgender|self[- ]identif\w*|protected class|pronouns?)\b/i;
 
 export function classifyField(sig: FieldSignature): Classification {
   const label = sig.label.toLowerCase();
@@ -91,6 +93,12 @@ export function classifyField(sig: FieldSignature): Classification {
   }
 
   if (/linkedin/.test(text)) return { kind: "canonical", key: "linkedin" };
+  if (/most recent (job )?title|current (job )?title|current position|present title/.test(label)) {
+    return { kind: "canonical", key: "recent_title" };
+  }
+  if (/most recent (employer|company)|current (employer|company)|present employer/.test(label)) {
+    return { kind: "canonical", key: "recent_employer" };
+  }
   if (/preferred (first )?name|nickname|goes by|what should we call you|what name do you go by/.test(label)) {
     return { kind: "canonical", key: "preferred_name" };
   }
@@ -204,6 +212,10 @@ export function resolveValue(
       return c.first_name || null;
     case "preferred_name":
       return c.preferred_name?.trim() || c.first_name || null;
+    case "recent_title":
+      return c.recent_title?.trim() || null;
+    case "recent_employer":
+      return c.recent_employer?.trim() || null;
     case "phone_country":
       return resolvePhoneCountry(ctx.answers["phone_country"], options);
     case "last_name":

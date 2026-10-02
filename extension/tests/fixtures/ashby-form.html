@@ -1,0 +1,63 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Engagement Manager @ Chartis</title>
+<style>.opt{display:none}.opt.open{display:block}</style></head><body>
+<form id="app" novalidate>
+  <div><button type="button" id="autofill-btn">Upload File</button><input type="file"></div>
+  <div class="ashby-application-form-field-entry _fieldEntry_x"><label class="_label _required_1" for="_systemfield_resume">Resume</label>
+    <input type="file" id="_systemfield_resume" required></div>
+  <div class="ashby-application-form-field-entry"><label class="_required_1" for="_systemfield_name">Name</label>
+    <input type="text" id="_systemfield_name" name="_systemfield_name" required placeholder="Type here..."></div>
+  <div class="ashby-application-form-field-entry"><label class="_required_1" for="pref">Preferred First Name</label>
+    <input type="text" id="pref" name="pref" required placeholder="Type here..."></div>
+  <fieldset class="_fieldEntry_x ashby-application-form-input-radio-group"><label class="_label_1 _required_1" for="pron-x">Preferred Pronouns</label>
+    <div><input type="radio" id="pron-0" name="pron" value="he"><label for="pron-0" class="_label_2">He/him/his</label></div>
+    <div><input type="radio" id="pron-1" name="pron" value="she"><label for="pron-1" class="_label_2">She/her/hers</label></div></fieldset>
+
+  <div class="ashby-application-form-field-entry" id="q-employed"><label class="_required_1" for="q-employed-cb">Have you ever been employed by Chartis in the past?</label>
+    <div class="yn"><button class="ynb" aria-pressed="false" data-option="yes">Yes</button><button class="ynb" aria-pressed="false" data-option="no">No</button><input type="checkbox" id="q-employed-cb" tabindex="-1"></div></div>
+  <div class="ashby-application-form-field-entry" id="q-auth"><label class="_required_1" for="q-auth-cb">Are you legally authorized to work in the United States?</label>
+    <div class="yn"><button class="ynb" aria-pressed="false" data-option="yes">Yes</button><button class="ynb" aria-pressed="false" data-option="no">No</button><input type="checkbox" id="q-auth-cb" tabindex="-1"></div></div>
+  <div class="ashby-application-form-field-entry" id="q-sponsor"><label class="_required_1" for="q-sponsor-cb">Will you now or in the future require sponsorship for employment visa status?</label>
+    <div class="yn"><button class="ynb" aria-pressed="false" data-option="yes">Yes</button><button class="ynb" aria-pressed="false" data-option="no">No</button><input type="checkbox" id="q-sponsor-cb" tabindex="-1"></div></div>
+
+  <div class="ashby-application-form-field-entry" id="q-terms"><label class="_required_1" for="q-terms-cb">Terms of Use &amp; Privacy Agreement</label>
+    <div class="yn"><button class="ynb" aria-pressed="false" data-option="yes">Yes</button><button class="ynb" aria-pressed="false" data-option="no">No</button><input type="checkbox" id="q-terms-cb" tabindex="-1"></div></div>
+
+  <div class="ashby-application-form-field-entry"><label class="_required_1" for="_systemfield_email">Email</label>
+    <input type="email" id="_systemfield_email" name="_systemfield_email" required></div>
+  <div class="ashby-application-form-field-entry"><label class="_required_1" for="phone">Phone Number</label>
+    <input type="tel" id="phone" name="phone" required placeholder="1-415-555-1234..."></div>
+  <div class="ashby-application-form-field-entry"><label class="_required_1" for="title">Most Recent Title</label>
+    <input type="text" id="title" name="title" required></div>
+  <div class="ashby-application-form-field-entry"><label class="_required_1" for="employer">Most Recent Employer</label>
+    <input type="text" id="employer" name="employer" required></div>
+  <div class="ashby-application-form-field-entry"><label class="_required_1" for="_systemfield_location">Location</label>
+    <div class="_inputContainer"><input role="combobox" id="" placeholder="Start typing..." aria-autocomplete="list" aria-expanded="false" autocomplete="off" type="text">
+    <div role="listbox" class="opt" id="loc-list"></div></div></div>
+  <div class="ashby-application-form-field-entry"><label for="li">LinkedIn Profile Link/Handle</label>
+    <input type="text" id="li" name="li"></div>
+  <fieldset class="_fieldEntry_x ashby-application-form-input-radio-group"><label class="_label_1" for="gender-x">Gender</label>
+    <div><input type="radio" id="g-0" name="gender" value="m"><label for="g-0" class="_label_2">Male</label></div>
+    <div><input type="radio" id="g-1" name="gender" value="f"><label for="g-1" class="_label_2">Female</label></div></fieldset>
+  <button type="submit" id="submit-btn">Submit Application</button>
+</form>
+<script>
+  window.__submitted = 0;
+  document.getElementById('app').addEventListener('submit', e => { e.preventDefault(); window.__submitted++; });
+  // Like Ashby: the Yes/No buttons have no type attribute, so a click would submit the form unless blocked.
+  document.querySelectorAll('.ynb').forEach(b => b.addEventListener('click', () => {
+    b.parentElement.querySelectorAll('.ynb').forEach(o => o.setAttribute('aria-pressed', o === b ? 'true' : 'false'));
+  }));
+  const loc = document.querySelector('input[role=combobox]'), list = document.getElementById('loc-list');
+  const places = ['East Boston, Massachusetts, United States','Boston, Massachusetts, United States','Boston, Lincolnshire, England, United Kingdom','Boston, Virginia, United States'];
+  loc.addEventListener('input', () => {
+    list.innerHTML = '';
+    places.filter(p => p.toLowerCase().includes(loc.value.toLowerCase())).forEach(p => {
+      const d = document.createElement('div'); d.setAttribute('role','option'); d.textContent = p;
+      d.addEventListener('click', () => { loc.dataset.chosen = p; loc.value = p; list.classList.remove('open'); loc.setAttribute('aria-expanded','false'); });
+      list.appendChild(d);
+    });
+    list.classList.add('open'); loc.setAttribute('aria-expanded','true');
+  });
+  window.__inputSeen = {};
+  document.querySelectorAll('input[type=text], input[type=tel], input[type=email]').forEach(el => el.addEventListener('input', () => { window.__inputSeen[el.id || 'loc'] = el.value; }));
+</script></body></html>

@@ -1,0 +1,18 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Workday entry</title></head><body>
+<div id="root"></div>
+<script>
+  window.__pressed = []; window.__submits = 0;
+  const root = document.getElementById('root');
+  const btn = (aid, text, go) => { const b = document.createElement('a'); b.href = '#'; b.setAttribute('data-automation-id', aid); b.textContent = text;
+    b.addEventListener('click', (e) => { e.preventDefault(); window.__pressed.push(aid); go && go(); }); return b; };
+  function listing() { root.innerHTML = '<h2>Revenue Analyst</h2>'; root.append(btn('adventureButton', 'Apply', () => setTimeout(choose, 150))); }
+  function choose() { root.innerHTML = '<div data-automation-id="applyAdventurePage"></div>'; const d = root.firstChild;
+    d.append(btn('autofillWithResume', 'Autofill with Resume'), btn('applyManually', 'Apply Manually', () => setTimeout(signin, 150)), btn('useMyLastApplication', 'Use My Last Application')); }
+  function signin() { root.innerHTML = '<h2>Sign In</h2><label for="em">Email Address</label><input id="em" type="text" data-automation-id="email"><label for="pw">Password</label><input id="pw" type="password" data-automation-id="password"><button type="button" id="signin">Sign In</button>';
+    document.getElementById('signin').addEventListener('click', () => { window.__pressed.push('signin'); setTimeout(info, 150); }); }
+  function info() { root.innerHTML = '<h2>My Information</h2><div data-automation-id="formField-a"><label for="fn">First Name<abbr>*</abbr></label><input id="fn" type="text" aria-required="true"></div><div data-automation-id="formField-b"><label for="ln">Last Name<abbr>*</abbr></label><input id="ln" type="text" aria-required="true"></div><div data-automation-id="pageFooter"><button type="button" data-automation-id="pageFooterNextButton" id="next">Save and Continue</button></div>';
+    document.getElementById('next').addEventListener('click', () => { window.__pressed.push('next'); setTimeout(review, 150); }); }
+  function review() { root.innerHTML = '<h2>Review</h2><div data-automation-id="pageFooter"><button type="button" data-automation-id="pageFooterNextButton" id="sub">Submit</button></div>';
+    document.getElementById('sub').addEventListener('click', () => { window.__submits++; }); }
+  listing();
+</script></body></html>

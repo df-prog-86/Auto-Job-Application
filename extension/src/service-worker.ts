@@ -133,7 +133,107 @@ function applicationUrlFor(raw: string): string {
   return url.toString();
 }
 
+// ---- Workday: posting -> Apply -> Apply Manually -> (person signs in) -> fill and move on ----
+
+const WORKDAY_RUN_KEY = "jobAgent.workdayRun";
+const WORKDAY_RUN_MAX_MS = 20 * 60_000;
+
+interface WorkdayRun {
+  tabId: number;
+  jobId: number;
+  startedAt: number;
+}
+
+const isWorkdayUrl = (raw: string): boolean => {
+  try {
+    return new URL(raw).hostname.toLowerCase().endsWith(".myworkdayjobs.com");
+  } catch {
+    return false;
+  }
+};
+
+async function getWorkdayRun(): Promise<WorkdayRun | null> {
+  const stored = await chrome.storage.session.get(WORKDAY_RUN_KEY);
+  const run = stored[WORKDAY_RUN_KEY] as WorkdayRun | undefined;
+  if (!run || Date.now() - run.startedAt > WORKDAY_RUN_MAX_MS) return null;
+  return run;
+}
+
+async function clearWorkdayRun(): Promise<void> {
+  await chrome.storage.session.remove(WORKDAY_RUN_KEY);
+}
+
+/** (Re)starts the in-page walker on the tab. Safe to call on every page load: the page ignores a second start. */
+async function startWorkdayWalker(run: WorkdayRun): Promise<void> {
+  const tab = await chrome.tabs.get(run.tabId);
+  if (!tab.url || !isWorkdayUrl(tab.url) || !isSupportedApplicationUrl(tab.url)) return;
+  const ctx = await backend.applyContext(tab.url, run.jobId);
+  if (!ctx.job || !ctx.candidate || !ctx.resume) {
+    await clearWorkdayRun();
+    notify("Couldn't fill the application", ctx.problem ?? "Couldn't prepare this application.");
+    return;
+  }
+  const resume = { base64: await downloadDocumentBase64(ctx.resume.document_id), filename: ctx.resume.filename };
+  const applyCtx: ApplyContext = { candidate: ctx.candidate, answers: ctx.answers, learned_answers: ctx.learned_answers };
+  await chrome.scripting.executeScript({ target: { tabId: run.tabId }, files: ["content/fill-page.js"] });
+  await chrome.scripting.executeScript({
+    target: { tabId: run.tabId },
+    func: (c: ApplyContext, r: { base64: string; filename: string }) =>
+      (window as unknown as { __jobAgentWorkday: (c: ApplyContext, r: unknown) => string }).__jobAgentWorkday(c, r),
+    args: [applyCtx, resume],
+  });
+}
+
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status !== "complete") return;
+  void (async () => {
+    const run = await getWorkdayRun();
+    if (!run || run.tabId !== tabId) return;
+    await startWorkdayWalker(run);
+  })().catch(() => undefined);
+});
+
+async function finishWorkdayRun(
+  senderTabId: number | undefined,
+  report: FillReport | null,
+  stoppedBecause: string,
+): Promise<void> {
+  const run = await getWorkdayRun();
+  if (!run || run.tabId !== senderTabId) return;
+  await clearWorkdayRun();
+  if (!report) {
+    notify("Couldn't finish the application", stoppedBecause || "Open the application and try again.");
+    return;
+  }
+  const tab = await chrome.tabs.get(run.tabId);
+  const page = new URL(tab.url ?? "https://invalid.example/");
+  await backend
+    .applyReport({
+      jobId: run.jobId,
+      pageUrl: `${page.origin}${page.pathname}`,
+      filledCount: report.filled.length,
+      flagged: report.flagged,
+    })
+    .catch(() => undefined);
+  const pages = report.pagesAdvanced ?? 0;
+  notify(
+    "Application filled, not submitted",
+    `Moved ahead ${pages} page${pages === 1 ? "" : "s"}.${report.stoppedBecause ? ` Stopped: ${report.stoppedBecause}` : ""} Review it, then submit it yourself.`,
+  );
+}
+
+async function completeWorkdayApplication(jobId: number, url: string): Promise<void> {
+  const tab = await chrome.tabs.create({ url, active: true });
+  if (tab.id === undefined) return;
+  const run: WorkdayRun = { tabId: tab.id, jobId, startedAt: Date.now() };
+  await chrome.storage.session.set({ [WORKDAY_RUN_KEY]: run });
+  // The tab may already be loaded by now; if not, the tab listener starts it when it is.
+  const now = await chrome.tabs.get(tab.id);
+  if (now.status === "complete") await startWorkdayWalker(run);
+}
+
 async function completeApplication(jobId: number, url: string): Promise<void> {
+  if (isWorkdayUrl(url)) return completeWorkdayApplication(jobId, url);
   const tab = await chrome.tabs.create({ url: applicationUrlFor(url), active: true });
   if (tab.id === undefined) return;
   const tabId = tab.id;
@@ -214,6 +314,18 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
       sendResponse({ ok: true });
       return false;
     }
+
+    case "WORKDAY_WAITING":
+      if (sender.id === chrome.runtime.id && sender.tab) {
+        notify("Sign in to Workday", "Sign in (or create your account) on that tab. Job Agent carries on by itself afterwards.");
+      }
+      return false;
+
+    case "WORKDAY_DONE":
+      if (sender.id === chrome.runtime.id && sender.tab) {
+        void finishWorkdayRun(sender.tab.id, message.report, message.stoppedBecause).catch(() => undefined);
+      }
+      return false;
 
     case "PAIR":
       backend

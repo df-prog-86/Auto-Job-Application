@@ -147,3 +147,31 @@ test("Workday: the Review page and its Submit button are never pressed", async (
   assert.match(report.stoppedBecause, /last step|Review/i);
   await page.close();
 });
+
+test("Workday walker: Apply, Apply Manually, waits at sign-in without touching the password, then fills and stops at Review", async () => {
+  const html = (await import("node:fs")).readFileSync(resolve(here, "fixtures/workday-entry.html"), "utf8");
+  const page = await browser.newPage();
+  await page.route("https://test.myworkdayjobs.com/**", (route) => route.fulfill({ contentType: "text/html", body: html }));
+  await page.goto("https://test.myworkdayjobs.com/job/1");
+  await page.evaluate(bundle);
+  assert.equal(await page.evaluate(([x, r]) => window.__jobAgentWorkday(x, r), [ctx(), resume]), "started");
+  assert.equal(await page.evaluate(([x, r]) => window.__jobAgentWorkday(x, r), [ctx(), resume]), "already running");
+
+  await page.waitForSelector("#pw", { timeout: 15000 });
+  await page.waitForFunction(() => document.getElementById("em").value !== "", null, { timeout: 5000 });
+  assert.equal(await page.$eval("#em", (el) => el.value), "jane@example.com", "only the email is typed");
+  await page.waitForTimeout(1500);
+  assert.equal(await page.$eval("#pw", (el) => el.value), "", "the password is never touched");
+  assert.equal(await page.evaluate(() => window.__jobAgentOutcome?.type), "WORKDAY_WAITING");
+  assert.equal(await page.evaluate(() => window.__pressed.includes("next")), false, "waits for the person");
+
+  await page.click("#signin"); // the person signs in
+  await page.waitForFunction(() => window.__jobAgentOutcome?.type === "WORKDAY_DONE", null, { timeout: 20000 });
+  const pressed = await page.evaluate(() => window.__pressed);
+  assert.deepEqual(pressed, ["adventureButton", "applyManually", "signin", "next"]);
+  assert.equal(await page.evaluate(() => window.__submits), 0);
+  assert.equal(await page.$eval("h2", (h) => h.textContent), "Review");
+  const out = await page.evaluate(() => window.__jobAgentOutcome);
+  assert.equal(out.report.pagesAdvanced, 1);
+  await page.close();
+});

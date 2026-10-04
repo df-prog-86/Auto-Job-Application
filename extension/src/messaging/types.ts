@@ -14,7 +14,10 @@ export type ExtensionMessage =
   | { type: "TOGGLE_AUTOMATION" }
   | { type: "CAPTURE_JOB"; tabId: number }
   | { type: "FILL_PAGE"; tabId: number; jobId?: number }
-  | { type: "COMPLETE_APPLICATION"; jobId: number; url: string };
+  | { type: "COMPLETE_APPLICATION"; jobId: number; url: string }
+  /** From the Workday walker running in the page. */
+  | { type: "WORKDAY_WAITING" }
+  | { type: "WORKDAY_DONE"; report: import("@/form-engine/types").FillReport | null; stoppedBecause: string };
 
 export interface PairResult {
   ok: boolean;

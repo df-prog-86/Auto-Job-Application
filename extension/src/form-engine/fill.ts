@@ -14,7 +14,7 @@ function fire(el: HTMLElement, types: string[]): void {
   for (const type of types) el.dispatchEvent(new Event(type, { bubbles: true }));
 }
 
-function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+export function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
   if (setter) setter.call(el, value);

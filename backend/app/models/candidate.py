@@ -72,6 +72,7 @@ class Education(Base, TimestampMixin):
     field: Mapped[str | None] = mapped_column(String(200), nullable=True)
     start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    gpa: Mapped[str | None] = mapped_column(String(20), nullable=True)
     source: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     profile: Mapped[CandidateProfile] = relationship(back_populates="education")

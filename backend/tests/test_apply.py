@@ -264,3 +264,27 @@ def test_context_skills_put_the_ones_in_the_posting_first(app_and_db):
         db.commit()
     out = client.post("/api/v1/apply/context", json={"url": "https://x.com", "job_id": job_id}, headers=_token(client)).json()
     assert out["skills"] == ["Tableau", "SQL", "Python", "Excel"]  # posting words first, no duplicates, no partial-word hits
+
+
+def test_education_gpa_and_certifications_are_editable_and_reach_the_apply_context(app_and_db):
+    client, SessionLocal = app_and_db
+    client.post("/api/v1/profile/commit", json=_COMMIT)
+
+    profile = client.post("/api/v1/profile/education", json={"institution": "State University", "degree": "Bachelors Degree"}).json()
+    edu_id = profile["education"][0]["id"]
+    out = client.patch(f"/api/v1/profile/education/{edu_id}", json={"start_date": "2014-09", "end_date": "2018-05", "gpa": " 3.7 "}).json()
+    assert out["education"][0]["gpa"] == "3.7" and out["education"][0]["start_date"] == "2014-09-01"
+
+    created = client.post("/api/v1/profile/certifications", json={"certification": "Epic Clarity", "issuer": "Epic", "date": "2022-03-15"}).json()
+    cert_id = created["certifications"][0]["id"]
+    out = client.patch(f"/api/v1/profile/certifications/{cert_id}", json={"expiration": "2026-03-15", "certification": "  "}).json()
+    assert out["certifications"][0]["certification"] == "Epic Clarity"  # a required name cannot be blanked
+    assert out["certifications"][0]["expiration"] == "2026-03-15"
+
+    job_id = _job(SessionLocal)
+    ctx = client.post("/api/v1/apply/context", json={"url": "https://x.com", "job_id": job_id}, headers=_token(client)).json()
+    assert ctx["education"][0]["gpa"] == "3.7" and ctx["education"][0]["start_date"] == "2014-09"
+    assert ctx["certifications"] == [{"name": "Epic Clarity", "issuer": "Epic", "issued": "2022-03-15", "expires": "2026-03-15"}]
+
+    assert client.delete(f"/api/v1/profile/certifications/{cert_id}").json()["certifications"] == []
+    assert client.delete("/api/v1/profile/certifications/9999").status_code == 404

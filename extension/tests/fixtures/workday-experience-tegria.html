@@ -56,7 +56,33 @@
     btn.addEventListener('click', () => { window.__adds++; box.insertAdjacentHTML('beforeend', make(++seq)); wire(box); relabel(btn, box); });
   }
   adder('addwork', 'workbox', workRow); adder('addedu', 'edubox', eduRow);
-  document.getElementById('addcert').addEventListener('click', () => { window.__certAdds++; });
+  const CERTS = ['CPC', 'Epic Clarity Data Model'];
+  function certRow(n) {
+    const p = `certifications-${n}`;
+    return `<div class="row" role="group"><div><span>Certifications ${document.querySelectorAll('#certbox .row').length + 1}</span><button type="button" class="del">Delete</button></div>
+      <div data-automation-id="multiSelectContainer"><label for="${p}--certification">Certification<abbr aria-hidden="true">*</abbr></label>
+        <input id="${p}--certification" type="text" data-uxi-widget-type="selectinput" placeholder="Search"><div data-automation-id="promptAriaInstruction">0 items selected</div><ul class="cmenu" role="listbox"></ul></div>
+      <div><label for="${p}--certificationNumber">Certification Number</label><input id="${p}--certificationNumber" type="text"></div>
+      <div class="issued">${date3(p + '--issuedDate', 'Issued Date')}</div><div class="expires">${date3(p + '--expirationDate', 'Expiration Date')}</div></div>`;
+  }
+  const date3 = (id, label) => `<fieldset><legend><label><span>${label}</span></label></legend><div data-automation-id="dateInputWrapper" id="${id}">
+    <input id="${id}-dateSectionMonth-input" data-automation-id="dateSectionMonth-input" aria-label="Month"><input id="${id}-dateSectionDay-input" data-automation-id="dateSectionDay-input" aria-label="Day"><input id="${id}-dateSectionYear-input" data-automation-id="dateSectionYear-input" aria-label="Year"></div></fieldset>`;
+  function wireCert(box) {
+    box.querySelectorAll('.row').forEach(row => {
+      if (row.__wired) return; row.__wired = true;
+      row.querySelector('.del').addEventListener('click', () => { window.__deletes = (window.__deletes || 0) + 1; row.remove(); document.querySelectorAll('#certbox .row h4, #certbox .row span:first-child').forEach(() => {}); });
+      const inp = row.querySelector('input[data-uxi-widget-type]'), menu = row.querySelector('.cmenu'), note = row.querySelector('[data-automation-id=promptAriaInstruction]');
+      inp.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return; menu.innerHTML = '';
+        const q = inp.value.trim().toLowerCase(); if (!q) return;
+        const echo = document.createElement('li'); echo.setAttribute('role', 'option'); echo.setAttribute('data-automation-id', 'selectedItem'); echo.textContent = inp.value; menu.appendChild(echo);
+        CERTS.filter(c => c.toLowerCase().startsWith(q)).forEach(c => { const li = document.createElement('li'); li.setAttribute('role', 'option'); li.setAttribute('data-automation-id', 'menuItem'); li.textContent = c;
+          li.addEventListener('click', () => { note.textContent = '1 item selected'; inp.value = ''; menu.innerHTML = ''; inp.dataset.chosen = c; }); menu.appendChild(li); });
+      });
+    });
+  }
+  document.getElementById('addcert').addEventListener('click', () => { window.__certAdds++; document.getElementById('certbox').insertAdjacentHTML('beforeend', certRow(++seq)); wireCert(document.getElementById('certbox')); const b = document.getElementById('addcert'); b.textContent = 'Add Another'; });
+  window.__certs = () => Array.from(document.querySelectorAll('#certbox .row')).map(r => ({ chosen: r.querySelector('input[data-uxi-widget-type]').dataset.chosen || '', dates: Array.from(r.querySelectorAll('[data-automation-id^=dateSection]')).map(i => i.value) }));
   document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
   // Skills search: Enter lists an echo of the typed text plus the catalog entries that match it exactly or by prefix.
   const CATALOG = ['SQL', 'SQL Server', 'Microsoft Excel', 'Tableau', 'Python'];

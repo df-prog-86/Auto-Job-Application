@@ -3,6 +3,7 @@ import type {
   AnswerUpsert,
   AutomationStatusResponse,
   DiscoveryRunResult,
+  CertificationInput,
   EducationInput,
   EmploymentInput,
   HealthResponse,
@@ -115,6 +116,11 @@ export const api = {
   updateEducation: (id: number, payload: EducationInput) =>
     request<ProfileOut>(`/profile/education/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteEducation: (id: number) => request<ProfileOut>(`/profile/education/${id}`, { method: "DELETE" }),
+  addCertification: (payload: CertificationInput) =>
+    request<ProfileOut>("/profile/certifications", { method: "POST", body: JSON.stringify(payload) }),
+  updateCertification: (id: number, payload: CertificationInput) =>
+    request<ProfileOut>(`/profile/certifications/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteCertification: (id: number) => request<ProfileOut>(`/profile/certifications/${id}`, { method: "DELETE" }),
   addSkill: (canonical_skill: string) =>
     request<ProfileOut>("/profile/skills", { method: "POST", body: JSON.stringify({ canonical_skill }) }),
   deleteSkill: (id: number) => request<ProfileOut>(`/profile/skills/${id}`, { method: "DELETE" }),

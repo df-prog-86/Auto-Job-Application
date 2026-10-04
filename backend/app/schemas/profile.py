@@ -66,6 +66,7 @@ class EducationOut(BaseModel):
     field: str | None
     start_date: dt.date | None
     end_date: dt.date | None
+    gpa: str | None = None
 
     class Config:
         from_attributes = True
@@ -81,6 +82,7 @@ class SkillOut(BaseModel):
 
 
 class CertificationOut(BaseModel):
+    id: int
     certification: str
     issuer: str | None
     date: dt.date | None
@@ -143,6 +145,14 @@ class EducationIn(BaseModel):
     field: str | None = None
     start_date: str | None = None
     end_date: str | None = None
+    gpa: str | None = None
+
+
+class CertificationIn(BaseModel):
+    certification: str | None = None
+    issuer: str | None = None
+    date: str | None = None
+    expiration: str | None = None
 
 
 class SkillIn(BaseModel):

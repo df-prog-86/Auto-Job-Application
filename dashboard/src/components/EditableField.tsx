@@ -7,7 +7,7 @@ interface EditableFieldProps {
   value: string;
   onSave: (value: string) => Promise<unknown>;
   required?: boolean;
-  type?: "text" | "email" | "tel" | "url" | "month";
+  type?: "text" | "email" | "tel" | "url" | "month" | "date";
   /** Shown instead of "Add ..." when an optional value is empty (e.g. "Present"). */
   emptyLabel?: string;
   /** Formats the saved value for reading (e.g. a month). */

@@ -398,3 +398,43 @@ test("Workday: what you typed by hand on the page you moved to is not overwritte
   assert.equal(await page.$eval("#em", (i) => i.value).catch(() => "moved"), "mine@example.com");
   await page.close();
 });
+
+test("certifications: found in Workday's list and dated; one that is not in the list is not kept", async () => {
+  const { page, report } = await runTegria({
+    ...history(),
+    certifications: [
+      { name: "Epic Clarity Data Model", issuer: "Epic", issued: "2022-03-15", expires: null },
+      { name: "Made Up Certificate", issuer: "Nobody", issued: "2020-01-01", expires: null },
+    ],
+  });
+  const certs = await page.evaluate(() => window.__certs());
+  assert.equal(certs.length, 1, "the unmatched certification's empty row was removed again");
+  assert.deepEqual(certs[0], { chosen: "Epic Clarity Data Model", dates: ["03", "15", "2022", "", "", ""] });
+  assert.equal(await page.evaluate(() => window.__deletes), 1);
+  assert.ok(!report.flagged.some((f) => /Certification/.test(f.label)), JSON.stringify(report.flagged));
+  await page.close();
+});
+
+test("certifications: a date with no day is not given an invented one", async () => {
+  const { page } = await runTegria({ ...history(), certifications: [{ name: "CPC", issued: "2022-03", expires: null }] });
+  const certs = await page.evaluate(() => window.__certs());
+  assert.deepEqual(certs[0].dates, ["", "", "", "", "", ""]);
+  assert.equal(certs[0].chosen, "CPC");
+  await page.close();
+});
+
+test("education: GPA is filled, and a required year that is missing is flagged", async () => {
+  const h = history(); h.education[0].gpa = "3.7"; h.education[0].end_date = null;
+  const { page, report } = await runTegria(h);
+  const edu = await tegriaRows(page, "edubox");
+  assert.equal(edu[0].texts[2], "3.7");
+  assert.deepEqual(edu[0].dates, ["2014", ""]);
+  assert.ok(report.flagged.some((f) => /Education 1: To \(year\)/.test(f.label)), JSON.stringify(report.flagged));
+  await page.close();
+});
+
+test("certifications: nothing saved means the Certifications section is left alone", async () => {
+  const { page } = await runTegria({ ...history(), certifications: [] });
+  assert.equal(await page.evaluate(() => window.__certAdds), 0);
+  await page.close();
+});

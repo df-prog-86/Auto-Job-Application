@@ -65,6 +65,7 @@ async function fillApplicationPage(tabId: number, jobId?: number): Promise<FillP
     experience: ctx.experience,
     education: ctx.education,
     skills: ctx.skills,
+    certifications: ctx.certifications,
   };
 
   await chrome.scripting.executeScript({ target: { tabId }, files: ["content/fill-page.js"] });
@@ -184,6 +185,7 @@ async function startWorkdayWalker(run: WorkdayRun): Promise<void> {
     experience: ctx.experience,
     education: ctx.education,
     skills: ctx.skills,
+    certifications: ctx.certifications,
   };
   await chrome.scripting.executeScript({ target: { tabId: run.tabId }, files: ["content/fill-page.js"] });
   await chrome.scripting.executeScript({

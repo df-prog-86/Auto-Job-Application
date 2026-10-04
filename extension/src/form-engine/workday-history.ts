@@ -14,28 +14,30 @@ import { discoverFields } from "@/form-engine/discover";
 import type { FormField } from "@/form-engine/discover";
 import { currentValue, fillCombobox, fillField, readDropdownOptions, setNativeValue } from "@/form-engine/fill";
 import { mark } from "@/form-engine/highlight";
-import type { ApplyContext, ApplyEducation, ApplyExperience, FillReport } from "@/form-engine/types";
+import type { ApplyCertification, ApplyContext, ApplyEducation, ApplyExperience, FillReport } from "@/form-engine/types";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const MAX_ROWS = 6;
 
 const clean = (t: string | null | undefined) => (t ?? "").replace(/[*✱∗]/g, " ").replace(/\s+/g, " ").trim();
 
-type Kind = "work" | "edu" | "web";
+type Kind = "work" | "edu" | "web" | "cert";
 
 const PANEL: Record<Kind, RegExp> = {
   work: /^workExperience-\d+$/,
   edu: /^education-\d+$/,
   web: /^websites?-\d+$/,
+  cert: /^certifications?-\d+$/,
 };
 const HEADING: Record<Kind, RegExp> = {
   work: /^work experience \d+$/i,
   edu: /^education \d+$/i,
   web: /^websites? \d+$/i,
+  cert: /^certifications? \d+$/i,
 };
 
 const DATE_SELECTOR =
-  "input[data-automation-id*='dateSection' i], input[placeholder*='MM'], input[placeholder*='YYYY'], input[aria-label*='month' i], input[aria-label*='year' i]";
+  "input[data-automation-id*='dateSection' i], input[placeholder*='MM'], input[placeholder*='DD'], input[placeholder*='YYYY'], input[aria-label*='month' i], input[aria-label*='day' i], input[aria-label*='year' i]";
 
 export function isDateInput(el: Element): boolean {
   return el.matches(DATE_SELECTOR);
@@ -77,7 +79,7 @@ export function findRows(doc: Document, kind: Kind): HTMLElement[] {
 
   const all = (k: Kind) => Array.from(doc.querySelectorAll("*")).filter((e) => HEADING[k].test(ownText(e)));
   const mine = all(kind);
-  const others = (["work", "edu", "web"] as Kind[]).filter((k) => k !== kind).flatMap(all);
+  const others = (["work", "edu", "web", "cert"] as Kind[]).filter((k) => k !== kind).flatMap(all);
   const rows: HTMLElement[] = [];
   for (const h of mine) {
     let box = h as HTMLElement;
@@ -129,7 +131,12 @@ async function clickAddAnother(doc: Document, last: HTMLElement): Promise<boolea
   return true;
 }
 
-const SECTION_TITLE: Record<Kind, RegExp> = { work: /^work experience$/i, edu: /^education$/i, web: /^websites?$/i };
+const SECTION_TITLE: Record<Kind, RegExp> = {
+  work: /^work experience$/i,
+  edu: /^education$/i,
+  web: /^websites?$/i,
+  cert: /^certifications?$/i,
+};
 
 /** The "Add" button under a section's title, for sections that start with no rows. */
 function sectionAddButton(doc: Document, kind: Kind): HTMLButtonElement | null {
@@ -182,25 +189,29 @@ async function ensureRows(doc: Document, kind: Kind, want: number): Promise<HTML
 
 // ---- dates -----------------------------------------------------------------
 
+type DateKey = "from" | "to" | "issued" | "expires";
+
 interface DateWidget {
-  label: "from" | "to";
+  label: DateKey;
+  required: boolean;
   inputs: HTMLInputElement[];
 }
 
-/** Each From / To date box in the row, found by the From / To label that sits with it. */
+const DATE_LABEL = /^(from|to|start|end|issued|expiration|expires)\b/;
+const keyOf = (t: string): DateKey =>
+  /^(from|start)/.test(t) ? "from" : /^(to|end)/.test(t) ? "to" : /^issued/.test(t) ? "issued" : "expires";
+
+/** Each date box in the row (From, To, Issued, Expiration), found by the label that sits with it. */
 function dateWidgets(row: HTMLElement): DateWidget[] {
   const inputs = Array.from(row.querySelectorAll<HTMLInputElement>(DATE_SELECTOR)).filter((i) => !i.disabled && !i.readOnly);
-  const groups = new Map<HTMLElement, { label: "from" | "to"; inputs: HTMLInputElement[] }>();
+  const groups = new Map<HTMLElement, DateWidget>();
   for (const input of inputs) {
     let p: HTMLElement | null = input.parentElement;
     while (p && p !== row) {
-      const labels = Array.from(p.querySelectorAll("label, legend"))
-        .map((l) => clean(l.textContent).toLowerCase())
-        .filter((t) => /^(from|to)\b/.test(t));
-      const kinds = new Set(labels.map((t) => (t.startsWith("from") ? "from" : "to")));
+      const labels = Array.from(p.querySelectorAll("label, legend")).filter((l) => DATE_LABEL.test(clean(l.textContent).toLowerCase()));
+      const kinds = new Set(labels.map((l) => keyOf(clean(l.textContent).toLowerCase())));
       if (kinds.size === 1) {
-        const label = [...kinds][0] as "from" | "to";
-        const g = groups.get(p) ?? { label, inputs: [] };
+        const g = groups.get(p) ?? { label: [...kinds][0], required: labels.some((l) => /\*/.test(l.textContent ?? "")), inputs: [] };
         g.inputs.push(input);
         groups.set(p, g);
         break;
@@ -215,33 +226,45 @@ function dateWidgets(row: HTMLElement): DateWidget[] {
 const attrs = (i: HTMLInputElement) =>
   `${i.getAttribute("data-automation-id") ?? ""} ${i.getAttribute("aria-label") ?? ""} ${i.getAttribute("placeholder") ?? ""} ${i.id}`;
 
-/** Writes "YYYY-MM" (or just the year) into a date box and checks it took. */
-async function writeDate(w: DateWidget, ym: string, yearOnly: boolean): Promise<boolean> {
-  const [year, month] = ym.split("-");
+const COMBINED = /MM\s*\/\s*(DD\s*\/\s*)?YYYY/i;
+
+/**
+ * Writes "YYYY-MM" or "YYYY-MM-DD" (or just the year) into a date box and checks it took.
+ * A box that wants a day is never given an invented one: without a day it is left alone.
+ */
+async function writeDate(w: DateWidget, date: string, yearOnly = false): Promise<boolean> {
+  const [year, month, day] = date.split("-");
   if (!/^\d{4}$/.test(year ?? "")) return false;
   const set = (i: HTMLInputElement, v: string) => {
     i.focus();
     setNativeValue(i, v);
     i.dispatchEvent(new Event("blur", { bubbles: true }));
   };
-  const monthBox = w.inputs.find((i) => /month|^MM$/i.test(attrs(i)) && !/MM\s*\/\s*YYYY/i.test(attrs(i)));
-  const yearBox = w.inputs.find((i) => /year|^YYYY$/i.test(attrs(i)) && !/MM\s*\/\s*YYYY/i.test(attrs(i)));
-  if (monthBox && yearBox && !yearOnly) {
+  const separate = w.inputs.filter((i) => !COMBINED.test(attrs(i)));
+  const monthBox = separate.find((i) => /month|^MM$/i.test(attrs(i)));
+  const dayBox = separate.find((i) => /day|^DD$/i.test(attrs(i)));
+  const yearBox = separate.find((i) => /year|^YYYY$/i.test(attrs(i)));
+  if (yearOnly || (yearBox && !monthBox && !dayBox)) {
+    const box = yearBox ?? w.inputs[0];
+    if (!box) return false;
+    set(box, year);
+    await sleep(60);
+    return box.value.includes(year);
+  }
+  if (monthBox && yearBox) {
     if (!/^\d{2}$/.test(month ?? "")) return false;
+    if (dayBox && !/^\d{2}$/.test(day ?? "")) return false;
     set(monthBox, month);
+    if (dayBox) set(dayBox, day);
     set(yearBox, year);
     await sleep(60);
-    return monthBox.value.trim() !== "" && yearBox.value.includes(year);
+    return monthBox.value.trim() !== "" && (!dayBox || dayBox.value.trim() !== "") && yearBox.value.includes(year);
   }
   const single = w.inputs[0];
-  if (!single) return false;
-  if (yearOnly || (yearBox && !monthBox)) {
-    set(yearBox ?? single, year);
-    await sleep(60);
-    return (yearBox ?? single).value.includes(year);
-  }
-  if (!/^\d{2}$/.test(month ?? "")) return false;
-  set(single, `${month}/${year}`);
+  if (!single || !/^\d{2}$/.test(month ?? "")) return false;
+  const wantsDay = /DD/i.test(attrs(single));
+  if (wantsDay && !/^\d{2}$/.test(day ?? "")) return false;
+  set(single, wantsDay ? `${month}/${day}/${year}` : `${month}/${year}`);
   await sleep(60);
   return single.value.includes(year);
 }
@@ -347,12 +370,59 @@ async function fillEduRow(doc: Document, row: HTMLElement, n: number, e: ApplyEd
   if (study && e.field && currentValue(study) === "") {
     if (await fillField(study, e.field, { typeText: e.field })) done(report, `${tag}: Field of Study`, study.outlineEl);
   }
-  // Years only; both are optional on the page.
+  await putText(report, find(fields, /overall result|gpa/), `${tag}: GPA`, e.gpa);
+  // Years only. A year the page requires but that could not be written is flagged, never skipped quietly.
   const widgets = dateWidgets(row);
-  const from = widgets.find((w) => w.label === "from");
-  const to = widgets.find((w) => w.label === "to");
-  if (from && e.start_date && (await writeDate(from, e.start_date, true))) done(report, `${tag}: From`, from.inputs[0]);
-  if (to && e.end_date && (await writeDate(to, e.end_date, true))) done(report, `${tag}: To`, to.inputs[0]);
+  for (const [key, value, name] of [["from", e.start_date, "From"], ["to", e.end_date, "To"]] as const) {
+    const w = widgets.find((x) => x.label === key);
+    if (!w) continue;
+    if (value && (await writeDate(w, value, true))) done(report, `${tag}: ${name}`, w.inputs[0]);
+    else if (w.required && w.inputs.every((i) => i.value.trim() === "")) flag(report, `${tag}: ${name} (year)`, w.inputs[0]);
+  }
+}
+
+const MAX_CERTS = 5;
+
+/** Presses a row's own Delete button, only ever for a row this file just added and that is still empty. */
+async function removeEmptyRow(doc: Document, kind: Kind, row: HTMLElement): Promise<boolean> {
+  if (!rowIsEmpty(row, doc)) return false;
+  const del = Array.from(row.querySelectorAll<HTMLButtonElement>("button")).find((b) => /^delete$/i.test(clean(b.textContent)));
+  if (!del) return false;
+  const form = del.closest("form");
+  const block = (e: Event) => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  form?.addEventListener("submit", block, true);
+  try {
+    del.click();
+    await sleep(400);
+  } finally {
+    form?.removeEventListener("submit", block, true);
+  }
+  return !doc.contains(row);
+}
+
+/** Adds one more row of a kind and returns it (the new row is the last one). */
+async function addOne(doc: Document, kind: Kind): Promise<HTMLElement | null> {
+  const before = findRows(doc, kind);
+  const rows = await ensureRows(doc, kind, before.length + 1);
+  return rows.length > before.length ? rows[rows.length - 1] : null;
+}
+
+async function fillCertRow(doc: Document, row: HTMLElement, n: number, c: ApplyCertification, report: FillReport): Promise<boolean> {
+  const tag = `Certification ${n}`;
+  const name = find(rowFields(row, doc), /^certification$/);
+  if (!name || currentValue(name) !== "") return false;
+  // The name is searched in Workday's own list; only an exact entry is ever picked.
+  if (!(await fillField(name, c.name, { typeText: c.name, exactOnly: true }))) return false;
+  done(report, `${tag}: Certification`, name.outlineEl);
+  const widgets = dateWidgets(row);
+  for (const [key, value, label] of [["issued", c.issued, "Issued Date"], ["expires", c.expires, "Expiration Date"]] as const) {
+    const w = widgets.find((x) => x.label === key);
+    if (w && value && (await writeDate(w, value))) done(report, `${tag}: ${label}`, w.inputs[0]);
+  }
+  return true;
 }
 
 export interface HistoryResult {
@@ -418,6 +488,26 @@ export async function fillHistory(doc: Document, ctx: ApplyContext, report: Fill
     }
   }
   owned.push(...findRows(doc, "edu"));
+
+  // Certifications: each is searched in Workday's list. One that is not in the list is not added, and the
+  // empty row made for it is removed again, so it never blocks the page. Rows holding anything are left alone.
+  const certs = (ctx.certifications ?? []).filter((c) => c.name.trim()).slice(0, MAX_CERTS);
+  const certRows = findRows(doc, "cert");
+  const certsOk = certRows.length > 0 ? certRows.every((r) => rowIsEmpty(r, doc)) : !!sectionAddButton(doc, "cert");
+  if (certs.length > 0 && certsOk) {
+    let n = 0;
+    for (const cert of certs) {
+      let row: HTMLElement | null = findRows(doc, "cert").find((r) => rowIsEmpty(r, doc)) ?? null;
+      if (!row) row = await addOne(doc, "cert");
+      if (!row) break;
+      if (await fillCertRow(doc, row, n + 1, cert, report)) {
+        n++;
+      } else if (!(await removeEmptyRow(doc, "cert", row))) {
+        flag(report, `Certification ${n + 1}: ${cert.name} (not found in the list)`, row);
+      }
+    }
+  }
+  owned.push(...findRows(doc, "cert"));
 
   // One empty "Websites" row asks for a required URL; the LinkedIn address is the natural fit.
   const web = findRows(doc, "web");

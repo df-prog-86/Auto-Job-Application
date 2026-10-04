@@ -126,6 +126,7 @@ export interface EducationOut {
   field?: string | null;
   start_date?: string | null;
   end_date?: string | null;
+  gpa?: string | null;
 }
 
 export interface SkillOut {
@@ -135,6 +136,7 @@ export interface SkillOut {
 }
 
 export interface CertificationOut {
+  id: number;
   certification: string;
   issuer?: string | null;
   date?: string | null;
@@ -304,6 +306,14 @@ export interface EducationInput {
   field?: string | null;
   start_date?: string | null;
   end_date?: string | null;
+  gpa?: string | null;
+}
+
+export interface CertificationInput {
+  certification?: string | null;
+  issuer?: string | null;
+  date?: string | null;
+  expiration?: string | null;
 }
 
 export interface ProfileUpdate {

@@ -11,6 +11,7 @@ import { answerValue, missingItems } from "@/lib/completeness";
 import type {
   AnswerOut,
   DraftClaim,
+  CertificationOut,
   EducationOut,
   EmploymentHistoryOut,
   MasterRole,
@@ -74,6 +75,12 @@ const SPONSORSHIP_OPTIONS = [
 /** "2021-04-01" or "2021-04" -> "2021-04" (what a month input wants). */
 function toMonth(value?: string | null): string {
   return value ? value.slice(0, 7) : "";
+}
+
+function formatDay(value: string): string {
+  const [y, m, d] = value.split("-").map(Number);
+  if (!y || !m || !d) return value;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 function formatMonth(value: string): string {
@@ -301,19 +308,24 @@ export function Profile() {
         </div>
       </section>
 
-      {profile.certifications.length > 0 && (
-        <Card className="p-6">
-          <h2 className="mb-3 text-base font-bold text-ink-900">Certifications</h2>
-          <ul className="space-y-2">
-            {profile.certifications.map((cert, i) => (
-              <li key={i} className="text-sm">
-                <span className="font-semibold text-ink-900">{cert.certification}</span>
-                {cert.issuer && <span className="text-ink-500">, {cert.issuer}</span>}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
+      <section>
+        <SectionTitle
+          title="Certifications"
+          action={
+            <Button size="sm" onClick={() => void applyProfile(api.addCertification({}))}>
+              Add a certification
+            </Button>
+          }
+        />
+        <div className="space-y-4">
+          {profile.certifications.length === 0 && (
+            <EmptyNote>No certifications yet. Add one above if the applications you fill ask for them.</EmptyNote>
+          )}
+          {profile.certifications.map((cert) => (
+            <CertificationCard key={cert.id} cert={cert} onChange={applyProfile} />
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -561,6 +573,66 @@ function RoleCard({
   );
 }
 
+function CertificationCard({
+  cert,
+  onChange,
+}: {
+  cert: CertificationOut;
+  onChange: (call: Promise<ProfileOut>) => Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const edit = (patch: Parameters<typeof api.updateCertification>[1]) =>
+    onChange(api.updateCertification(cert.id, patch));
+
+  return (
+    <Card className="p-6">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <EditableField
+          label="Certification"
+          value={cert.certification}
+          required
+          bold
+          onSave={(v) => edit({ certification: v })}
+        />
+        <EditableField label="Issued by" value={cert.issuer ?? ""} emptyLabel="Add issuer (optional)" onSave={(v) => edit({ issuer: v })} />
+        <EditableField
+          label="Issued"
+          value={cert.date ?? ""}
+          type="date"
+          emptyLabel="Add date (optional)"
+          format={formatDay}
+          onSave={(v) => edit({ date: v })}
+        />
+        <EditableField
+          label="Expires"
+          value={cert.expiration ?? ""}
+          type="date"
+          emptyLabel="No expiry"
+          format={formatDay}
+          onSave={(v) => edit({ expiration: v })}
+        />
+      </div>
+      <div className="mt-4 flex justify-end">
+        {confirming ? (
+          <span className="flex items-center gap-2 text-xs text-ink-500">
+            Remove this certification from your profile?
+            <Button size="sm" variant="danger" onClick={() => void onChange(api.deleteCertification(cert.id))}>
+              Remove
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+          </span>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={() => setConfirming(true)}>
+            Remove certification
+          </Button>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function EducationCard({
   edu,
   onChange,
@@ -585,13 +657,22 @@ function EducationCard({
         <EditableField label="Degree" value={edu.degree ?? ""} required onSave={(v) => edit({ degree: v })} />
         <EditableField label="Field of study" value={edu.field ?? ""} onSave={(v) => edit({ field: v })} />
         <EditableField
-          label="Graduated"
+          label="Started"
+          value={toMonth(edu.start_date)}
+          type="month"
+          emptyLabel="Add date"
+          format={formatMonth}
+          onSave={(v) => edit({ start_date: v })}
+        />
+        <EditableField
+          label="Graduated (or expected)"
           value={toMonth(edu.end_date)}
           type="month"
           emptyLabel="Add date"
           format={formatMonth}
           onSave={(v) => edit({ end_date: v })}
         />
+        <EditableField label="GPA" value={edu.gpa ?? ""} emptyLabel="Add GPA (optional)" onSave={(v) => edit({ gpa: v })} />
       </div>
       <div className="mt-4 flex justify-end">
         {confirming ? (

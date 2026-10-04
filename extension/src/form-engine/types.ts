@@ -31,6 +31,15 @@ export interface ApplyEducation {
   field?: string | null;
   start_date?: string | null;
   end_date?: string | null;
+  gpa?: string | null;
+}
+
+export interface ApplyCertification {
+  name: string;
+  issuer?: string | null;
+  /** "YYYY-MM-DD" */
+  issued?: string | null;
+  expires?: string | null;
 }
 
 export interface ApplyContext {
@@ -41,6 +50,7 @@ export interface ApplyContext {
   education?: ApplyEducation[];
   /** Skills for a skills box, those named in the job posting first. */
   skills?: string[];
+  certifications?: ApplyCertification[];
 }
 
 export interface FlaggedField {

@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.repositories.profile_repository import commit_profile, get_current_profile
-from app.models.candidate import Education, EmploymentHistory, Skill
+from app.models.candidate import Certification, Education, EmploymentHistory, Skill
 from app.schemas.profile import (
     CommitProfileRequest,
+    CertificationIn,
     EducationIn,
     EmploymentIn,
     MasterRoleOut,
@@ -173,6 +174,7 @@ def add_education(payload: EducationIn, db: Session = Depends(get_db)) -> Profil
         institution=(data.get("institution") or "").strip(),
         degree=data.get("degree"),
         field=data.get("field"),
+        gpa=(data.get("gpa") or "").strip() or None,
         source="manual",
     )
     _apply_dates(row, data)
@@ -191,7 +193,7 @@ def update_education(entry_id: int, payload: EducationIn, db: Session = Depends(
     data = payload.model_dump(exclude_unset=True)
     if "institution" in data and (data["institution"] or "").strip():
         row.institution = data["institution"].strip()
-    for field in ("degree", "field"):
+    for field in ("degree", "field", "gpa"):
         if field in data:
             setattr(row, field, (data[field] or "").strip() or None)
     _apply_dates(row, data)
@@ -206,6 +208,58 @@ def delete_education(entry_id: int, db: Session = Depends(get_db)) -> ProfileOut
     row = db.get(Education, entry_id)
     if row is None or row.profile_id != profile.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="School not found.")
+    db.delete(row)
+    db.commit()
+    db.refresh(profile)
+    return ProfileOut.model_validate(profile)
+
+
+def _apply_cert_dates(row: Certification, data: dict) -> None:
+    for key in ("date", "expiration"):
+        if key in data:
+            setattr(row, key, parse_partial_date((data[key] or "").strip() or None))
+
+
+@router.post("/certifications", response_model=ProfileOut, status_code=status.HTTP_201_CREATED)
+def add_certification(payload: CertificationIn, db: Session = Depends(get_db)) -> ProfileOut:
+    profile = _need_profile(db)
+    data = payload.model_dump(exclude_unset=True)
+    row = Certification(
+        profile_id=profile.id,
+        certification=(data.get("certification") or "").strip(),
+        issuer=(data.get("issuer") or "").strip() or None,
+        source="manual",
+    )
+    _apply_cert_dates(row, data)
+    db.add(row)
+    db.commit()
+    db.refresh(profile)
+    return ProfileOut.model_validate(profile)
+
+
+@router.patch("/certifications/{entry_id}", response_model=ProfileOut)
+def update_certification(entry_id: int, payload: CertificationIn, db: Session = Depends(get_db)) -> ProfileOut:
+    profile = _need_profile(db)
+    row = db.get(Certification, entry_id)
+    if row is None or row.profile_id != profile.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Certification not found.")
+    data = payload.model_dump(exclude_unset=True)
+    if "certification" in data and (data["certification"] or "").strip():
+        row.certification = data["certification"].strip()  # required; ignore an attempt to blank it
+    if "issuer" in data:
+        row.issuer = (data["issuer"] or "").strip() or None
+    _apply_cert_dates(row, data)
+    db.commit()
+    db.refresh(profile)
+    return ProfileOut.model_validate(profile)
+
+
+@router.delete("/certifications/{entry_id}", response_model=ProfileOut)
+def delete_certification(entry_id: int, db: Session = Depends(get_db)) -> ProfileOut:
+    profile = _need_profile(db)
+    row = db.get(Certification, entry_id)
+    if row is None or row.profile_id != profile.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Certification not found.")
     db.delete(row)
     db.commit()
     db.refresh(profile)

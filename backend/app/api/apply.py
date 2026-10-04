@@ -21,6 +21,7 @@ from app.models.questions import PendingQuestion
 from app.repositories.profile_repository import get_current_profile
 from app.schemas.apply import (
     ApplyContextIn,
+    ApplyCertification,
     ApplyContextOut,
     ApplyEducation,
     ApplyExperience,
@@ -94,6 +95,7 @@ def _history(profile, resume_doc) -> tuple[list[ApplyExperience], list[ApplyEduc
             field=e.field,
             start_date=_month(e.start_date),
             end_date=_month(e.end_date),
+            gpa=e.gpa,
         )
         for e in schools
     ]
@@ -101,6 +103,20 @@ def _history(profile, resume_doc) -> tuple[list[ApplyExperience], list[ApplyEduc
 
 
 MAX_SKILLS = 25
+
+
+def _certifications(profile) -> list[ApplyCertification]:
+    certs = sorted(profile.certifications, key=lambda c: c.date or dt.date.min, reverse=True)
+    return [
+        ApplyCertification(
+            name=c.certification,
+            issuer=c.issuer,
+            issued=c.date.isoformat() if c.date else None,
+            expires=c.expiration.isoformat() if c.expiration else None,
+        )
+        for c in certs
+        if (c.certification or "").strip()
+    ]
 
 
 def _skills(profile, job: Job) -> list[str]:
@@ -184,6 +200,7 @@ def get_apply_context(payload: ApplyContextIn, db: Session = Depends(get_db)) ->
     )
     out.experience, out.education = _history(profile, resume_doc)
     out.skills = _skills(profile, job)
+    out.certifications = _certifications(profile)
     for answer in db.query(CandidateAnswer).filter(CandidateAnswer.profile_id == profile.id).all():
         raw = answer.value.get("raw") if isinstance(answer.value, dict) else None
         if answer.answer_key in ELIGIBILITY_KEYS:

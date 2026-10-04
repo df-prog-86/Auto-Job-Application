@@ -633,6 +633,53 @@ function CertificationCard({
   );
 }
 
+/** Short list that maps cleanly onto the degree choices employers show. */
+const DEGREES = [
+  "High School or GED",
+  "Some College",
+  "Certificate",
+  "Associate's Degree",
+  "Bachelor's Degree",
+  "Master's Degree",
+  "MBA",
+  "Doctorate",
+];
+
+/** The standard degrees, plus a degree saved earlier in other words so it is not lost. */
+function degreeOptions(current?: string | null) {
+  const list = current && !DEGREES.includes(current) ? [current, ...DEGREES] : DEGREES;
+  return list.map((d) => ({ value: d, label: d }));
+}
+
+/** Typing suggestions only. Employers' own lists differ, so any text is still allowed. */
+const FIELD_OF_STUDY_SUGGESTIONS = [
+  "Accounting",
+  "Biology",
+  "Business Administration",
+  "Business Analytics",
+  "Business Management",
+  "Communications",
+  "Computer Science",
+  "Data Science",
+  "Economics",
+  "Education",
+  "Engineering",
+  "English",
+  "Finance",
+  "Health Information Management",
+  "Healthcare Administration",
+  "Information Systems",
+  "Management Information Systems",
+  "Marketing",
+  "Mathematics",
+  "Nursing",
+  "Political Science",
+  "Psychology",
+  "Public Health",
+  "Sociology",
+  "Statistics",
+];
+
 function EducationCard({
   edu,
   onChange,
@@ -654,8 +701,19 @@ function EducationCard({
           bold
           onSave={(v) => edit({ institution: v })}
         />
-        <EditableField label="Degree" value={edu.degree ?? ""} required onSave={(v) => edit({ degree: v })} />
-        <EditableField label="Field of study" value={edu.field ?? ""} onSave={(v) => edit({ field: v })} />
+        <SelectField
+          label="Degree"
+          value={edu.degree ?? ""}
+          required
+          options={degreeOptions(edu.degree)}
+          onSave={(v) => edit({ degree: v })}
+        />
+        <EditableField
+          label="Field of study"
+          value={edu.field ?? ""}
+          suggestions={FIELD_OF_STUDY_SUGGESTIONS}
+          onSave={(v) => edit({ field: v })}
+        />
         <EditableField
           label="Year started"
           value={(edu.start_date ?? "").slice(0, 4)}

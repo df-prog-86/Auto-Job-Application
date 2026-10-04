@@ -345,6 +345,8 @@ export function degreeChoice(degree: string | null | undefined, options: string[
   else if (/ph\.?\s?d|doctor/.test(d)) keyword = "doctor";
   else if (/associate|\ba\.?a\.?s?\b/.test(d)) keyword = "associate";
   else if (/high school|\bged\b/.test(d)) keyword = "high school";
+  else if (/some college/.test(d)) keyword = "some college";
+  else if (/certificate/.test(d)) keyword = "certificate";
   if (!keyword) return null;
   const hits = options.filter((o) => normalizeQuestion(o).includes(keyword));
   if (hits.length === 1) return hits[0];

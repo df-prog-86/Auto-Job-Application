@@ -14,6 +14,8 @@ interface EditableFieldProps {
   format?: (value: string) => string;
   className?: string;
   bold?: boolean;
+  /** Typing suggestions (any text is still allowed). */
+  suggestions?: string[];
 }
 
 /**
@@ -30,6 +32,7 @@ export function EditableField({
   format,
   className = "",
   bold = false,
+  suggestions,
 }: EditableFieldProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -78,7 +81,15 @@ export function EditableField({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           className={inputClass}
+          {...(suggestions ? { list: `${label.replace(/\W+/g, "-")}-options` } : {})}
         />
+        {suggestions && (
+          <datalist id={`${label.replace(/\W+/g, "-")}-options`}>
+            {suggestions.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+        )}
         <div className="mt-2 flex items-center gap-2">
           <Button type="submit" variant="primary" size="sm" disabled={saving}>
             {saving ? "Saving…" : "Save"}

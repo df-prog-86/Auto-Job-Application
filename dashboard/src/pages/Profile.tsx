@@ -657,19 +657,17 @@ function EducationCard({
         <EditableField label="Degree" value={edu.degree ?? ""} required onSave={(v) => edit({ degree: v })} />
         <EditableField label="Field of study" value={edu.field ?? ""} onSave={(v) => edit({ field: v })} />
         <EditableField
-          label="Started"
-          value={toMonth(edu.start_date)}
-          type="month"
-          emptyLabel="Add date"
-          format={formatMonth}
+          label="Year started"
+          value={(edu.start_date ?? "").slice(0, 4)}
+          type="year"
+          emptyLabel="Add year"
           onSave={(v) => edit({ start_date: v })}
         />
         <EditableField
-          label="Graduated (or expected)"
-          value={toMonth(edu.end_date)}
-          type="month"
-          emptyLabel="Add date"
-          format={formatMonth}
+          label="Year graduated (or expected)"
+          value={(edu.end_date ?? "").slice(0, 4)}
+          type="year"
+          emptyLabel="Add year"
           onSave={(v) => edit({ end_date: v })}
         />
         <EditableField label="GPA" value={edu.gpa ?? ""} emptyLabel="Add GPA (optional)" onSave={(v) => edit({ gpa: v })} />

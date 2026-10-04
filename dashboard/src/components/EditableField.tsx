@@ -7,7 +7,7 @@ interface EditableFieldProps {
   value: string;
   onSave: (value: string) => Promise<unknown>;
   required?: boolean;
-  type?: "text" | "email" | "tel" | "url" | "month" | "date";
+  type?: "text" | "email" | "tel" | "url" | "month" | "date" | "year";
   /** Shown instead of "Add ..." when an optional value is empty (e.g. "Present"). */
   emptyLabel?: string;
   /** Formats the saved value for reading (e.g. a month). */
@@ -73,7 +73,8 @@ export function EditableField({
         <label className="mb-1 block text-xs font-semibold text-ink-500">{label}</label>
         <input
           autoFocus
-          type={type}
+          type={type === "year" ? "number" : type}
+          {...(type === "year" ? { min: 1950, max: 2100, step: 1, placeholder: "YYYY" } : {})}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           className={inputClass}

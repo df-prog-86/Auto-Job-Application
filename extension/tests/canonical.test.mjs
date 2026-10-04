@@ -60,3 +60,27 @@ test("a 'City, ST' location expands to the full entry a place list shows", async
   assert.equal(expandLocation("Boston")?.typeText, undefined);
   assert.equal(expandLocation("Paris, FR"), null);
 });
+
+test("willingness questions use the person's saved yes/no, and history questions are left alone", () => {
+  const q = {
+    bg: "Are you willing to submit to a background check? Cardinal Health will conduct a background check only where legally permissible.",
+    crim: "Are you willing to submit to a criminal record check? We will conduct a criminal record check only where legally permissible.",
+    drug: "Are you willing to complete a drug screen and/or medical examination?",
+    random: "Are you willing to take a random drug test if employed?",
+    age: "Are you 18 years of age or older? (Applicants under age 18 will be required to submit documentation)",
+  };
+  assert.deepEqual(classifyField(sig(q.bg)), { kind: "canonical", key: "background_check" });
+  assert.deepEqual(classifyField(sig(q.crim)), { kind: "canonical", key: "criminal_check" });
+  assert.deepEqual(classifyField(sig(q.drug)), { kind: "canonical", key: "drug_screen" });
+  assert.deepEqual(classifyField(sig(q.random)), { kind: "canonical", key: "drug_screen" });
+  assert.deepEqual(classifyField(sig(q.age)), { kind: "canonical", key: "age_18" });
+  // Questions about the past are never answered for the person.
+  assert.equal(classifyField(sig("Have you ever failed a drug test?")).kind, "unknown");
+  assert.equal(classifyField(sig("Have you ever been convicted of a crime? A criminal record check may follow.")).kind, "unknown");
+  const answers = { background_check_ok: true, criminal_check_ok: true, drug_screen_ok: false, age_18_plus: true };
+  assert.equal(resolveValue("background_check", ctx(answers), ["Select One", "Yes", "No"]), "Yes");
+  assert.equal(resolveValue("drug_screen", ctx(answers), ["Select One", "Yes", "No"]), "No");
+  assert.equal(resolveValue("age_18", ctx(answers), ["Yes", "No"]), "Yes");
+  // Nothing saved: left for the person.
+  assert.equal(resolveValue("criminal_check", ctx({}), ["Yes", "No"]), null);
+});

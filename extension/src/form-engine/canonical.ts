@@ -25,7 +25,11 @@ export type CanonicalKey =
   | "resume"
   | "work_authorization"
   | "sponsorship"
-  | "security_clearance";
+  | "security_clearance"
+  | "background_check"
+  | "criminal_check"
+  | "drug_screen"
+  | "age_18";
 
 export type VoluntaryTopic = "gender" | "race" | "hispanic" | "veteran" | "other";
 
@@ -106,6 +110,15 @@ export function classifyField(sig: FieldSignature): Classification {
   // Questions come before plain name/phone rules: "sponsorship" and
   // "authorized to work" must never be mistaken for a name or phone field.
   if (/sponsor/.test(label)) return { kind: "canonical", key: "sponsorship" };
+  // "Are you willing to ..." questions the person has answered once on their Profile.
+  // Questions about history ("ever failed", "convicted") are never matched here.
+  const willing = /\b(willing|able|agree)\b/.test(label) && !/\b(ever|failed|convicted|positive|refused|arrest\w*|charged)\b/.test(label);
+  if (willing && /drug (screen|test)|drug and alcohol|substance (screen|test)/.test(label)) return { kind: "canonical", key: "drug_screen" };
+  if (willing && /criminal (record|background|history)? ?check|criminal record/.test(label)) return { kind: "canonical", key: "criminal_check" };
+  if (willing && /background (check|investigation|screening)/.test(label)) return { kind: "canonical", key: "background_check" };
+  if (/(?:\b18\b|eighteen)[^?]{0,20}(years|yrs|age|older|over)|at least (18|eighteen)|over (the age of )?(18|eighteen)/.test(label) && !/\b(ever|convicted)\b/.test(label)) {
+    return { kind: "canonical", key: "age_18" };
+  }
   if (/security clearance|\bclearance\b/.test(label)) return { kind: "canonical", key: "security_clearance" };
   if (
     /(authori[sz]ed|eligible|legally|right|permitted|able) to work|work authori[sz]ation|employment eligibility/.test(label)
@@ -307,6 +320,15 @@ export function resolveValue(
       };
       const pattern = patterns[status];
       return (pattern && options.find((o) => pattern.test(o))) || null;
+    }
+    case "background_check":
+    case "criminal_check":
+    case "drug_screen":
+    case "age_18": {
+      const saved = ctx.answers[{ background_check: "background_check_ok", criminal_check: "criminal_check_ok", drug_screen: "drug_screen_ok", age_18: "age_18_plus" }[key]];
+      if (typeof saved !== "boolean") return null; // never guessed
+      if (options.length === 0) return saved ? "Yes" : "No";
+      return yesNo(options, saved);
     }
     case "security_clearance": {
       const level = ctx.answers["security_clearance"];

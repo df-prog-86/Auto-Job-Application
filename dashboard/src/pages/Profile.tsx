@@ -386,6 +386,10 @@ function EligibilityCard({ answers, loading }: { answers: AnswerOut[] | undefine
   };
 
   const sponsor = answerValue(answers, "sponsorship_required");
+  const yesNo = (key: string) => {
+    const v = answerValue(answers, key);
+    return v === true ? "yes" : v === false ? "no" : "";
+  };
 
   return (
     <Card className="p-6">
@@ -410,6 +414,30 @@ function EligibilityCard({ answers, loading }: { answers: AnswerOut[] | undefine
             value={sponsor === true ? "yes" : sponsor === false ? "no" : ""}
             options={SPONSORSHIP_OPTIONS}
             onSave={(v) => save("sponsorship_required", "bool", v)}
+          />
+          <SelectField
+            label="Willing to complete a background check?"
+            value={yesNo("background_check_ok")}
+            options={SPONSORSHIP_OPTIONS.slice().reverse()}
+            onSave={(v) => save("background_check_ok", "bool", v)}
+          />
+          <SelectField
+            label="Willing to complete a criminal record check?"
+            value={yesNo("criminal_check_ok")}
+            options={SPONSORSHIP_OPTIONS.slice().reverse()}
+            onSave={(v) => save("criminal_check_ok", "bool", v)}
+          />
+          <SelectField
+            label="Willing to complete a drug screen?"
+            value={yesNo("drug_screen_ok")}
+            options={SPONSORSHIP_OPTIONS.slice().reverse()}
+            onSave={(v) => save("drug_screen_ok", "bool", v)}
+          />
+          <SelectField
+            label="Are you 18 or older?"
+            value={yesNo("age_18_plus")}
+            options={SPONSORSHIP_OPTIONS.slice().reverse()}
+            onSave={(v) => save("age_18_plus", "bool", v)}
           />
           <SelectField
             label="Phone country code"

@@ -21,6 +21,10 @@ STANDARD_ANSWER_KEYS = [
     "salary_target",
     "travel_percentage",
     "security_clearance",
+    "background_check_ok",
+    "criminal_check_ok",
+    "drug_screen_ok",
+    "age_18_plus",
 ]
 
 

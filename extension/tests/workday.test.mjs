@@ -365,3 +365,36 @@ test("skills: a box that already has skills is left alone", async () => {
   assert.deepEqual(await page.evaluate(() => window.__chips()), ["Mine"]);
   await page.close();
 });
+
+test("Workday: after you fix a missed field by hand and press Next yourself, the next step is filled too", async () => {
+  const c = ctx(); c.candidate.last_name = "";
+  const page = await browser.newPage();
+  page.__start = "?after=contact";
+  const report = await runFlow(page, c);
+  assert.equal(report.pagesAdvanced, 0, "stopped on the first page because Last Name was missing");
+  assert.equal(await page.$eval("h2", (h) => h.textContent), "My Information");
+  // The person types the missing name and moves on by themselves.
+  await page.fill("#ln", "Doe");
+  await page.click("#next");
+  await page.waitForFunction(() => document.querySelector("#em")?.value === "jane@example.com", null, { timeout: 8000 });
+  // The person is driving: the step is filled, but Next is theirs to press.
+  await page.waitForTimeout(2500);
+  assert.equal(await page.$eval("h2", (h) => h.textContent), "My Experience");
+  assert.deepEqual(await page.evaluate(() => window.__clicks), ["Save and Continue"], "only the person's own press");
+  assert.equal(await page.evaluate(() => window.__submits), 0);
+  await page.close();
+});
+
+test("Workday: what you typed by hand on the page you moved to is not overwritten", async () => {
+  const c = ctx(); c.candidate.last_name = "";
+  const page = await browser.newPage();
+  page.__start = "?after=contact";
+  await runFlow(page, c);
+  await page.fill("#ln", "Doe");
+  await page.click("#next");
+  await page.waitForSelector("#em");
+  await page.fill("#em", "mine@example.com");
+  await page.waitForTimeout(3500);
+  assert.equal(await page.$eval("#em", (i) => i.value).catch(() => "moved"), "mine@example.com");
+  await page.close();
+});

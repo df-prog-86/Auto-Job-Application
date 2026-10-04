@@ -58,6 +58,16 @@ export function canAdvance(doc: Document, report: FillReport): Verdict {
   return { ok: true, button };
 }
 
+/**
+ * Which step of the application is showing, ignoring rows added or fields that appear within it.
+ * Used to notice that the person moved on by themselves.
+ */
+export function stepSignature(doc: Document): string {
+  const heads = Array.from(doc.querySelectorAll("h2, h3")).map((h) => (h.textContent ?? "").trim()).join("|");
+  const step = /current step (\d+) of (\d+)/i.exec(doc.body?.innerText ?? "")?.[1] ?? "";
+  return `${heads}#${step}`;
+}
+
 /** A cheap fingerprint of the current step, to notice when Workday has moved on. */
 export function pageSignature(doc: Document): string {
   const heads = Array.from(doc.querySelectorAll("h2")).map((h) => (h.textContent ?? "").trim()).join("|");

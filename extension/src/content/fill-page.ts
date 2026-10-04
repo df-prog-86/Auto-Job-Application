@@ -4,7 +4,7 @@
  * does nothing until it is called.
  */
 
-import { MAX_ADVANCES, canAdvance, isWorkdayPage, pageSignature } from "@/form-engine/advance";
+import { MAX_ADVANCES, canAdvance, isWorkdayPage, pageSignature, stepSignature } from "@/form-engine/advance";
 import { fillPage } from "@/form-engine/engine";
 import { runWorkday } from "@/form-engine/workday-run";
 import type { ResumePayload } from "@/form-engine/engine";
@@ -21,9 +21,9 @@ declare global {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Fills this page; on Workday it also moves on page by page while it is safe to (see advance.ts). */
-async function fillAndAdvance(ctx: ApplyContext, resume: ResumePayload | null): Promise<FillReport> {
+async function fillAndAdvance(ctx: ApplyContext, resume: ResumePayload | null, advance = true): Promise<FillReport> {
   let report = await fillPage(document, ctx, resume);
-  if (!isWorkdayPage(document)) return report;
+  if (!advance || !isWorkdayPage(document)) return report;
   const filled = [...report.filled];
   let advanced = 0;
   let stopped = "";
@@ -53,7 +53,51 @@ async function fillAndAdvance(ctx: ApplyContext, resume: ResumePayload | null): 
   return { ...report, filled, pagesAdvanced: advanced, stoppedBecause: stopped };
 }
 
-window.__jobAgentFill = (ctx, resume) => fillAndAdvance(ctx, resume);
+/**
+ * After a fill, keep watching a Workday application. If the person fixes something by hand and moves
+ * to the next step themselves, that new step is filled too (the same rules apply: nothing they
+ * typed is overwritten, and nothing is submitted). Re-arming replaces the earlier watcher.
+ */
+let watcher: number | undefined;
+function watchSteps(ctx: ApplyContext, resume: ResumePayload | null): void {
+  if (!isWorkdayPage(document)) return;
+  if (watcher !== undefined) window.clearInterval(watcher);
+  let known = stepSignature(document);
+  let candidate = "";
+  let busy = false;
+  watcher = window.setInterval(() => {
+    if (busy || window.__jobAgentRunning) return;
+    const now = stepSignature(document);
+    if (now === known) {
+      candidate = "";
+      return;
+    }
+    if (now !== candidate) {
+      candidate = now; // wait one more tick so the new step has finished drawing
+      return;
+    }
+    busy = true;
+    void (async () => {
+      try {
+        await sleep(700);
+        // Fill only: the person is driving now, so Next is theirs to press.
+        await fillAndAdvance(ctx, resume, false);
+      } catch {
+        /* the page changed under us; the next change will try again */
+      } finally {
+        known = stepSignature(document);
+        candidate = "";
+        busy = false;
+      }
+    })();
+  }, 800);
+}
+
+window.__jobAgentFill = async (ctx, resume) => {
+  const report = await fillAndAdvance(ctx, resume);
+  watchSteps(ctx, resume);
+  return report;
+};
 
 function tell(message: Record<string, unknown>): void {
   (window as unknown as { __jobAgentOutcome?: unknown }).__jobAgentOutcome = message;
@@ -78,7 +122,10 @@ window.__jobAgentWorkday = (ctx, resume) => {
     () => fillAndAdvance(ctx, resume),
     () => tell({ type: "WORKDAY_WAITING" }),
   )
-    .then((outcome) => tell({ type: "WORKDAY_DONE", report: outcome.report, stoppedBecause: outcome.stoppedBecause }))
+    .then((outcome) => {
+      watchSteps(ctx, resume);
+      tell({ type: "WORKDAY_DONE", report: outcome.report, stoppedBecause: outcome.stoppedBecause });
+    })
     .catch((err: Error) => tell({ type: "WORKDAY_DONE", report: null, stoppedBecause: err.message }))
     .finally(() => {
       window.__jobAgentRunning = false;

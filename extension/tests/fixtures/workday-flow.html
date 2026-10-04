@@ -6,7 +6,9 @@
   const pages = {
     info: { h: 'My Information', next: 'Save and Continue', html: `
       <div data-automation-id="formField-a"><label for="fn">First Name<abbr>*</abbr></label><input id="fn" type="text" aria-required="true"></div>
-      <div data-automation-id="formField-b"><label for="ln">Last Name<abbr>*</abbr></label><input id="ln" type="text" aria-required="true"></div>`, to: 'terms' },
+      <div data-automation-id="formField-b"><label for="ln">Last Name<abbr>*</abbr></label><input id="ln" type="text" aria-required="true"></div>`, to: new URLSearchParams(location.search).get('after') || 'terms' },
+    contact: { h: 'My Experience', next: 'Save and Continue', html: `
+      <div data-automation-id="formField-e"><label for="em">Email Address<abbr>*</abbr></label><input id="em" type="text" aria-required="true"></div>`, to: 'review' },
     terms: { h: 'Voluntary Disclosures', next: 'Save and Continue', html: `
       <div data-automation-id="formField-c"><label><input type="checkbox" id="agree" aria-required="true"> Yes, I have read and consent to the terms and conditions<abbr>*</abbr></label></div>`, to: 'review' },
     review: { h: 'Review', next: 'Submit', html: '<p>Check everything.</p>', to: null },

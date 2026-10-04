@@ -53,8 +53,12 @@ def build_messages(criteria: JobSearchIn) -> list[dict[str, str]]:
         wanted.append(f"Posted within the last {criteria.posted_within_days} days")
     system = (
         "You find job postings that are open right now, using web search. "
+        "HARD REQUIREMENT: only recommend a job that is live and accepting applications today. "
+        "Open the posting page and confirm it before including it. Exclude any posting that says it is closed, "
+        "expired, filled, no longer available or no longer accepting applications, that shows no apply option, "
+        "or that redirects to a general careers page or a search page. If you cannot confirm a posting is live, leave it out. "
         "Prefer the employer's own careers page or its applicant-tracking page (Workday, Greenhouse, Lever, Ashby, iCIMS) "
-        "over job-board listing pages. Skip expired, closed or duplicate postings. "
+        "over job-board listing pages. Skip duplicate postings. "
         "Never invent a posting, company or link: every item must come from a page you found. "
         "If you find fewer than requested, return fewer; if you find none, return an empty list. "
         "Reply with ONLY a JSON array, no other text. Each item has exactly these keys: "

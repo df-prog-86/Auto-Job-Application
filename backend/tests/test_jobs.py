@@ -473,3 +473,38 @@ def test_work_eligibility_answers_need_a_profile_then_round_trip(app_and_db):
     updated = {a["answer_key"]: a["value"] for a in client.get("/api/v1/profile/answers").json()}
     assert updated["sponsorship_required"] is True
     assert len(client.get("/api/v1/profile/answers").json()) == 3  # updated in place, not duplicated
+
+
+def test_original_resume_needs_proceed_first(app_and_db, monkeypatch, docs_dir):
+    client, _ = app_and_db
+    job = _add_job(client, monkeypatch)
+    assert client.post(f"/api/v1/jobs/{job['id']}/original-resume").status_code == 409
+
+
+def test_original_resume_without_a_master_explains_what_to_do(app_and_db, monkeypatch, docs_dir):
+    client, _ = app_and_db
+    client.post("/api/v1/profile/commit", json=_PROFILE)
+    job = _add_job(client, monkeypatch)
+    client.post(f"/api/v1/jobs/{job['id']}/proceed")
+    resp = client.post(f"/api/v1/jobs/{job['id']}/original-resume")
+    assert resp.status_code == 409 and "Upload your resume" in resp.json()["detail"]
+
+
+def test_original_resume_is_an_unchanged_copy_and_the_master_is_untouched(app_and_db, monkeypatch, docs_dir):
+    client, _ = app_and_db
+    client.post("/api/v1/profile/commit", json=_PROFILE)
+    job = _add_job(client, monkeypatch)
+    client.post(f"/api/v1/jobs/{job['id']}/proceed")
+    master_before = _write_master(docs_dir)
+
+    resp = client.post(f"/api/v1/jobs/{job['id']}/original-resume")
+    assert resp.status_code == 200, resp.text
+    docs = resp.json()
+    assert [d["document_type"] for d in docs] == ["resume"] and docs[0]["template_version"] == "original-1"
+    download = client.get(f"/api/v1/jobs/documents/{docs[0]['id']}/download")
+    assert "Jane Doe_Resume_Globex_" in unquote(download.headers["content-disposition"])
+    assert download.content == master_before
+    assert (docs_dir / "master_resume" / "master.docx").read_bytes() == master_before
+
+    listed = client.get("/api/v1/jobs").json()[0]
+    assert [d["document_type"] for d in listed["documents"]] == ["resume"]

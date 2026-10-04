@@ -88,3 +88,28 @@ def test_dash_cleanup_and_trailing_blank_strip():
 def test_filename_rules():
     assert resume_filename("Jane Doe", "Mass General Brigham", "pdf", 2026) == "Jane Doe_Resume_Mass General Brigham_2026.pdf"
     assert resume_filename("Jane Doe", "A/B: Co", "docx", 2026) == "Jane Doe_Resume_AB Co_2026.docx"
+
+
+def test_bullets_are_matched_to_roles_by_company_then_title_and_never_guessed():
+    from app.services.resume.role_bullets import match_bullets
+
+    blocks = [
+        {"context": "Analyst, Acme | 2020 - Present", "bullets": ["a1", "a2"]},
+        {"context": "Intern, Beta | 2019", "bullets": ["b1"]},
+    ]
+    assert match_bullets([("Beta", "Intern"), ("Acme", "Analyst")], blocks) == [["b1"], ["a1", "a2"]]
+    assert match_bullets([("Gamma", "Chef")], blocks) == [None]  # unmatched, counts differ: nothing shown
+    assert match_bullets([("Unknown One", "Zzz"), ("Unknown Two", "Qqq")], blocks) == [["a1", "a2"], ["b1"]]  # all unmatched, counts line up: order
+
+
+def test_resume_roles_reads_the_bullets_under_each_role(tmp_path):
+    from app.services.resume.role_bullets import resume_roles
+
+    path = tmp_path / "r.docx"
+    _master().save(str(path))
+    roles = resume_roles(path)
+    assert [r["bullets"] for r in roles] == [
+        ["Reduced report time by 40% using SQL", "Led a team of 5 analysts", "Built Tableau dashboards"],
+        ["Cleaned data in Excel"],
+    ]
+    assert resume_roles(tmp_path / "missing.docx") == []

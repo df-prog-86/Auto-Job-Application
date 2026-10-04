@@ -18,6 +18,7 @@ import type {
   ProfileUpdate,
   ResumeExtraction,
   ResumeParseResponse,
+  GeneratedDocumentOut,
   TailorResumeOut,
   SearchProfile,
   SearchProfileInput,
@@ -144,6 +145,8 @@ export const api = {
   listAnswers: () => request<AnswerOut[]>("/profile/answers"),
   saveAnswer: (key: string, payload: AnswerUpsert) =>
     request<AnswerOut>(`/profile/answers/${key}`, { method: "PUT", body: JSON.stringify(payload) }),
+  useOriginalResume: (id: number) =>
+    request<GeneratedDocumentOut[]>(`/jobs/${id}/original-resume`, { method: "POST" }),
   tailorResume: (id: number) =>
     request<TailorResumeOut>(`/jobs/${id}/tailor`, { method: "POST" }),
   listNeedsAttention: () => request<PendingQuestionOut[]>("/needs-attention"),

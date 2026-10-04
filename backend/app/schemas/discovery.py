@@ -94,6 +94,7 @@ class GeneratedDocumentOut(BaseModel):
     document_type: str
     format: str
     generated_at: dt.datetime
+    template_version: str = ""
 
     class Config:
         from_attributes = True

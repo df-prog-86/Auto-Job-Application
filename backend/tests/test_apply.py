@@ -26,7 +26,9 @@ def _token(client) -> dict:
     return {"X-Extension-Token": token}
 
 
-def _job(SessionLocal, *, url="https://job-boards.greenhouse.io/acme/jobs/123", proceeding=True, resume=True) -> int:
+def _job(
+    SessionLocal, *, url="https://job-boards.greenhouse.io/acme/jobs/123", proceeding=True, resume=True, resume_path="/tmp/Jane Doe_Resume_Acme_2026.docx"
+) -> int:
     from app.models.documents import GeneratedDocument
     from app.models.jobs import Job
 
@@ -50,7 +52,7 @@ def _job(SessionLocal, *, url="https://job-boards.greenhouse.io/acme/jobs/123", 
                 GeneratedDocument(
                     job_id=job.id,
                     document_type="resume",
-                    local_path="/tmp/Jane Doe_Resume_Acme_2026.docx",
+                    local_path=resume_path,
                     format="docx",
                     generated_at=now,
                     template_version="t",
@@ -123,7 +125,7 @@ def test_context_stops_before_proceed_or_resume(app_and_db):
     assert "Proceed" in not_proceeding["problem"] and not_proceeding["candidate"] is None
 
     no_resume = client.post("/api/v1/apply/context", json={"url": "https://a.com/two"}, headers=headers).json()
-    assert "tailored resume" in no_resume["problem"] and no_resume["candidate"] is None
+    assert "Choose a resume" in no_resume["problem"] and no_resume["candidate"] is None
 
 
 def test_context_lists_choices_when_page_is_unknown(app_and_db):
@@ -206,3 +208,44 @@ def test_ashby_posting_and_application_urls_match_and_recent_role_is_returned(ap
     assert out["problem"] is None
     assert out["candidate"]["recent_title"] == "Manager"
     assert out["candidate"]["recent_employer"] == "Huron"
+
+
+def test_context_returns_roles_with_bullets_from_the_resume_used_for_the_job(app_and_db, monkeypatch, tmp_path):
+    from docx import Document
+
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "GENERATED_DOCUMENTS_DIR", str(tmp_path / "generated_documents"))
+    client, SessionLocal = app_and_db
+    commit = {
+        **_COMMIT,
+        "extraction": {
+            **_COMMIT["extraction"],
+            "employment": [
+                {"employer": "Acme Corp", "title": "Senior Data Analyst", "start_date": "2021-04", "end_date": None, "source_text": "x"},
+                {"employer": "Beta LLC", "title": "Analyst", "start_date": "2018-01", "end_date": "2021-03", "source_text": "y"},
+            ],
+            "education": [{"institution": "State University", "degree": "BS", "field": "Finance", "start_date": "2014-09", "end_date": "2018-05"}],
+        },
+    }
+    client.post("/api/v1/profile/commit", json=commit)
+
+    doc = Document()
+    doc.add_paragraph("Senior Data Analyst, Acme Corp | 2021 - Present")
+    doc.add_paragraph("Tailored bullet one", style="List Bullet")
+    doc.add_paragraph("Tailored bullet two", style="List Bullet")
+    doc.add_paragraph("Analyst, Beta LLC | 2018 - 2021")
+    doc.add_paragraph("Older bullet", style="List Bullet")
+    folder = tmp_path / "generated_documents" / "job_1"
+    folder.mkdir(parents=True)
+    path = folder / "resume.docx"
+    doc.save(str(path))
+
+    job_id = _job(SessionLocal, resume_path=str(path))
+    out = client.post("/api/v1/apply/context", json={"url": "https://x.com", "job_id": job_id}, headers=_token(client)).json()
+    assert [r["employer"] for r in out["experience"]] == ["Acme Corp", "Beta LLC"]  # current role first
+    acme, beta = out["experience"]
+    assert acme["current"] is True and acme["end_date"] is None and acme["start_date"] == "2021-04"
+    assert acme["description"] == "\u2022 Tailored bullet one\n\u2022 Tailored bullet two"
+    assert beta["current"] is False and beta["end_date"] == "2021-03" and beta["description"] == "\u2022 Older bullet"
+    assert out["education"][0]["institution"] == "State University" and out["education"][0]["end_date"] == "2018-05"

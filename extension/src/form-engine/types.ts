@@ -13,10 +13,32 @@ export interface ApplyCandidate {
   linkedin_url: string | null;
 }
 
+export interface ApplyExperience {
+  title: string;
+  employer: string;
+  location?: string | null;
+  /** "YYYY-MM" */
+  start_date?: string | null;
+  end_date?: string | null;
+  current: boolean;
+  /** The role's bullets from the resume used for this job (tailored, else original), one per line. */
+  description: string;
+}
+
+export interface ApplyEducation {
+  institution: string;
+  degree?: string | null;
+  field?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+}
+
 export interface ApplyContext {
   candidate: ApplyCandidate;
   answers: Record<string, unknown>;
   learned_answers: Record<string, string>;
+  experience?: ApplyExperience[];
+  education?: ApplyEducation[];
 }
 
 export interface FlaggedField {

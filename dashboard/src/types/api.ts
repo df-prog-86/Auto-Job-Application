@@ -222,6 +222,7 @@ export interface GeneratedDocumentOut {
   document_type: string;
   format: string;
   generated_at: string;
+  template_version?: string;
 }
 
 export interface TailorResumeOut {

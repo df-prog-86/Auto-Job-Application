@@ -1,4 +1,4 @@
-import type { ApplyCandidate, FlaggedField } from "@/form-engine/types";
+import type { ApplyCandidate, ApplyEducation, ApplyExperience, FlaggedField } from "@/form-engine/types";
 import { getStoredToken } from "@/security/token-store";
 
 const BACKEND_ORIGIN = "http://127.0.0.1:8765";
@@ -26,6 +26,8 @@ export interface ApplyContextResponse {
   answers: Record<string, unknown>;
   learned_answers: Record<string, string>;
   resume: { document_id: number; filename: string; format: string } | null;
+  experience: ApplyExperience[];
+  education: ApplyEducation[];
   candidates: { id: number; title: string; company: string; url: string; proceeding: boolean }[];
   problem: string | null;
 }

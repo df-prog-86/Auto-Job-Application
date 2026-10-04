@@ -33,6 +33,7 @@ from app.services.resume.service import (
     is_safe_document_path,
     remove_job_documents,
     tailor_resume,
+    use_original_resume,
 )
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
@@ -178,6 +179,25 @@ async def tailor_resume_for_job(job_id: int, db: Session = Depends(get_db)) -> T
         problems=outcome.problems,
         changelog=outcome.changelog,
     )
+
+
+@router.post("/{job_id}/original-resume", response_model=list[GeneratedDocumentOut])
+def original_resume_for_job(job_id: int, db: Session = Depends(get_db)) -> list[GeneratedDocumentOut]:
+    """Apply with the saved master resume as it is, instead of tailoring it. Same gate as tailoring."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    if job.application_status != "proceeding":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Click 'Proceed with Application' on this job before choosing a resume.",
+        )
+    profile = get_current_profile(db)
+    try:
+        doc = use_original_resume(db, job, profile.name if profile else "Candidate")
+    except MasterMissingError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return [GeneratedDocumentOut.model_validate(doc)]
 
 
 @router.get("/documents/{document_id}/download")

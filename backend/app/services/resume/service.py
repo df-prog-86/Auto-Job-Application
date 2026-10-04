@@ -7,6 +7,7 @@ save as Word, and record the file plus a changelog. The master file itself is ne
 from __future__ import annotations
 
 import datetime as dt
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from app.services.resume.naming import resume_filename
 from app.services.resume.validation import plan_to_dict
 
 TEMPLATE_VERSION = "docx-inplace-1"
+ORIGINAL_TEMPLATE_VERSION = "original-1"  # the master resume, copied as it is
 
 
 class MasterMissingError(RuntimeError):
@@ -107,6 +109,34 @@ async def tailor_resume(db: Session, job: Job, candidate_name: str) -> TailorOut
     for d in docs:
         db.refresh(d)
     return TailorOutcome(docs, result.plan is None, result.problems, changelog)
+
+
+def use_original_resume(db: Session, job: Job, candidate_name: str) -> GeneratedDocument:
+    """Applies with the master resume unchanged: a plain copy saved for this job, like a tailored one."""
+    master = master_path()
+    if master is None:
+        raise MasterMissingError(
+            "No master Word resume is saved yet. Upload your resume as a Word (.docx) file on the Profile page."
+        )
+    out_dir = _documents_dir() / f"job_{job.id}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / resume_filename(candidate_name, job.company, "docx")
+    remove_job_documents(db, job)
+    shutil.copyfile(master, target)  # the master itself is only read
+    doc = GeneratedDocument(
+        job_id=job.id,
+        document_type="resume",
+        local_path=str(target),
+        format="docx",
+        generated_at=dt.datetime.now(dt.timezone.utc),
+        template_version=ORIGINAL_TEMPLATE_VERSION,
+        source_claim_ids=[],
+        content_hash=_sha256(target),
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return doc
 
 
 def _sha256(path: Path) -> str:

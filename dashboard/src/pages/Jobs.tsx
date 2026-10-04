@@ -6,7 +6,7 @@ import { api, ApiError, documentDownloadUrl } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge, Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
 import { completeApplication } from "@/lib/extensionBridge";
-import type { JobOut, TailorResumeOut } from "@/types/api";
+import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api";
 
 function scoreColor(score: number): string {
   if (score >= 0.75) return "#12b76a";
@@ -180,6 +180,7 @@ function JobCard({ job }: { job: JobOut }) {
   const resumeDocs = job.documents.filter((d) => d.document_type === "resume");
   const changelogDocs = job.documents.filter((d) => d.document_type === "changelog");
   const hasResume = resumeDocs.length > 0;
+  const usingOriginal = resumeDocs.some((d) => d.template_version === "original-1");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [applyState, setApplyState] = useState<{ kind: "idle" | "starting" | "opened" | "problem"; text?: string }>({
     kind: "idle",
@@ -218,13 +219,17 @@ function JobCard({ job }: { job: JobOut }) {
     mutationFn: () => api.deleteJob(job.id),
     onSuccess: refresh,
   });
+  const originalMutation = useMutation<GeneratedDocumentOut[], ApiError, void>({
+    mutationFn: () => api.useOriginalResume(job.id),
+    onSuccess: refresh,
+  });
   const tailorMutation = useMutation<TailorResumeOut, ApiError, void>({
     mutationFn: () => api.tailorResume(job.id),
     onSuccess: refresh,
   });
 
   const error =
-    proceedMutation.error ?? requalifyMutation.error ?? tailorMutation.error ?? undoMutation.error ?? deleteMutation.error;
+    proceedMutation.error ?? requalifyMutation.error ?? tailorMutation.error ?? originalMutation.error ?? undoMutation.error ?? deleteMutation.error;
 
   const scoreButtonLabel = requalifyMutation.isPending
     ? evaluation
@@ -309,9 +314,28 @@ function JobCard({ job }: { job: JobOut }) {
             </Button>
           )}
           {proceeding && !hasResume && (
-            <Button variant="primary" onClick={() => tailorMutation.mutate()} disabled={tailorMutation.isPending}>
-              {tailorMutation.isPending ? "Creating…" : "Create tailored resume"}
-            </Button>
+            <div className="w-full rounded-2xl bg-brand-50/60 p-4">
+              <div className="text-sm font-bold text-ink-900">Which resume should this application use?</div>
+              <div className="mt-0.5 text-xs text-ink-500">
+                Either way, the application is filled from the same resume you pick here, including each role's bullets.
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button
+                  variant="primary"
+                  onClick={() => tailorMutation.mutate()}
+                  disabled={tailorMutation.isPending || originalMutation.isPending}
+                >
+                  {tailorMutation.isPending ? "Creating…" : "Tailor my resume first"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => originalMutation.mutate()}
+                  disabled={tailorMutation.isPending || originalMutation.isPending}
+                >
+                  {originalMutation.isPending ? "Saving…" : "Use my original resume"}
+                </Button>
+              </div>
+            </div>
           )}
           {requalifyMutation.isPending && evaluation && (
             <span className="animate-pulse text-xs text-ink-400">Comparing your resume with this job…</span>
@@ -329,9 +353,13 @@ function JobCard({ job }: { job: JobOut }) {
           <div className="mt-4 rounded-2xl bg-brand-50/60 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-bold text-ink-900">Your tailored resume is ready</div>
+                <div className="text-sm font-bold text-ink-900">
+                  {usingOriginal ? "Using your original resume" : "Your tailored resume is ready"}
+                </div>
                 <div className="mt-0.5 text-xs text-ink-500">
-                  Made from your master resume with the same layout. Read it over before you send it.
+                  {usingOriginal
+                    ? "Your saved resume, unchanged. Read it over before you send it."
+                    : "Made from your master resume with the same layout. Read it over before you send it."}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -344,7 +372,7 @@ function JobCard({ job }: { job: JobOut }) {
                     Download {d.format === "docx" ? "Word file" : d.format.toUpperCase()}
                   </a>
                 ))}
-                {changelogDocs.map((d) => (
+                {!usingOriginal && changelogDocs.map((d) => (
                   <a
                     key={d.id}
                     href={documentDownloadUrl(d.id)}
@@ -353,9 +381,24 @@ function JobCard({ job }: { job: JobOut }) {
                     What changed
                   </a>
                 ))}
-                <Button size="sm" variant="ghost" onClick={() => tailorMutation.mutate()} disabled={tailorMutation.isPending}>
-                  {tailorMutation.isPending ? "Creating…" : "Recreate"}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => tailorMutation.mutate()}
+                  disabled={tailorMutation.isPending || originalMutation.isPending}
+                >
+                  {tailorMutation.isPending ? "Creating…" : usingOriginal ? "Tailor it instead" : "Recreate"}
                 </Button>
+                {!usingOriginal && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => originalMutation.mutate()}
+                    disabled={tailorMutation.isPending || originalMutation.isPending}
+                  >
+                    {originalMutation.isPending ? "Saving…" : "Use original instead"}
+                  </Button>
+                )}
               </div>
             </div>
 

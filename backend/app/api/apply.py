@@ -21,12 +21,16 @@ from app.repositories.profile_repository import get_current_profile
 from app.schemas.apply import (
     ApplyContextIn,
     ApplyContextOut,
+    ApplyEducation,
+    ApplyExperience,
     ApplyJob,
     ApplyReportIn,
     ApplyResume,
     CandidateFacts,
 )
 from app.services.apply.questions import normalize_question, urls_match
+from app.services.resume.role_bullets import match_bullets, resume_roles
+from app.services.resume.service import is_safe_document_path
 
 router = APIRouter(prefix="/api/v1/apply", tags=["apply"], dependencies=[Depends(require_extension_auth)])
 
@@ -53,6 +57,46 @@ def _apply_job(job: Job) -> ApplyJob:
         url=job.canonical_application_url,
         proceeding=job.application_status == "proceeding",
     )
+
+
+def _month(d: dt.date | None) -> str | None:
+    return d.strftime("%Y-%m") if d else None
+
+
+def _history(profile, resume_doc) -> tuple[list[ApplyExperience], list[ApplyEducation]]:
+    """Saved roles and schools, newest first. Role descriptions come from the resume used for this job."""
+    roles = sorted(
+        profile.employment_history,
+        key=lambda r: (r.end_date is None, r.end_date or dt.date.min, r.start_date or dt.date.min),
+        reverse=True,
+    )
+    bullets: list[list[str] | None] = [None] * len(roles)
+    if resume_doc is not None and resume_doc.format == "docx" and is_safe_document_path(resume_doc.local_path):
+        bullets = match_bullets([(r.employer, r.title) for r in roles], resume_roles(resume_doc.local_path))
+    experience = [
+        ApplyExperience(
+            title=r.title,
+            employer=r.employer,
+            location=r.location,
+            start_date=_month(r.start_date),
+            end_date=_month(r.end_date),
+            current=r.end_date is None,
+            description="\n".join(f"\u2022 {b}" for b in (bullets[i] or [])),
+        )
+        for i, r in enumerate(roles)
+    ]
+    schools = sorted(profile.education, key=lambda e: (e.end_date or dt.date.min, e.start_date or dt.date.min), reverse=True)
+    education = [
+        ApplyEducation(
+            institution=e.institution,
+            degree=e.degree,
+            field=e.field,
+            start_date=_month(e.start_date),
+            end_date=_month(e.end_date),
+        )
+        for e in schools
+    ]
+    return experience, education
 
 
 def _split_name(full_name: str) -> tuple[str, str]:
@@ -91,7 +135,7 @@ def get_apply_context(payload: ApplyContextIn, db: Session = Depends(get_db)) ->
         None,
     )
     if resume_doc is None:
-        out.problem = "Create the tailored resume for this job in the app first."
+        out.problem = "Choose a resume for this job in the app first (tailored or your original)."
         return out
 
     first, last = _split_name(profile.name)
@@ -116,6 +160,7 @@ def get_apply_context(payload: ApplyContextIn, db: Session = Depends(get_db)) ->
     out.resume = ApplyResume(
         document_id=resume_doc.id, filename=Path(resume_doc.local_path).name, format=resume_doc.format
     )
+    out.experience, out.education = _history(profile, resume_doc)
     for answer in db.query(CandidateAnswer).filter(CandidateAnswer.profile_id == profile.id).all():
         raw = answer.value.get("raw") if isinstance(answer.value, dict) else None
         if answer.answer_key in ELIGIBILITY_KEYS:

@@ -62,6 +62,8 @@ async function fillApplicationPage(tabId: number, jobId?: number): Promise<FillP
     candidate: ctx.candidate,
     answers: ctx.answers,
     learned_answers: ctx.learned_answers,
+    experience: ctx.experience,
+    education: ctx.education,
   };
 
   await chrome.scripting.executeScript({ target: { tabId }, files: ["content/fill-page.js"] });
@@ -174,7 +176,13 @@ async function startWorkdayWalker(run: WorkdayRun): Promise<void> {
     return;
   }
   const resume = { base64: await downloadDocumentBase64(ctx.resume.document_id), filename: ctx.resume.filename };
-  const applyCtx: ApplyContext = { candidate: ctx.candidate, answers: ctx.answers, learned_answers: ctx.learned_answers };
+  const applyCtx: ApplyContext = {
+    candidate: ctx.candidate,
+    answers: ctx.answers,
+    learned_answers: ctx.learned_answers,
+    experience: ctx.experience,
+    education: ctx.education,
+  };
   await chrome.scripting.executeScript({ target: { tabId: run.tabId }, files: ["content/fill-page.js"] });
   await chrome.scripting.executeScript({
     target: { tabId: run.tabId },

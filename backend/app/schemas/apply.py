@@ -39,12 +39,33 @@ class ApplyResume(BaseModel):
     format: str
 
 
+class ApplyExperience(BaseModel):
+    title: str
+    employer: str
+    location: str | None = None
+    start_date: str | None = None  # "YYYY-MM"
+    end_date: str | None = None  # "YYYY-MM"; None with current=True
+    current: bool = False
+    # The role's bullets from the resume being used for this job (tailored, else the original), one per line.
+    description: str = ""
+
+
+class ApplyEducation(BaseModel):
+    institution: str
+    degree: str | None = None
+    field: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+
+
 class ApplyContextOut(BaseModel):
     job: ApplyJob | None = None
     candidate: CandidateFacts | None = None
     answers: dict[str, Any] = {}  # work_authorization, sponsorship_required, security_clearance
     learned_answers: dict[str, str] = {}  # normalized question -> the candidate's own saved answer
     resume: ApplyResume | None = None
+    experience: list[ApplyExperience] = []
+    education: list[ApplyEducation] = []
     # When the page didn't match a saved job: the saved jobs the user can pick from.
     candidates: list[ApplyJob] = []
     problem: str | None = None

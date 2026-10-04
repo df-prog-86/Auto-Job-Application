@@ -195,3 +195,101 @@ test("without saved address answers, those required fields are flagged, never gu
   }
   await page.close();
 });
+
+// ---- My Experience: repeating Work Experience / Education rows ----
+const history = () => ({
+  experience: [
+    { title: "Senior Analyst", employer: "Acme Health", location: "Boston, MA", start_date: "2021-03", end_date: null, current: true, description: "Built denial dashboards\nCut AR days by 12%" },
+    { title: "Analyst", employer: "Beta Billing", location: "Remote", start_date: "2018-06", end_date: "2021-02", current: false, description: "Reconciled payer remits" },
+  ],
+  education: [{ institution: "State University", degree: "Bachelor of Science", field: "Finance", start_date: "2014-09", end_date: "2018-05" }],
+});
+async function runExperience(h = history(), setup) {
+  const page = await browser.newPage();
+  await page.goto(pathToFileURL(resolve(here, "fixtures/workday-experience.html")).href);
+  if (setup) await page.evaluate(setup);
+  await page.evaluate(bundle);
+  const c = { ...ctx(), ...h };
+  c.candidate.linkedin_url = "https://www.linkedin.com/in/jane";
+  const report = await page.evaluate(([x, r]) => window.__jobAgentFill(x, r), [c, resume]);
+  return { page, report };
+}
+const rowVals = (page, sel) => page.$$eval(`${sel} .row`, (rows) => rows.map((r) => ({
+  head: r.querySelector("h4").textContent,
+  texts: Array.from(r.querySelectorAll("input[type=text], textarea")).map((i) => i.value),
+  cur: r.querySelector(".cur")?.checked,
+  dates: Array.from(r.querySelectorAll("[data-automation-id^=dateSection]")).map((i) => i.value),
+  deg: r.querySelector(".deg")?.textContent,
+  toHidden: r.querySelector(".to")?.hidden,
+})));
+
+test("experience: adds a row per role, fills title/company/location/dates/bullets, current job has no end date", async () => {
+  const { page, report } = await runExperience();
+  const work = await rowVals(page, "#workrows");
+  assert.equal(work.length, 2);
+  assert.deepEqual(work[0].texts, ["Senior Analyst", "Acme Health", "Boston, MA", "Built denial dashboards\nCut AR days by 12%"]);
+  assert.equal(work[0].cur, true);
+  assert.deepEqual(work[0].dates, ["03", "2021", "", ""]);
+  assert.deepEqual(work[1].texts, ["Analyst", "Beta Billing", "Remote", "Reconciled payer remits"]);
+  assert.deepEqual(work[1].dates, ["06", "2018", "02", "2021"]);
+  assert.equal(work[1].cur, false);
+  assert.equal(await page.evaluate(() => window.__nextClicks), 0);
+  assert.equal(await page.evaluate(() => window.__submitted), 0);
+  assert.equal(await page.evaluate(() => window.__adds), 1, "only Add Another was pressed, once");
+  assert.ok(!report.flagged.some((f) => /Work Experience/.test(f.label)), JSON.stringify(report.flagged));
+  await page.close();
+});
+
+test("education: school, degree matched to the dropdown's wording, field, and years", async () => {
+  const { page } = await runExperience();
+  const edu = await rowVals(page, "#edurows");
+  assert.equal(edu.length, 1);
+  assert.deepEqual(edu[0].texts, ["State University", "Finance", ""]);
+  assert.equal(edu[0].deg, "Bachelor's Degree");
+  assert.deepEqual(edu[0].dates, ["2014", "2018"]);
+  await page.close();
+});
+
+test("websites: the one required URL gets the LinkedIn address", async () => {
+  const { page } = await runExperience();
+  assert.equal(await page.$eval("#url", (i) => i.value), "https://www.linkedin.com/in/jane");
+  await page.close();
+});
+
+test("experience: rows that already hold something are never touched or added to", async () => {
+  const { page } = await runExperience(history(), () => {
+    document.querySelector("#workrows .jt").value = "My own title";
+  });
+  const work = await rowVals(page, "#workrows");
+  assert.equal(work.length, 1);
+  assert.deepEqual(work[0].texts, ["My own title", "", "", ""]);
+  assert.equal(await page.evaluate(() => window.__adds), 0, "no row was added");
+  await page.close();
+});
+
+test("experience: a role with no start date is flagged, not guessed", async () => {
+  const h = history(); h.experience = [{ ...h.experience[1], start_date: null }];
+  const { page, report } = await runExperience(h);
+  assert.ok(report.flagged.some((f) => /Work Experience 1: From/.test(f.label)));
+  const work = await rowVals(page, "#workrows");
+  assert.deepEqual(work[0].dates.slice(0, 2), ["", ""]);
+  await page.close();
+});
+
+test("experience: an unknown degree is left for the person and flagged", async () => {
+  const h = history(); h.education[0].degree = "Diploma of Basket Weaving";
+  const { page, report } = await runExperience(h);
+  const edu = await rowVals(page, "#edurows");
+  assert.equal(edu[0].deg, "Select One");
+  assert.ok(report.flagged.some((f) => f.label.startsWith("Degree")));
+  await page.close();
+});
+
+test("experience: with no saved history the rows are left blank and the required ones flagged", async () => {
+  const { page, report } = await runExperience({ experience: [], education: [] });
+  const work = await rowVals(page, "#workrows");
+  assert.deepEqual(work[0].texts, ["", "", "", ""]);
+  assert.ok(report.flagged.some((f) => f.label.startsWith("Job Title")));
+  assert.equal(await page.evaluate(() => window.__adds), 0);
+  await page.close();
+});

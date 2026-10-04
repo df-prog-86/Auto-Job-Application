@@ -1,0 +1,62 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Workday experience fixture</title></head><body>
+<form id="app" data-automation-id="applyFlowPage">
+<section id="work"><h3>Work Experience</h3><div id="workrows"></div><button type="button" id="addwork">Add Another</button></section>
+<section id="edu"><h3>Education</h3><div id="edurows"></div><button type="button" id="addedu">Add Another</button></section>
+<section id="skills"><h3>Skills</h3><label for="sk">Type to Add Skills</label><input id="sk" type="text"></section>
+<section id="web"><h3>Websites</h3>
+  <div><div><h4>Websites 1</h4><button type="button">Delete</button></div>
+  <label for="url">URL<abbr title="required">*</abbr></label><input id="url" type="text" aria-required="true"></div>
+  <button type="button" id="addweb">Add Another</button></section>
+<div class="footer"><button type="button" data-automation-id="pageFooterNextButton" id="next">Save and Continue</button></div>
+</form>
+<ul role="listbox" id="pop" hidden></ul>
+<template id="worktpl"><div class="row"><div><h4>Work Experience #</h4><button type="button" class="del">Delete</button></div>
+  <label>Job Title<abbr title="required">*</abbr><input type="text" class="jt" aria-required="true"></label>
+  <label>Company<abbr title="required">*</abbr><input type="text" class="co" aria-required="true"></label>
+  <label>Location<input type="text" class="lo"></label>
+  <label>I currently work here<input type="checkbox" class="cur"></label>
+  <div class="from"><label>From<abbr title="required">*</abbr></label><input data-automation-id="dateSectionMonth-input" aria-label="Month" placeholder="MM"><input data-automation-id="dateSectionYear-input" aria-label="Year" placeholder="YYYY"></div>
+  <div class="to"><label>To<abbr title="required">*</abbr></label><input data-automation-id="dateSectionMonth-input" aria-label="Month" placeholder="MM"><input data-automation-id="dateSectionYear-input" aria-label="Year" placeholder="YYYY"></div>
+  <label>Role Description<textarea class="rd"></textarea></label></div></template>
+<template id="edutpl"><div class="row"><div><h4>Education #</h4><button type="button" class="del">Delete</button></div>
+  <label>School or University<abbr title="required">*</abbr><input type="text" aria-required="true"></label>
+  <div><label id="dl#">Degree<abbr title="required">*</abbr></label><button type="button" class="deg" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="dl#">Select One</button></div>
+  <label>Field of Study<input type="text"></label>
+  <label>Overall Result (GPA)<input type="text"></label>
+  <div class="from"><label>From</label><input data-automation-id="dateSectionYear-input" placeholder="YYYY"></div>
+  <div class="to"><label>To (Actual or Expected)</label><input data-automation-id="dateSectionYear-input" placeholder="YYYY"></div></div></template>
+<script>
+  window.__nextClicks = 0; window.__submitted = 0; window.__adds = 0;
+  document.getElementById('next').addEventListener('click', () => window.__nextClicks++);
+  document.getElementById('app').addEventListener('submit', e => { e.preventDefault(); window.__submitted++; });
+  const DEGREES = ['Select One', "Associate's Degree", "Bachelor's Degree", "Master's Degree", 'Doctorate', 'High School or GED'];
+  const pop = document.getElementById('pop'); let open = null;
+  function close() { if (open) open.setAttribute('aria-expanded', 'false'); pop.hidden = true; pop.innerHTML = ''; open = null; }
+  function wireRow(row) {
+    const cur = row.querySelector('.cur');
+    if (cur) cur.addEventListener('change', () => { row.querySelector('.to').hidden = cur.checked; });
+    const deg = row.querySelector('.deg');
+    if (deg) deg.addEventListener('click', () => {
+      if (open === deg) return close(); close(); open = deg; deg.setAttribute('aria-expanded', 'true');
+      DEGREES.forEach(t => { const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = t;
+        li.addEventListener('click', () => { deg.textContent = t; close(); }); pop.appendChild(li); });
+      pop.hidden = false;
+    });
+    row.querySelector('.del').addEventListener('click', () => { row.remove(); renumber(); });
+  }
+  function renumber() {
+    document.querySelectorAll('#workrows .row h4').forEach((h, i) => h.textContent = 'Work Experience ' + (i + 1));
+    document.querySelectorAll('#edurows .row h4').forEach((h, i) => h.textContent = 'Education ' + (i + 1));
+  }
+  function add(tplId, boxId) {
+    const node = document.getElementById(tplId).content.firstElementChild.cloneNode(true);
+    const k = Math.random().toString(36).slice(2);
+    node.querySelectorAll('[id]').forEach(e => e.id = e.id.replace('#', k));
+    node.querySelectorAll('[aria-labelledby]').forEach(e => e.setAttribute('aria-labelledby', e.getAttribute('aria-labelledby').replace('#', k)));
+    document.getElementById(boxId).appendChild(node); wireRow(node); renumber();
+  }
+  document.getElementById('addwork').addEventListener('click', () => { window.__adds++; add('worktpl', 'workrows'); });
+  document.getElementById('addedu').addEventListener('click', () => { window.__adds++; add('edutpl', 'edurows'); });
+  add('worktpl', 'workrows'); add('edutpl', 'edurows');
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+</script></body></html>

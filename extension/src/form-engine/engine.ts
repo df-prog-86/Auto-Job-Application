@@ -15,6 +15,7 @@ import type { FormField } from "@/form-engine/discover";
 import type { ComboboxHints } from "@/form-engine/fill";
 import { base64ToFile, currentValue, fillField, fillFile, readComboboxOptions, readDropdownOptions } from "@/form-engine/fill";
 import { clearMarks, mark, showBanner } from "@/form-engine/highlight";
+import { fillHistory, isDateInput } from "@/form-engine/workday-history";
 import type { ApplyContext, FillReport } from "@/form-engine/types";
 
 /** Questions that grant consent or accept terms are never answered for the candidate. */
@@ -33,6 +34,8 @@ export async function fillPage(
   clearMarks(doc);
   const report: FillReport = { filled: [], flagged: [], leftBlank: 0, alreadyFilled: 0, voluntarySkipped: 0 };
 
+  // Work Experience / Education rows are filled as a set first; the general pass then leaves them alone.
+  const history = await fillHistory(doc, ctx, report);
   const fields = discoverFields(doc);
   // The federal disability form (CC-305) is signed by the person: its name and date are never filled.
   const disabilityForm = /self-identification of disability/i.test(doc.body?.innerText ?? "");
@@ -51,6 +54,12 @@ export async function fillPage(
       inputType: field.inputType,
     };
     const cls: Classification = classifyField(sig);
+
+    if (isDateInput(field.el)) continue;
+    if (history.rows.some((row) => row.contains(field.el))) {
+      if (field.required && field.kind !== "checkbox" && currentValue(field) === "") flag(report, field);
+      continue;
+    }
 
     if (disabilityForm && field.kind !== "dropdown" && currentValue(field) === "") {
       if (field.required) flag(report, field);

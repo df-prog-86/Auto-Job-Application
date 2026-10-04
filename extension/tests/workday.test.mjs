@@ -336,6 +336,13 @@ test("Tegria style: with no saved history nothing is added", async () => {
   await page.close();
 });
 
+test("the saved degree abbreviation picks a code list entry, whatever the degree wording", async () => {
+  const h = history(); h.education[0].degree = "Bachelor's Degree"; h.education[0].degree_short = "B.S.";
+  const { page } = await runTegria(h);
+  assert.equal((await tegriaRows(page, "edubox"))[0].deg, "BS");
+  await page.close();
+});
+
 test("Tegria style: Business Administration or an unknown degree is not forced onto a code", async () => {
   const h = history(); h.education[0].degree = "Bachelor of Business Administration";
   const { page } = await runTegria(h);

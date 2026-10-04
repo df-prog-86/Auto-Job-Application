@@ -173,6 +173,7 @@ def add_education(payload: EducationIn, db: Session = Depends(get_db)) -> Profil
         profile_id=profile.id,
         institution=(data.get("institution") or "").strip(),
         degree=data.get("degree"),
+        degree_short=(data.get("degree_short") or "").strip() or None,
         field=data.get("field"),
         gpa=(data.get("gpa") or "").strip() or None,
         source="manual",
@@ -193,7 +194,7 @@ def update_education(entry_id: int, payload: EducationIn, db: Session = Depends(
     data = payload.model_dump(exclude_unset=True)
     if "institution" in data and (data["institution"] or "").strip():
         row.institution = data["institution"].strip()
-    for field in ("degree", "field", "gpa"):
+    for field in ("degree", "degree_short", "field", "gpa"):
         if field in data:
             setattr(row, field, (data[field] or "").strip() or None)
     _apply_dates(row, data)

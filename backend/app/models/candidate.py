@@ -69,6 +69,7 @@ class Education(Base, TimestampMixin):
     profile_id: Mapped[int] = mapped_column(ForeignKey("candidate_profiles.id", ondelete="CASCADE"))
     institution: Mapped[str] = mapped_column(String(300))
     degree: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    degree_short: Mapped[str | None] = mapped_column(String(40), nullable=True)  # B.A., B.S., M.S. ...
     field: Mapped[str | None] = mapped_column(String(200), nullable=True)
     start_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)

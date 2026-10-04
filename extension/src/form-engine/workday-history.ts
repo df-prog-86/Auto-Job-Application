@@ -325,11 +325,21 @@ async function fillWorkRow(doc: Document, row: HTMLElement, n: number, e: ApplyE
 }
 
 /** Picks the dropdown choice for a degree, only when exactly one fits. */
-export function degreeChoice(degree: string | null | undefined, options: string[]): string | null {
+export function degreeChoice(
+  degree: string | null | undefined,
+  options: string[],
+  short?: string | null,
+): string | null {
+  const squash = (t: string) => t.toLowerCase().replace(/[^a-z]/g, "");
+  // The abbreviation the person saved (B.A., B.S., M.S. ...) matches a code list exactly, whatever the dots.
+  const abbr = squash(clean(short));
+  if (abbr) {
+    const exact = options.filter((o) => squash(o) === abbr);
+    if (exact.length === 1) return exact[0];
+  }
   const d = clean(degree).toLowerCase();
   if (!d) return null;
   // Some employers list bare codes (BS, BA, MS, MBA, PhD ...): match those exactly.
-  const squash = (t: string) => t.toLowerCase().replace(/[^a-z]/g, "");
   let code = "";
   if (/\bmba\b|master of business/.test(d)) code = "mba";
   else if (/juris doctor|\bj\.?d\.?\b/.test(d)) code = "jd";
@@ -364,8 +374,8 @@ async function fillEduRow(doc: Document, row: HTMLElement, n: number, e: ApplyEd
   await putText(report, find(fields, /^school( or university)?$|^institution$/), `${tag}: School or University`, e.institution);
 
   const degreeField = find(fields, /^degree$/);
-  if (degreeField && degreeField.kind === "dropdown" && currentValue(degreeField) === "" && e.degree) {
-    const pick = degreeChoice(e.degree, await readDropdownOptions(degreeField.el));
+  if (degreeField && degreeField.kind === "dropdown" && currentValue(degreeField) === "" && (e.degree || e.degree_short)) {
+    const pick = degreeChoice(e.degree, await readDropdownOptions(degreeField.el), e.degree_short);
     if (pick && (await fillField(degreeField, pick))) done(report, `${tag}: Degree`, degreeField.outlineEl);
   }
   const study = find(fields, /^field of study$/);

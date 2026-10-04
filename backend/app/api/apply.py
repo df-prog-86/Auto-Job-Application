@@ -97,6 +97,7 @@ def _history(profile, resume_doc) -> tuple[list[ApplyExperience], list[ApplyEduc
         ApplyEducation(
             institution=e.institution,
             degree=e.degree,
+            degree_short=e.degree_short,
             field=e.field,
             start_date=_month(e.start_date),
             end_date=_month(e.end_date),

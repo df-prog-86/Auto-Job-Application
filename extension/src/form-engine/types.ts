@@ -28,6 +28,7 @@ export interface ApplyExperience {
 export interface ApplyEducation {
   institution: string;
   degree?: string | null;
+  degree_short?: string | null;
   field?: string | null;
   start_date?: string | null;
   end_date?: string | null;

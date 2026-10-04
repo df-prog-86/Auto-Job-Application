@@ -123,6 +123,7 @@ export interface EducationOut {
   id: number;
   institution: string;
   degree?: string | null;
+  degree_short?: string | null;
   field?: string | null;
   start_date?: string | null;
   end_date?: string | null;
@@ -303,6 +304,7 @@ export interface EmploymentInput {
 export interface EducationInput {
   institution?: string | null;
   degree?: string | null;
+  degree_short?: string | null;
   field?: string | null;
   start_date?: string | null;
   end_date?: string | null;

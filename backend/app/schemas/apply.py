@@ -53,6 +53,7 @@ class ApplyExperience(BaseModel):
 class ApplyEducation(BaseModel):
     institution: str
     degree: str | None = None
+    degree_short: str | None = None
     field: str | None = None
     start_date: str | None = None
     end_date: str | None = None

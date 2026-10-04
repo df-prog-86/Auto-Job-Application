@@ -63,6 +63,7 @@ class EducationOut(BaseModel):
     id: int
     institution: str
     degree: str | None
+    degree_short: str | None = None
     field: str | None
     start_date: dt.date | None
     end_date: dt.date | None
@@ -142,6 +143,7 @@ class EmploymentIn(BaseModel):
 class EducationIn(BaseModel):
     institution: str | None = None
     degree: str | None = None
+    degree_short: str | None = None
     field: str | None = None
     start_date: str | None = None
     end_date: str | None = None

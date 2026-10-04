@@ -734,6 +734,9 @@ const DEGREES = [
   "Doctorate",
 ];
 
+/** Abbreviations some employers list instead of words (B.A., B.S., ...). */
+const DEGREE_SHORTS = ["A.A.", "A.S.", "A.A.S.", "B.A.", "B.S.", "B.B.A.", "M.A.", "M.S.", "M.Ed.", "MBA", "Ph.D.", "J.D.", "M.D."];
+
 /** The standard degrees, plus a degree saved earlier in other words so it is not lost. */
 function degreeOptions(current?: string | null) {
   const list = current && !DEGREES.includes(current) ? [current, ...DEGREES] : DEGREES;
@@ -796,6 +799,12 @@ function EducationCard({
           required
           options={degreeOptions(edu.degree)}
           onSave={(v) => edit({ degree: v })}
+        />
+        <SelectField
+          label="Degree abbreviation (for forms that list B.A., B.S., M.S.)"
+          value={edu.degree_short ?? ""}
+          options={DEGREE_SHORTS.map((d) => ({ value: d, label: d }))}
+          onSave={(v) => edit({ degree_short: v })}
         />
         <EditableField
           label="Field of study"

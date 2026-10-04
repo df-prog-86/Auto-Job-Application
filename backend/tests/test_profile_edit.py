@@ -143,3 +143,15 @@ def test_dashboard_refresh_falls_back_to_index(tmp_path, monkeypatch):
     assert client.get("/app/assets/x.js").text == "console.log(1)"  # real files still served
     assert "nope" not in client.get("/app/../secret.txt").text
     assert client.get("/api/v1/nonexistent").status_code == 404
+
+
+def test_degree_abbreviation_is_saved_and_can_be_changed(app_and_db):
+    client, _ = app_and_db
+    _commit(client)
+    edu = client.post(
+        "/api/v1/profile/education",
+        json={"institution": "State U", "degree": "Bachelor's Degree", "degree_short": " B.S. "},
+    ).json()["education"][0]
+    assert edu["degree_short"] == "B.S."
+    changed = client.patch(f"/api/v1/profile/education/{edu['id']}", json={"degree_short": "B.A."}).json()["education"][0]
+    assert changed["degree_short"] == "B.A." and changed["degree"] == "Bachelor's Degree"

@@ -6,7 +6,7 @@
 
 import { normalizeQuestion } from "@/form-engine/canonical";
 import type { FormField } from "@/form-engine/discover";
-import { safeClick } from "@/form-engine/safety";
+import { isSubmitLike, safeClick } from "@/form-engine/safety";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -214,6 +214,7 @@ export async function fillCombobox(el: HTMLInputElement, value: string, hints: C
       (starts.length === 0 && contains.length === 1 ? contains[0] : undefined);
     if (pick && safeClick(pick)) {
       await sleep(60);
+      await confirmPicker(doc);
       return true;
     }
   }
@@ -221,6 +222,20 @@ export async function fillCombobox(el: HTMLInputElement, value: string, hints: C
   el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   el.blur();
   return false;
+}
+
+/**
+ * In a narrow window Workday opens a full-screen picker where a choice only
+ * counts after "Done". Press that button when one is showing; otherwise do nothing.
+ */
+async function confirmPicker(doc: Document): Promise<void> {
+  const done = Array.from(doc.querySelectorAll<HTMLElement>("button, [role='button']")).find(
+    (b) => (b.textContent ?? "").trim().toLowerCase() === "done" && b.getClientRects().length > 0,
+  );
+  if (done && !isSubmitLike(done)) {
+    done.click();
+    await sleep(150);
+  }
 }
 
 /** Reads the choices a combobox offers, without choosing anything. */

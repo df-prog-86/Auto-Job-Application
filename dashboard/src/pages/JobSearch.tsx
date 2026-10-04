@@ -80,8 +80,8 @@ export function JobSearch() {
     onSuccess: (r) => {
       setNotice(
         r.found > 0
-          ? `Found ${r.found} new ${r.found === 1 ? "match" : "matches"}.${r.skipped ? ` ${r.skipped} skipped (already in your jobs, already shown, or not a real posting link).` : ""}`
-          : `No new matches. ${r.skipped ? `${r.skipped} skipped because you already have them or removed them.` : "Try broader words."}`,
+          ? `Found ${r.found} new ${r.found === 1 ? "match" : "matches"}.${r.skipped ? ` ${r.skipped} skipped (already in your jobs, already shown, no longer open, or not a real posting link).` : ""}`
+          : `No new matches. ${r.skipped ? `${r.skipped} skipped because you already have them, removed them, or they are no longer open.` : "Try broader words."}`,
       );
       void qc.invalidateQueries({ queryKey: ["job-search-results"] });
     },

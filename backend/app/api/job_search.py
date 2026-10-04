@@ -55,7 +55,7 @@ def list_results(db: Session = Depends(get_db)) -> JobSearchRunOut:
 @router.post("/run", response_model=JobSearchRunOut)
 async def run_search(payload: JobSearchIn, db: Session = Depends(get_db)) -> JobSearchRunOut:
     try:
-        items = await web_search.search_jobs(payload)
+        items, closed = await web_search.search_jobs(payload)
     except LLMNotConfiguredError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -69,7 +69,8 @@ async def run_search(payload: JobSearchIn, db: Session = Depends(get_db)) -> Job
 
     known = {web_search.url_key(u) for (u,) in db.query(Job.canonical_application_url).all()}
     known |= {k for (k,) in db.query(JobSearchResult.url_key).all()}  # shown, added or removed before
-    found = skipped = 0
+    found = 0
+    skipped = closed  # postings that were clearly closed when the link was opened
     for item in items:
         if item["url_key"] in known:
             skipped += 1

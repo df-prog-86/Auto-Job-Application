@@ -46,6 +46,10 @@ def search(monkeypatch, app_and_db):
         }
         return ChatCompletionResult(content="Here you go:\n```json\n" + json.dumps(ITEMS) + "\n```", input_tokens=1, output_tokens=1, raw=raw)
 
+    async def unknown(url):
+        return None  # tests never visit real sites
+
+    monkeypatch.setattr(web_search, "check_live", unknown)
     monkeypatch.setattr(web_search.LLMClient, "chat_completion", fake)
     return app_and_db
 
@@ -131,3 +135,31 @@ def test_a_job_added_elsewhere_disappears_from_the_search_list(search):
     _saved_job(SessionLocal)  # the Delta posting now sits on the Jobs page
     titles = [r["title"] for r in client.get("/api/v1/job-search/results").json()["results"]]
     assert "Already saved" not in titles and "Billing Analyst" in titles
+
+
+def test_clearly_closed_postings_are_dropped_but_unclear_ones_stay(search, monkeypatch):
+    from app.services.discovery import web_search
+
+    client, _ = search
+
+    async def verdict(url):
+        return False if "acme" in url else None  # Acme is closed; the rest could not be checked
+
+    monkeypatch.setattr(web_search, "check_live", verdict)
+    out = client.post("/api/v1/job-search/run", json={"titles": "analyst"}).json()
+    assert "Revenue Cycle Analyst" not in [r["title"] for r in out["results"]]
+    assert "Billing Analyst" in [r["title"] for r in out["results"]]
+    assert out["skipped"] >= 1
+
+
+def test_closed_page_detection():
+    from app.services.discovery.web_search import is_public_host, looks_closed
+
+    u = "https://careers.example.com/jobs/123-director"
+    assert not looks_closed(u, u, 200, "Director. Apply now.")
+    assert looks_closed(u, u, 200, "Sorry, this job is no longer accepting applications.")
+    assert looks_closed(u, u, 404, "")
+    assert not looks_closed(u, u, 403, "")  # blocked is not the same as closed
+    assert looks_closed(u, "https://careers.example.com/", 200, "Welcome")  # bounced to the front page
+    assert not is_public_host("http://localhost:8765/x") and not is_public_host("http://10.0.0.5/")
+    assert is_public_host("https://careers.example.com/j")

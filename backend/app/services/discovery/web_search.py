@@ -9,10 +9,14 @@ suggestions; a job is added to the list when the person clicks Add.
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import json
 import re
 from typing import Any
 from urllib.parse import urlsplit
+
+import httpx
 
 from app.config import settings
 from app.schemas.job_search import JobSearchIn
@@ -47,6 +51,85 @@ def excluded_companies(criteria: JobSearchIn) -> list[str]:
 def is_excluded(company: str, excluded: list[str]) -> bool:
     name = company.lower()
     return any(e.lower() in name or name in e.lower() for e in excluded)
+
+
+_CLOSED_PHRASES = re.compile(
+    r"no longer accepting (?:applications|applicants)|is no longer (?:available|open|active|accepting)|"
+    r"(?:job|position|posting|requisition|role|opening) (?:has )?(?:been )?(?:is )?(?:closed|expired|filled|removed|unavailable)|"
+    r"(?:has|have) (?:been )?(?:closed|expired|filled)|"
+    r"this (?:job|position|posting|requisition) (?:is )?(?:no longer|has expired|has closed|has been filled)|"
+    r"job (?:was )?not found|position (?:was )?not found|we (?:could ?n.t|couldn.t) find (?:that|this|the) (?:job|page|position)|"
+    r"no longer exists|not currently accepting applications",
+    re.I,
+)
+_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0 Safari/537.36"
+)
+
+
+def is_public_host(url: str) -> bool:
+    """False for localhost and private addresses, so a search result can never aim this computer at itself."""
+    host = (urlsplit(url).hostname or "").lower()
+    if not host or host == "localhost" or host.endswith((".local", ".internal", ".localhost")):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return ip.is_global
+
+
+def looks_closed(original_url: str, final_url: str, status: int, text: str) -> bool:
+    """True only when the page clearly says the posting is gone. Anything unclear counts as open."""
+    if status in (404, 410):
+        return True
+    if status != 200:
+        return False
+    if _CLOSED_PHRASES.search(text[:20000]):
+        return True
+    # Bounced to a general careers or search page instead of the posting.
+    before = [p for p in urlsplit(original_url).path.split("/") if p]
+    after = [p for p in urlsplit(final_url).path.split("/") if p]
+    if len(before) >= 2 and len(after) <= 1:
+        return True
+    return len(before) >= 2 and "search" in "/".join(after).lower() and "search" not in "/".join(before).lower()
+
+
+async def check_live(url: str) -> bool | None:
+    """
+    True = looks open, False = clearly closed or gone, None = could not tell (the site blocks
+    automated visits, is slow, or builds its page with scripts). None never removes a result.
+    """
+    if not is_public_host(url):
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, max_redirects=5) as client:
+            resp = await client.get(url, headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
+    except httpx.HTTPError:
+        return None
+    if resp.status_code in (404, 410):
+        return False
+    if resp.status_code != 200:
+        return None
+    if not is_public_host(str(resp.url)):
+        return False
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", resp.text[:400000], flags=re.I | re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return not looks_closed(url, str(resp.url), resp.status_code, re.sub(r"\s+", " ", text))
+
+
+async def drop_closed(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Visits each link (a few at a time) and removes the ones that are clearly closed."""
+    gate = asyncio.Semaphore(5)
+
+    async def one(item: dict[str, Any]) -> bool | None:
+        async with gate:
+            return await check_live(item["url"])
+
+    verdicts = await asyncio.gather(*(one(i) for i in items), return_exceptions=True)
+    kept = [i for i, v in zip(items, verdicts) if v is not False]
+    return kept, len(items) - len(kept)
 
 
 def build_messages(criteria: JobSearchIn) -> list[dict[str, str]]:
@@ -123,8 +206,8 @@ def _clean(value: Any, limit: int) -> str | None:
     return text[:limit] if text else None
 
 
-async def search_jobs(criteria: JobSearchIn) -> list[dict[str, Any]]:
-    """Runs one web search and returns cleaned candidate postings (not yet saved anywhere)."""
+async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]:
+    """Runs one web search; returns cleaned candidate postings (not yet saved) and how many closed ones were dropped."""
     model = settings.PRIMARY_FAST_MODEL
     if not model:
         raise LLMNotConfiguredError("No LLM provider configured (PRIMARY_FAST_MODEL unset).")
@@ -165,4 +248,4 @@ async def search_jobs(criteria: JobSearchIn) -> list[dict[str, Any]]:
                 "grounded": url_key(link) in grounded_keys,
             }
         )
-    return items
+    return await drop_closed(items)

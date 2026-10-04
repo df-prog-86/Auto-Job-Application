@@ -163,3 +163,18 @@ def test_closed_page_detection():
     assert looks_closed(u, "https://careers.example.com/", 200, "Welcome")  # bounced to the front page
     assert not is_public_host("http://localhost:8765/x") and not is_public_host("http://10.0.0.5/")
     assert is_public_host("https://careers.example.com/j")
+
+
+def test_salary_minimum_is_a_floor_on_the_pay_midpoint_with_five_percent_slack(search):
+    from app.services.discovery.web_search import salary_floor, salary_midpoint
+
+    assert salary_floor(100000) == 95000
+    assert salary_midpoint("$80,000 - $100,000") == 90000
+    assert salary_midpoint("$85k") == 85000
+    assert salary_midpoint("$45 - $60 per hour") is None and salary_midpoint("Competitive") is None
+
+    client, _ = search
+    low = client.post("/api/v1/job-search/run", json={"titles": "analyst", "target_salary": 100000}).json()
+    titles = [r["title"] for r in low["results"]]
+    assert "Revenue Cycle Analyst" not in titles  # posted $85,000 is under the $95,000 floor
+    assert "Billing Analyst" in titles  # no posted pay stays unless the pay box is ticked

@@ -43,6 +43,27 @@ def is_http_url(url: str) -> bool:
     return parts.scheme in ("http", "https") and "." in parts.netloc
 
 
+def salary_floor(target: int) -> int:
+    """The lowest range midpoint to accept: the number entered, with 5% slack so near misses can be reviewed."""
+    return int(target * 0.95)
+
+
+_MONEY = re.compile(r"\$?\s*(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*([kK])?")
+
+
+def salary_midpoint(text: str | None) -> float | None:
+    """Midpoint of a yearly pay range written in the posting ("$80,000 - $100,000", "85k"). None if unclear or hourly."""
+    if not text:
+        return None
+    values: list[float] = []
+    for number, k in _MONEY.findall(text)[:2]:
+        value = float(number.replace(",", ""))
+        values.append(value * 1000 if k else value)
+    if not values or min(values) < 1000:
+        return None  # hourly or not a yearly figure: cannot tell
+    return sum(values) / len(values)
+
+
 def excluded_companies(criteria: JobSearchIn) -> list[str]:
     parts = re.split(r"[,;\n]", criteria.exclude_companies or "")
     return [p.strip() for p in parts if p.strip()][:20]
@@ -141,10 +162,11 @@ def build_messages(criteria: JobSearchIn) -> list[dict[str, str]]:
     if criteria.keywords:
         wanted.append(f"Must relate to: {criteria.keywords}")
     if criteria.target_salary:
-        low, high = int(criteria.target_salary * 0.85), int(criteria.target_salary * 1.15)
+        floor = salary_floor(criteria.target_salary)
         wanted.append(
-            f"Yearly pay where the midpoint of the posted pay range is about ${criteria.target_salary:,} "
-            f"(roughly ${low:,} to ${high:,}); postings that state no pay may still be included unless told otherwise below"
+            f"Yearly pay where the midpoint of the posted pay range is at least ${floor:,} "
+            "(there is no upper limit; higher is fine; for a single posted figure use that figure; "
+            "postings that state no pay may still be included unless told otherwise below)"
         )
     if criteria.require_salary:
         wanted.append("Ignore any posting that does not state its pay or pay range; every result must show pay")
@@ -231,6 +253,10 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
         link = strip_tracking_params(link)
         if is_excluded(company, excluded):
             continue
+        if criteria.target_salary:
+            mid = salary_midpoint(_clean(raw_item.get("salary"), 200))
+            if mid is not None and mid < salary_floor(criteria.target_salary):
+                continue  # posted pay is clearly under the floor
         if criteria.require_salary and not _clean(raw_item.get("salary"), 200):
             continue  # the person asked to see only postings that state pay
         work_type = _clean(raw_item.get("work_type"), 30)

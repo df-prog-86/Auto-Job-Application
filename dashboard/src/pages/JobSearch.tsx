@@ -179,6 +179,7 @@ export function JobSearch() {
               onChange={(e) => setTargetSalary(e.target.value)}
               placeholder="80000"
             />
+            <p className="mt-1 text-xs text-ink-400">Pay range midpoint must be at least this. Higher is fine.</p>
           </div>
           <div className="sm:col-span-2 lg:col-span-3">
             <label className={labelClass} htmlFor="js-exclude">Leave out these companies (optional)</label>

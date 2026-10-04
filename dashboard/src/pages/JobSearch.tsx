@@ -170,7 +170,7 @@ export function JobSearch() {
             </select>
           </div>
           <div>
-            <label className={labelClass} htmlFor="js-salary">Target salary (midpoint of range, yearly)</label>
+            <label className={labelClass} htmlFor="js-salary">Salary minimum (yearly)</label>
             <input
               id="js-salary"
               className={inputClass}

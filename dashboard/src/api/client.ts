@@ -151,6 +151,8 @@ export const api = {
   listAnswers: () => request<AnswerOut[]>("/profile/answers"),
   saveAnswer: (key: string, payload: AnswerUpsert) =>
     request<AnswerOut>(`/profile/answers/${key}`, { method: "PUT", body: JSON.stringify(payload) }),
+  clearQuestions: (ids?: number[]) =>
+    request<{ cleared: number }>("/needs-attention/clear", { method: "POST", body: JSON.stringify(ids ? { ids } : {}) }),
   forgetAnswer: (key: string) => request<void>(`/profile/answers/${encodeURIComponent(key)}`, { method: "DELETE" }),
   useOriginalResume: (id: number) =>
     request<GeneratedDocumentOut[]>(`/jobs/${id}/original-resume`, { method: "POST" }),

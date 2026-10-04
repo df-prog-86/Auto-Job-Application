@@ -25,8 +25,38 @@ function scoreLabel(score: number): string {
  * browser extension). Nothing runs automatically: scoring, proceeding and
  * tailoring each happen only when you click.
  */
+type Stage = "all" | "to-score" | "going" | "ready";
+type SortBy = "newest" | "fit";
+
+const STAGES: { value: Stage; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "to-score", label: "Not yet going after" },
+  { value: "going", label: "Going after" },
+  { value: "ready", label: "Ready to apply" },
+];
+
+function hasResumeDoc(job: JobOut): boolean {
+  return job.documents.some((d) => d.document_type === "resume");
+}
+
+function inStage(job: JobOut, stage: Stage): boolean {
+  const going = job.application_status === "proceeding";
+  if (stage === "to-score") return !going;
+  if (stage === "going") return going;
+  if (stage === "ready") return going && hasResumeDoc(job);
+  return true;
+}
+
 export function Jobs() {
   const jobsQuery = useQuery({ queryKey: ["jobs"], queryFn: api.listJobs });
+  const [stage, setStage] = useState<Stage>("all");
+  const [sortBy, setSortBy] = useState<SortBy>("newest");
+  const all = jobsQuery.data ?? [];
+  const visible = all
+    .filter((j) => inStage(j, stage))
+    .sort((a, b) =>
+      sortBy === "fit" ? (b.evaluation?.overall_score ?? -1) - (a.evaluation?.overall_score ?? -1) : 0,
+    );
 
   return (
     <div>
@@ -55,9 +85,43 @@ export function Jobs() {
         </Card>
       )}
 
-      {jobsQuery.data && jobsQuery.data.length > 0 && (
+      {all.length > 1 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {STAGES.map((st) => (
+            <button
+              key={st.value}
+              type="button"
+              onClick={() => setStage(st.value)}
+              aria-pressed={stage === st.value}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                stage === st.value ? "bg-brand-500 text-white shadow-glow" : "bg-white/80 text-ink-500 hover:text-brand-700"
+              }`}
+            >
+              {st.label}
+              <span className="ml-1.5 opacity-70">{all.filter((j) => inStage(j, st.value)).length}</span>
+            </button>
+          ))}
+          <label className="ml-auto flex items-center gap-2 text-xs font-semibold text-ink-500">
+            Sort
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value === "fit" ? "fit" : "newest")}
+              className="rounded-full border border-ink-300/70 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700"
+            >
+              <option value="newest">Newest first</option>
+              <option value="fit">Best fit first</option>
+            </select>
+          </label>
+        </div>
+      )}
+
+      {all.length > 0 && visible.length === 0 && (
+        <p className="text-sm text-ink-400">No jobs in this view. Pick another filter above.</p>
+      )}
+
+      {visible.length > 0 && (
         <ul className="space-y-4">
-          {jobsQuery.data.map((job) => (
+          {visible.map((job) => (
             <JobCard key={job.id} job={job} />
           ))}
         </ul>
@@ -182,6 +246,7 @@ function JobCard({ job }: { job: JobOut }) {
   const hasResume = resumeDocs.length > 0;
   const usingOriginal = resumeDocs.some((d) => d.template_version === "original-1");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [applyState, setApplyState] = useState<{ kind: "idle" | "starting" | "opened" | "problem"; text?: string }>({
     kind: "idle",
   });
@@ -239,6 +304,33 @@ function JobCard({ job }: { job: JobOut }) {
       ? "Re-score match"
       : "Score match";
 
+  const applyBlock = (
+    <div>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button variant="primary" onClick={startApplication} disabled={applyState.kind === "starting"}>
+                  {applyState.kind === "starting" ? "Opening…" : "Complete application"}
+                </Button>
+                <span className="text-xs text-ink-500">
+                  Opens the application in a new tab and fills it in. You review it and press Submit yourself.
+                </span>
+              </div>
+              {applyState.kind === "opened" && (
+                <p className="mt-2 text-xs text-ink-600">
+                  Opened in a new tab and filling now. You will get a notification when it is done. Anything it couldn't
+                  answer is highlighted there and listed under Needs Attention. Review it, then submit it yourself.
+                </p>
+              )}
+              {applyState.kind === "problem" && (
+                <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {applyState.text}{" "}
+                  <a className="font-semibold underline" href={job.canonical_application_url} target="_blank" rel="noreferrer">
+                    Open the posting
+                  </a>
+                </p>
+              )}
+    </div>
+  );
+
   return (
     <li>
       <Card className="p-6">
@@ -287,7 +379,7 @@ function JobCard({ job }: { job: JobOut }) {
           </div>
         </div>
 
-        {evaluation && (
+        {evaluation && expanded && (
           <div className="mt-4">
             <p className="text-sm leading-relaxed text-ink-700">{evaluation.summary}</p>
             {evaluation.gaps.length > 0 && <GapDetails gaps={evaluation.gaps} />}
@@ -349,7 +441,11 @@ function JobCard({ job }: { job: JobOut }) {
           <p className="mt-3 animate-pulse text-xs text-ink-500">Tailoring your resume. This can take a minute.</p>
         )}
 
-        {proceeding && hasResume && (
+        {proceeding && hasResume && !expanded && (
+          <div className="mt-4 rounded-2xl bg-brand-50/60 p-4">{applyBlock}</div>
+        )}
+
+        {proceeding && hasResume && expanded && (
           <div className="mt-4 rounded-2xl bg-brand-50/60 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -402,30 +498,7 @@ function JobCard({ job }: { job: JobOut }) {
               </div>
             </div>
 
-            <div className="mt-4 border-t border-brand-200/40 pt-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <Button variant="primary" onClick={startApplication} disabled={applyState.kind === "starting"}>
-                  {applyState.kind === "starting" ? "Opening…" : "Complete application"}
-                </Button>
-                <span className="text-xs text-ink-500">
-                  Opens the application in a new tab and fills it in. You review it and press Submit yourself.
-                </span>
-              </div>
-              {applyState.kind === "opened" && (
-                <p className="mt-2 text-xs text-ink-600">
-                  Opened in a new tab and filling now. Anything it couldn't answer is highlighted there and listed under
-                  Needs Attention.
-                </p>
-              )}
-              {applyState.kind === "problem" && (
-                <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  {applyState.text}{" "}
-                  <a className="font-semibold underline" href={job.canonical_application_url} target="_blank" rel="noreferrer">
-                    Open the posting
-                  </a>
-                </p>
-              )}
-            </div>
+            <div className="mt-4 border-t border-brand-200/40 pt-4">{applyBlock}</div>
 
             {tailorMutation.data?.used_original_wording && (
               <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -445,6 +518,17 @@ function JobCard({ job }: { job: JobOut }) {
               </details>
             )}
           </div>
+        )}
+
+        {(evaluation || (proceeding && hasResume)) && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            className="mt-3 text-xs font-semibold text-brand-600 hover:text-brand-700"
+          >
+            {expanded ? "Hide details" : "Show details"}
+          </button>
         )}
 
         {confirmingDelete && (

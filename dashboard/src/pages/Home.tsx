@@ -34,6 +34,7 @@ export function Home() {
   const profileQuery = useQuery({ queryKey: ["profile"], queryFn: api.getProfile, retry: false });
   const answersQuery = useQuery({ queryKey: ["answers"], queryFn: api.listAnswers, retry: false });
   const jobsQuery = useQuery({ queryKey: ["jobs"], queryFn: api.listJobs });
+  const attentionQuery = useQuery({ queryKey: ["needs-attention"], queryFn: api.listNeedsAttention, retry: false });
 
   const toggle = useMutation<unknown, ApiError, void>({
     mutationFn: () =>
@@ -98,6 +99,10 @@ export function Home() {
   const doneCount = steps.filter((s) => s.done).length;
   const nextIndex = steps.findIndex((s) => !s.done);
   const allDone = doneCount === steps.length;
+  const openQuestions = new Set((attentionQuery.data ?? []).map((q) => q.label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim())).size;
+  const readyToApply = jobs.filter(
+    (j) => j.application_status === "proceeding" && j.documents.some((d) => d.document_type === "resume"),
+  ).length;
   const loading = masterQuery.isLoading || profileQuery.isLoading || jobsQuery.isLoading;
 
   return (
@@ -129,13 +134,45 @@ export function Home() {
               </h2>
               <p className="mt-1 text-sm text-ink-500">
                 {allDone
-                  ? "Everything on the checklist is done. Add more jobs whenever you find them."
+                  ? "Setup is finished. Here is what needs you next."
                   : `${steps.length - doneCount} ${steps.length - doneCount === 1 ? "step" : "steps"} left. Finish them in any order.`}
               </p>
             </div>
           </div>
         </div>
 
+        {allDone && (
+          <ul className="divide-y divide-ink-900/5">
+            <li className="flex items-center gap-4 px-6 py-4 md:px-7">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-ink-900">
+                  {readyToApply} {readyToApply === 1 ? "job is" : "jobs are"} ready to apply to
+                </div>
+                <div className="mt-0.5 text-xs text-ink-500">Each one has a resume. Open it, fill it in, then review and submit it yourself.</div>
+              </div>
+              <Link to="/jobs">
+                <Button variant="primary" size="sm" tabIndex={-1}>
+                  Open jobs
+                </Button>
+              </Link>
+            </li>
+            <li className="flex items-center gap-4 px-6 py-4 md:px-7">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-ink-900">
+                  {openQuestions === 0 ? "No questions waiting on you" : `${openQuestions} ${openQuestions === 1 ? "question is" : "questions are"} waiting on you`}
+                </div>
+                <div className="mt-0.5 text-xs text-ink-500">Answer a question once and it is filled in every time after.</div>
+              </div>
+              <Link to="/needs-attention">
+                <Button variant={openQuestions > 0 ? "primary" : "secondary"} size="sm" tabIndex={-1}>
+                  {openQuestions > 0 ? "Review" : "View"}
+                </Button>
+              </Link>
+            </li>
+          </ul>
+        )}
+
+        {!allDone && (
         <ol className="divide-y divide-ink-900/5">
           {steps.map((step, i) => {
             const isNext = i === nextIndex;
@@ -174,6 +211,7 @@ export function Home() {
             );
           })}
         </ol>
+        )}
         {loading && <div className="px-7 pb-4 text-xs text-ink-400">Checking what's saved…</div>}
       </Card>
 

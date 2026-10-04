@@ -13,13 +13,11 @@ interface NavItem {
 const WORK: NavItem[] = [
   { to: "/", label: "Home" },
   { to: "/jobs", label: "Jobs" },
-  { to: "/applications", label: "Applications", soon: true },
   { to: "/needs-attention", label: "Needs Attention" },
 ];
 
 const SETUP: NavItem[] = [
   { to: "/profile", label: "Profile" },
-  { to: "/accounts", label: "Accounts", soon: true },
   { to: "/pairing", label: "Pair Extension" },
 ];
 
@@ -42,8 +40,8 @@ function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
   const openCount = attention.data?.length ?? 0;
   return (
     <div>
-      <div className="mb-1.5 px-3 text-xs font-semibold text-ink-400">{title}</div>
-      <div className="flex flex-col gap-0.5">
+      <div className="mb-1.5 hidden px-3 text-xs font-semibold text-ink-400 md:block">{title}</div>
+      <div className="flex gap-0.5 md:flex-col">
         {items.map((item) => (
           <NavLink
             key={item.to}
@@ -73,14 +71,14 @@ export function NavShell() {
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       <aside className="shrink-0 border-b border-white/70 bg-white/60 px-4 py-5 backdrop-blur md:sticky md:top-0 md:h-screen md:w-60 md:border-b-0 md:border-r md:py-7">
-        <div className="mb-5 flex items-center gap-3 px-2 md:mb-9">
+        <div className="mb-3 flex items-center gap-3 px-2 md:mb-9">
           <LogoMark />
           <div>
             <div className="text-base font-bold leading-tight text-ink-900">Job Agent</div>
             <div className="text-xs text-ink-400">Your job search, organized</div>
           </div>
         </div>
-        <nav className="flex gap-6 overflow-x-auto md:flex-col md:gap-7 md:overflow-visible">
+        <nav className="flex gap-2 overflow-x-auto md:flex-col md:gap-7 md:overflow-visible">
           <NavGroup title="Your search" items={WORK} />
           <NavGroup title="Setup" items={SETUP} />
         </nav>

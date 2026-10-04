@@ -326,3 +326,29 @@ def test_answers_the_person_gives_on_a_form_are_remembered_and_can_be_forgotten(
     assert client.delete("/api/v1/profile/answers/work_authorization").status_code == 400  # standard answers are edited, not deleted
     assert client.delete(f"/api/v1/profile/answers/{key}").status_code == 204
     assert [a for a in client.get("/api/v1/profile/answers").json() if a["answer_key"] == key] == []
+
+
+def test_needs_attention_can_be_cleared_and_closes_what_the_profile_now_answers(app_and_db):
+    client, SessionLocal = app_and_db
+    client.post("/api/v1/profile/commit", json=_COMMIT)
+    job_id = _job(SessionLocal)
+    headers = _token(client)
+    flagged = [
+        {"label": "Address Line 1", "field_type": "text", "options": [], "required": True},
+        {"label": "Do you have a relative here?", "field_type": "dropdown", "options": ["Yes", "No"], "required": True},
+        {"label": "Preferred pronouns?", "field_type": "text", "options": [], "required": True},
+    ]
+    client.post("/api/v1/apply/report", json={"job_id": job_id, "flagged": flagged}, headers=headers)
+    assert len(client.get("/api/v1/needs-attention").json()) == 3
+
+    # Saving the street address on the Profile settles the matching question by itself.
+    client.put("/api/v1/profile/answers/address_line1", json={"value_type": "str", "value": "1 Main St"})
+    open_items = client.get("/api/v1/needs-attention").json()
+    assert sorted(q["label"] for q in open_items) == ["Do you have a relative here?", "Preferred pronouns?"]
+
+    # Clear some by id, then the rest.
+    first = open_items[0]["id"]
+    assert client.post("/api/v1/needs-attention/clear", json={"ids": [first]}).json() == {"cleared": 1}
+    assert len(client.get("/api/v1/needs-attention").json()) == 1
+    assert client.post("/api/v1/needs-attention/clear", json={}).json() == {"cleared": 1}
+    assert client.get("/api/v1/needs-attention").json() == []

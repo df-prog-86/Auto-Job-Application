@@ -205,12 +205,16 @@ export function Profile() {
         description="This is what applications are filled out from. Click any field to change it."
       />
 
-      <ResumeDrop parseMutation={parseMutation} hasProfile />
+      <SectionNav />
+
+      <div id="profile-resume" className="scroll-mt-20">
+        <ResumeDrop parseMutation={parseMutation} hasProfile />
+      </div>
 
       <CompletionBanner missing={missing} />
 
       <Card className="p-6">
-        <h2 className="mb-4 text-base font-bold text-ink-900">Personal details</h2>
+        <h2 id="profile-details" className="mb-4 scroll-mt-20 text-base font-bold text-ink-900">Personal details</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <EditableField
             label="Name"
@@ -255,11 +259,15 @@ export function Profile() {
         </div>
       </Card>
 
-      <EligibilityCard answers={answers} loading={answersQuery.isLoading} />
+      <div id="profile-answers" className="scroll-mt-20">
+        <EligibilityCard answers={answers} loading={answersQuery.isLoading} />
+      </div>
 
-      <SelfIdCard answers={answers} loading={answersQuery.isLoading} />
+      <div id="profile-selfid" className="scroll-mt-20">
+        <SelfIdCard answers={answers} loading={answersQuery.isLoading} />
+      </div>
 
-      <section>
+      <section id="profile-experience" className="scroll-mt-20">
         <SectionTitle
           title="Experience"
           action={
@@ -289,9 +297,7 @@ export function Profile() {
         )}
       </section>
 
-      <SkillsCard skills={profile.skills} onChange={applyProfile} />
-
-      <section>
+      <section id="profile-education" className="scroll-mt-20">
         <SectionTitle
           title="Education"
           action={
@@ -308,7 +314,11 @@ export function Profile() {
         </div>
       </section>
 
-      <section>
+      <div id="profile-skills" className="scroll-mt-20">
+        <SkillsCard skills={profile.skills} onChange={applyProfile} />
+      </div>
+
+      <section id="profile-certs" className="scroll-mt-20">
         <SectionTitle
           title="Certifications"
           action={
@@ -327,6 +337,38 @@ export function Profile() {
         </div>
       </section>
     </div>
+  );
+}
+
+const PROFILE_SECTIONS: { id: string; label: string }[] = [
+  { id: "profile-resume", label: "Resume" },
+  { id: "profile-details", label: "Details" },
+  { id: "profile-answers", label: "Answers" },
+  { id: "profile-selfid", label: "Self-ID" },
+  { id: "profile-experience", label: "Experience" },
+  { id: "profile-education", label: "Education" },
+  { id: "profile-skills", label: "Skills" },
+  { id: "profile-certs", label: "Certifications" },
+];
+
+/** Jump links that stay in view while the page scrolls. */
+function SectionNav() {
+  return (
+    <nav
+      aria-label="Profile sections"
+      className="sticky top-0 z-10 -mx-1 flex gap-1.5 overflow-x-auto rounded-2xl border border-white bg-white/90 px-2 py-2 shadow-soft backdrop-blur"
+    >
+      {PROFILE_SECTIONS.map((sec) => (
+        <button
+          key={sec.id}
+          type="button"
+          onClick={() => document.getElementById(sec.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          className="shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold text-ink-500 transition hover:bg-brand-50 hover:text-brand-700"
+        >
+          {sec.label}
+        </button>
+      ))}
+    </nav>
   );
 }
 
@@ -391,6 +433,8 @@ function EligibilityCard({ answers, loading }: { answers: AnswerOut[] | undefine
     return v === true ? "yes" : v === false ? "no" : "";
   };
 
+  const yesNoOptions = SPONSORSHIP_OPTIONS.slice().reverse();
+
   return (
     <Card className="p-6">
       <h2 className="text-base font-bold text-ink-900">Answers used on every application</h2>
@@ -400,79 +444,96 @@ function EligibilityCard({ answers, loading }: { answers: AnswerOut[] | undefine
       {loading ? (
         <p className="text-sm text-ink-400">Loading…</p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <SelectField
-            label="Work authorization"
-            required
-            value={(answerValue(answers, "work_authorization") as string | undefined) ?? ""}
-            options={AUTHORIZATION_OPTIONS}
-            onSave={(v) => save("work_authorization", "str", v)}
-          />
-          <SelectField
-            label="Need visa sponsorship now or later?"
-            required
-            value={sponsor === true ? "yes" : sponsor === false ? "no" : ""}
-            options={SPONSORSHIP_OPTIONS}
-            onSave={(v) => save("sponsorship_required", "bool", v)}
-          />
-          <SelectField
-            label="Willing to complete a background check?"
-            value={yesNo("background_check_ok")}
-            options={SPONSORSHIP_OPTIONS.slice().reverse()}
-            onSave={(v) => save("background_check_ok", "bool", v)}
-          />
-          <SelectField
-            label="Willing to complete a criminal record check?"
-            value={yesNo("criminal_check_ok")}
-            options={SPONSORSHIP_OPTIONS.slice().reverse()}
-            onSave={(v) => save("criminal_check_ok", "bool", v)}
-          />
-          <SelectField
-            label="Willing to complete a drug screen?"
-            value={yesNo("drug_screen_ok")}
-            options={SPONSORSHIP_OPTIONS.slice().reverse()}
-            onSave={(v) => save("drug_screen_ok", "bool", v)}
-          />
-          <SelectField
-            label="Are you 18 or older?"
-            value={yesNo("age_18_plus")}
-            options={SPONSORSHIP_OPTIONS.slice().reverse()}
-            onSave={(v) => save("age_18_plus", "bool", v)}
-          />
-          <SelectField
-            label="Phone country code"
-            required
-            value={(answerValue(answers, "phone_country") as string | undefined) ?? ""}
-            options={PHONE_COUNTRY_OPTIONS}
-            onSave={(v) => save("phone_country", "str", v)}
-          />
-          <SelectField
-            label="Phone type"
-            value={(answerValue(answers, "phone_device_type") as string | undefined) ?? ""}
-            options={PHONE_TYPE_OPTIONS}
-            onSave={(v) => save("phone_device_type", "str", v)}
-          />
-          <EditableField
-            label="Street address (line 1)"
-            value={(answerValue(answers, "address_line1") as string | undefined) ?? ""}
-            emptyLabel="Not set"
-            onSave={(v) => save("address_line1", "str", v)}
-          />
-          <EditableField
-            label="Postal code"
-            value={(answerValue(answers, "postal_code") as string | undefined) ?? ""}
-            emptyLabel="Not set"
-            onSave={(v) => save("postal_code", "str", v)}
-          />
-          <SelectField
-            label="Security clearance (optional)"
-            value={(answerValue(answers, "security_clearance") as string | undefined) ?? ""}
-            options={CLEARANCE_OPTIONS}
-            onSave={(v) => save("security_clearance", "str", v)}
-          />
+        <div className="space-y-6">
+          <AnswerGroup title="Work eligibility">
+            <SelectField
+              label="Work authorization"
+              required
+              value={(answerValue(answers, "work_authorization") as string | undefined) ?? ""}
+              options={AUTHORIZATION_OPTIONS}
+              onSave={(v) => save("work_authorization", "str", v)}
+            />
+            <SelectField
+              label="Need visa sponsorship now or later?"
+              required
+              value={sponsor === true ? "yes" : sponsor === false ? "no" : ""}
+              options={SPONSORSHIP_OPTIONS}
+              onSave={(v) => save("sponsorship_required", "bool", v)}
+            />
+            <SelectField
+              label="Are you 18 or older?"
+              value={yesNo("age_18_plus")}
+              options={yesNoOptions}
+              onSave={(v) => save("age_18_plus", "bool", v)}
+            />
+            <SelectField
+              label="Security clearance (optional)"
+              value={(answerValue(answers, "security_clearance") as string | undefined) ?? ""}
+              options={CLEARANCE_OPTIONS}
+              onSave={(v) => save("security_clearance", "str", v)}
+            />
+          </AnswerGroup>
+
+          <AnswerGroup title="Background and screening">
+            <SelectField
+              label="Willing to complete a background check?"
+              value={yesNo("background_check_ok")}
+              options={yesNoOptions}
+              onSave={(v) => save("background_check_ok", "bool", v)}
+            />
+            <SelectField
+              label="Willing to complete a criminal record check?"
+              value={yesNo("criminal_check_ok")}
+              options={yesNoOptions}
+              onSave={(v) => save("criminal_check_ok", "bool", v)}
+            />
+            <SelectField
+              label="Willing to complete a drug screen?"
+              value={yesNo("drug_screen_ok")}
+              options={yesNoOptions}
+              onSave={(v) => save("drug_screen_ok", "bool", v)}
+            />
+          </AnswerGroup>
+
+          <AnswerGroup title="Address and phone">
+            <EditableField
+              label="Street address (line 1)"
+              value={(answerValue(answers, "address_line1") as string | undefined) ?? ""}
+              emptyLabel="Not set"
+              onSave={(v) => save("address_line1", "str", v)}
+            />
+            <EditableField
+              label="Postal code"
+              value={(answerValue(answers, "postal_code") as string | undefined) ?? ""}
+              emptyLabel="Not set"
+              onSave={(v) => save("postal_code", "str", v)}
+            />
+            <SelectField
+              label="Phone country code"
+              required
+              value={(answerValue(answers, "phone_country") as string | undefined) ?? ""}
+              options={PHONE_COUNTRY_OPTIONS}
+              onSave={(v) => save("phone_country", "str", v)}
+            />
+            <SelectField
+              label="Phone type"
+              value={(answerValue(answers, "phone_device_type") as string | undefined) ?? ""}
+              options={PHONE_TYPE_OPTIONS}
+              onSave={(v) => save("phone_device_type", "str", v)}
+            />
+          </AnswerGroup>
         </div>
       )}
     </Card>
+  );
+}
+
+function AnswerGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div>
+      <h3 className="mb-3 border-b border-ink-900/5 pb-1.5 text-sm font-bold text-ink-700">{title}</h3>
+      <div className="grid gap-4 sm:grid-cols-2">{children}</div>
+    </div>
   );
 }
 

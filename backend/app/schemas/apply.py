@@ -123,5 +123,11 @@ class PendingQuestionOut(BaseModel):
         from_attributes = True
 
 
+class ClearQuestionsIn(BaseModel):
+    """Which open questions to clear. Leave ids out to clear every open question."""
+
+    ids: list[int] | None = None
+
+
 class AnswerQuestionIn(BaseModel):
     answer: str

@@ -85,7 +85,8 @@ def test_search_keeps_real_links_marks_grounded_ones_and_skips_known_ones(search
 def test_add_uses_the_summary_when_the_page_cannot_be_read_and_remove_hides_a_result(search, monkeypatch):
     from app.services.discovery import manual_extraction
 
-    client, _ = search
+    client, SessionLocal = search
+    _saved_job(SessionLocal)  # the mocked search also returns a posting that is already saved
 
     async def blocked(url):
         raise manual_extraction.ManualExtractionError("blocked")
@@ -108,7 +109,8 @@ def test_add_uses_the_summary_when_the_page_cannot_be_read_and_remove_hides_a_re
 
 
 def test_clear_removes_everything_waiting(search):
-    client, _ = search
+    client, SessionLocal = search
+    _saved_job(SessionLocal)
     client.post("/api/v1/job-search/run", json={"titles": "analyst"})
     assert client.post("/api/v1/job-search/clear").json() == {"cleared": 2}
     assert client.get("/api/v1/job-search/results").json()["results"] == []

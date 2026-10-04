@@ -386,7 +386,7 @@ async function fillEduRow(doc: Document, row: HTMLElement, n: number, e: ApplyEd
 const MAX_CERTS = 5;
 
 /** Presses a row's own Delete button, only ever for a row this file just added and that is still empty. */
-async function removeEmptyRow(doc: Document, kind: Kind, row: HTMLElement): Promise<boolean> {
+async function removeEmptyRow(doc: Document, _kind: Kind, row: HTMLElement): Promise<boolean> {
   if (!rowIsEmpty(row, doc)) return false;
   const del = Array.from(row.querySelectorAll<HTMLButtonElement>("button")).find((b) => /^delete$/i.test(clean(b.textContent)));
   if (!del) return false;

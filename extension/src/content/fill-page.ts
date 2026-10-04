@@ -6,6 +6,7 @@
 
 import { MAX_ADVANCES, canAdvance, isWorkdayPage, pageSignature, stepSignature } from "@/form-engine/advance";
 import { fillPage } from "@/form-engine/engine";
+import { startLearning } from "@/form-engine/learn";
 import { runWorkday } from "@/form-engine/workday-run";
 import type { ResumePayload } from "@/form-engine/engine";
 import type { ApplyContext, FillReport } from "@/form-engine/types";
@@ -93,9 +94,21 @@ function watchSteps(ctx: ApplyContext, resume: ResumePayload | null): void {
   }, 800);
 }
 
+/** Offers to keep answers the person gives by hand. Only sends what they agree to save. */
+function offerToRemember(): void {
+  startLearning(document, (answers) => {
+    try {
+      if (typeof chrome !== "undefined" && chrome.runtime?.id) void chrome.runtime.sendMessage({ type: "LEARN_ANSWERS", answers });
+    } catch {
+      /* the extension was reloaded; the answers simply are not saved */
+    }
+  });
+}
+
 window.__jobAgentFill = async (ctx, resume) => {
   const report = await fillAndAdvance(ctx, resume);
   watchSteps(ctx, resume);
+  offerToRemember();
   return report;
 };
 
@@ -124,6 +137,7 @@ window.__jobAgentWorkday = (ctx, resume) => {
   )
     .then((outcome) => {
       watchSteps(ctx, resume);
+      offerToRemember();
       tell({ type: "WORKDAY_DONE", report: outcome.report, stoppedBecause: outcome.stoppedBecause });
     })
     .catch((err: Error) => tell({ type: "WORKDAY_DONE", report: null, stoppedBecause: err.message }))

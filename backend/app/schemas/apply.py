@@ -88,6 +88,18 @@ class FlaggedField(BaseModel):
     required: bool = False
 
 
+class LearnedAnswerIn(BaseModel):
+    label: str
+    value: str
+
+
+class LearnedIn(BaseModel):
+    """Answers the person typed or chose themselves on an application form."""
+
+    answers: list[LearnedAnswerIn] = []
+    job_id: int | None = None
+
+
 class ApplyReportIn(BaseModel):
     job_id: int
     page_url: str | None = None

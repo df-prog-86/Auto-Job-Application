@@ -27,10 +27,11 @@ from app.schemas.apply import (
     ApplyExperience,
     ApplyJob,
     ApplyReportIn,
+    LearnedIn,
     ApplyResume,
     CandidateFacts,
 )
-from app.services.apply.questions import normalize_question, urls_match
+from app.services.apply.questions import answer_key_for, normalize_question, urls_match
 from app.services.resume.role_bullets import match_bullets, resume_roles
 from app.services.resume.service import is_safe_document_path
 
@@ -212,6 +213,65 @@ def get_apply_context(payload: ApplyContextIn, db: Session = Depends(get_db)) ->
         elif answer.answer_key.startswith("q:") and isinstance(raw, str) and raw.strip():
             out.learned_answers[answer.answer_key[2:]] = raw
     return out
+
+
+# Questions whose answers must be given fresh each time (agreements, signatures, identifiers, secrets).
+_NEVER_REMEMBER = re.compile(
+    r"password|passcode|\bssn\b|social security|card number|account number|routing|passport|"
+    r"certify|attest|acknowledg|\bagree\b|consent|signature|sign here|i understand|terms|"
+    r"\b(ever|convicted|arrested|felony|failed)\b",
+    re.I,
+)
+
+
+@router.post("/learned")
+def save_learned(payload: LearnedIn, db: Session = Depends(get_db)) -> dict[str, int]:
+    """
+    Remembers answers the person gave themselves on a form, so the same
+    question is filled in next time. Anything that looks like an agreement,
+    a secret or a history question is refused here as well.
+    """
+    profile = get_current_profile(db)
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No profile has been created yet.")
+    saved = 0
+    for item in payload.answers[:20]:
+        label = item.label.strip()
+        value = item.value.strip()
+        key = normalize_question(label)
+        if not key or not value or len(value) > 300 or _NEVER_REMEMBER.search(label):
+            continue
+        answer_key = answer_key_for(key)
+        existing = (
+            db.query(CandidateAnswer)
+            .filter(CandidateAnswer.profile_id == profile.id, CandidateAnswer.answer_key == answer_key)
+            .one_or_none()
+        )
+        if existing is None:
+            db.add(
+                CandidateAnswer(
+                    profile_id=profile.id,
+                    answer_key=answer_key,
+                    value_type="str",
+                    value={"raw": value},
+                    explanatory_text=label[:500],
+                    provenance="extension",
+                    user_confirmed=True,
+                )
+            )
+        else:
+            existing.value = {"raw": value}
+            existing.explanatory_text = existing.explanatory_text or label[:500]
+            existing.user_confirmed = True
+        # The question is no longer waiting on anyone.
+        for pending in db.query(PendingQuestion).filter(
+            PendingQuestion.question_key == key[:500], PendingQuestion.status == "open"
+        ):
+            pending.status = "answered"
+            pending.answer_text = value
+        saved += 1
+    db.commit()
+    return {"saved": saved}
 
 
 @router.post("/report", status_code=status.HTTP_204_NO_CONTENT)

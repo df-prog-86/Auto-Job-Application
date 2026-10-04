@@ -43,7 +43,50 @@ export function NeedsAttention() {
           <QuestionCard key={q.id} q={q} />
         ))}
       </ul>
+
+      <SavedAnswers />
     </div>
+  );
+}
+
+/** Answers the app remembers from earlier applications. Forget one and it is asked again next time. */
+function SavedAnswers() {
+  const queryClient = useQueryClient();
+  const answers = useQuery({ queryKey: ["answers"], queryFn: api.listAnswers });
+  const forget = useMutation<void, ApiError, string>({
+    mutationFn: (key) => api.forgetAnswer(key),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["answers"] }),
+  });
+  const saved = (answers.data ?? []).filter((a) => a.answer_key.startsWith("q:") && typeof a.value === "string");
+  if (saved.length === 0) return null;
+
+  return (
+    <section className="mt-10">
+      <h2 className="text-base font-bold text-ink-900">Answers I remember</h2>
+      <p className="mb-3 mt-1 text-xs text-ink-500">
+        Filled in automatically when the same question appears. Forget one if it is wrong or out of date.
+      </p>
+      <Card className="divide-y divide-ink-900/5">
+        {saved.map((a) => (
+          <div key={a.answer_key} className="flex items-center justify-between gap-4 px-5 py-3">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-ink-900">{a.explanatory_text || a.answer_key.slice(2)}</div>
+              <div className="truncate text-sm text-ink-500">{String(a.value)}</div>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={forget.isPending}
+              onClick={() => forget.mutate(a.answer_key)}
+            >
+              Forget
+            </Button>
+          </div>
+        ))}
+      </Card>
+      {forget.error && <p className="mt-2 text-sm text-red-600">{forget.error.message}</p>}
+    </section>
   );
 }
 

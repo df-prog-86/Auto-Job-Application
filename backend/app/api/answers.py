@@ -86,3 +86,19 @@ def upsert_answer(
 def experience_summary(db: Session = Depends(get_db)) -> ExperienceSummaryResponse:
     profile = _require_profile(db)
     return compute_experience_summary(db, profile.id)
+
+
+@router.delete("/answers/{answer_key}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_remembered_answer(answer_key: str, db: Session = Depends(get_db)) -> None:
+    """Forgets one remembered question ("q:..."). The standard profile answers are edited, not deleted."""
+    if not answer_key.startswith("q:"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only remembered question answers can be deleted.")
+    profile = _require_profile(db)
+    row = (
+        db.query(CandidateAnswer)
+        .filter(CandidateAnswer.profile_id == profile.id, CandidateAnswer.answer_key == answer_key)
+        .one_or_none()
+    )
+    if row is not None:
+        db.delete(row)
+        db.commit()

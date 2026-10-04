@@ -288,3 +288,41 @@ def test_education_gpa_and_certifications_are_editable_and_reach_the_apply_conte
 
     assert client.delete(f"/api/v1/profile/certifications/{cert_id}").json()["certifications"] == []
     assert client.delete("/api/v1/profile/certifications/9999").status_code == 404
+
+
+def test_answers_the_person_gives_on_a_form_are_remembered_and_can_be_forgotten(app_and_db):
+    client, SessionLocal = app_and_db
+    client.post("/api/v1/profile/commit", json=_COMMIT)
+    job_id = _job(SessionLocal)
+    headers = _token(client)
+    client.post(
+        "/api/v1/apply/report",
+        json={"job_id": job_id, "flagged": [{"label": "Do you have a relative here? *", "field_type": "dropdown", "options": ["Yes", "No"], "required": True}]},
+        headers=headers,
+    )
+    assert len(client.get("/api/v1/needs-attention").json()) == 1
+
+    out = client.post(
+        "/api/v1/apply/learned",
+        json={
+            "answers": [
+                {"label": "Do you have a relative here?", "value": "No"},
+                {"label": "I agree to the terms", "value": "Yes"},  # agreements are never remembered
+                {"label": "Have you ever been fired?", "value": "No"},  # history questions are never remembered
+                {"label": "Your password", "value": "x"},
+            ]
+        },
+        headers=headers,
+    ).json()
+    assert out == {"saved": 1}
+    assert client.get("/api/v1/needs-attention").json() == []  # settled by the saved answer
+
+    ctx = client.post("/api/v1/apply/context", json={"url": "https://x.com", "job_id": job_id}, headers=headers).json()
+    assert ctx["learned_answers"] == {"do you have a relative here": "No"}
+
+    key = "q:do you have a relative here"
+    shown = [a for a in client.get("/api/v1/profile/answers").json() if a["answer_key"] == key][0]
+    assert shown["value"] == "No" and shown["explanatory_text"] == "Do you have a relative here?"
+    assert client.delete("/api/v1/profile/answers/work_authorization").status_code == 400  # standard answers are edited, not deleted
+    assert client.delete(f"/api/v1/profile/answers/{key}").status_code == 204
+    assert [a for a in client.get("/api/v1/profile/answers").json() if a["answer_key"] == key] == []

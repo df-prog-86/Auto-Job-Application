@@ -15,6 +15,7 @@ import type { FormField } from "@/form-engine/discover";
 import type { ComboboxHints } from "@/form-engine/fill";
 import { base64ToFile, currentValue, fillField, fillFile, readComboboxOptions, readDropdownOptions } from "@/form-engine/fill";
 import { clearMarks, mark, showBanner } from "@/form-engine/highlight";
+import { trackFlagged } from "@/form-engine/learn";
 import { fillHistory, isDateInput } from "@/form-engine/workday-history";
 import type { ApplyContext, FillReport } from "@/form-engine/types";
 
@@ -147,7 +148,8 @@ export async function fillPage(
     if (value && (await fillField(field, value, hints))) {
       done(report, field);
     } else if (field.required || cls.kind === "canonical") {
-      flag(report, field);
+      flag(report, field, options);
+      if (cls.kind === "unknown") trackFlagged(field);
     } else {
       report.leftBlank++;
     }
@@ -162,11 +164,11 @@ function done(report: FillReport, field: FormField): void {
   mark(field.outlineEl, "filled");
 }
 
-function flag(report: FillReport, field: FormField): void {
+function flag(report: FillReport, field: FormField, options?: string[]): void {
   report.flagged.push({
     label: field.label,
     field_type: field.kind === "radio" ? "radio" : field.kind,
-    options: field.options.slice(0, 50),
+    options: (options && options.length > 0 ? options : field.options).filter((o) => !/^select one$/i.test(o)).slice(0, 50),
     required: field.required,
   });
   mark(field.outlineEl, "flagged");

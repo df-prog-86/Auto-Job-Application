@@ -327,6 +327,18 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
       return false;
     }
 
+    case "LEARN_ANSWERS":
+      if (sender.id === chrome.runtime.id && sender.tab && Array.isArray(message.answers)) {
+        const answers = message.answers
+          .filter((a) => typeof a?.label === "string" && typeof a?.value === "string")
+          .slice(0, 20);
+        void backend
+          .learnAnswers(answers)
+          .then((r) => notify("Saved for next time", `${r.saved} answer${r.saved === 1 ? "" : "s"} kept. You can review them in the app.`))
+          .catch(() => notify("Couldn't save the answers", "Make sure the app is running, then try again."));
+      }
+      return false;
+
     case "WORKDAY_WAITING":
       if (sender.id === chrome.runtime.id && sender.tab) {
         notify("Sign in to Workday", "Sign in (or create your account) on that tab. Job Agent carries on by itself afterwards.");

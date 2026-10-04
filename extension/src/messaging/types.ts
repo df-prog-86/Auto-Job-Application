@@ -17,6 +17,8 @@ export type ExtensionMessage =
   | { type: "COMPLETE_APPLICATION"; jobId: number; url: string }
   /** From the Workday walker running in the page. */
   | { type: "WORKDAY_WAITING" }
+  /** From the page: answers the person typed themselves and agreed to keep. */
+  | { type: "LEARN_ANSWERS"; answers: { label: string; value: string }[] }
   | { type: "WORKDAY_DONE"; report: import("@/form-engine/types").FillReport | null; stoppedBecause: string };
 
 export interface PairResult {

@@ -92,6 +92,14 @@ export const backend = {
       },
       true,
     ),
+
+  /** Answers the person gave themselves on a form, kept so the same question is filled next time. */
+  learnAnswers: (answers: { label: string; value: string }[]) =>
+    request<{ saved: number }>(
+      "/api/v1/apply/learned",
+      { method: "POST", body: JSON.stringify({ answers }) },
+      true,
+    ),
 };
 
 /** The tailored resume, as base64 so it can be handed to the page script. */

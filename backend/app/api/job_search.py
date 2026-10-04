@@ -28,12 +28,15 @@ router = APIRouter(prefix="/api/v1/job-search", tags=["job-search"])
 
 
 def _new_results(db: Session) -> list[JobSearchResult]:
-    return (
+    rows = (
         db.query(JobSearchResult)
         .filter(JobSearchResult.status == "new")
         .order_by(JobSearchResult.id.desc())
         .all()
     )
+    # A posting that is already on the Jobs page (added here or any other way) is not offered again.
+    in_jobs = {web_search.url_key(u) for (u,) in db.query(Job.canonical_application_url).all()}
+    return [r for r in rows if r.url_key not in in_jobs]
 
 
 def _run_out(db: Session, found: int, skipped: int) -> JobSearchRunOut:

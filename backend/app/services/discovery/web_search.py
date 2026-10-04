@@ -39,6 +39,16 @@ def is_http_url(url: str) -> bool:
     return parts.scheme in ("http", "https") and "." in parts.netloc
 
 
+def excluded_companies(criteria: JobSearchIn) -> list[str]:
+    parts = re.split(r"[,;\n]", criteria.exclude_companies or "")
+    return [p.strip() for p in parts if p.strip()][:20]
+
+
+def is_excluded(company: str, excluded: list[str]) -> bool:
+    name = company.lower()
+    return any(e.lower() in name or name in e.lower() for e in excluded)
+
+
 def build_messages(criteria: JobSearchIn) -> list[dict[str, str]]:
     wanted = [f"Job title or role: {criteria.titles}"]
     if criteria.location:
@@ -55,6 +65,8 @@ def build_messages(criteria: JobSearchIn) -> list[dict[str, str]]:
         )
     if criteria.require_salary:
         wanted.append("Ignore any posting that does not state its pay or pay range; every result must show pay")
+    if excluded_companies(criteria):
+        wanted.append("Do not include postings from these companies: " + ", ".join(excluded_companies(criteria)))
     if criteria.posted_within_days:
         wanted.append(f"Posted within the last {criteria.posted_within_days} days")
     system = (
@@ -126,6 +138,7 @@ async def search_jobs(criteria: JobSearchIn) -> list[dict[str, Any]]:
     )
     grounded_keys = cited_urls(result.raw)
     items: list[dict[str, Any]] = []
+    excluded = excluded_companies(criteria)
     for raw_item in parse_items(result.content):
         title = _clean(raw_item.get("title"), 300)
         company = _clean(raw_item.get("company"), 300)
@@ -133,6 +146,8 @@ async def search_jobs(criteria: JobSearchIn) -> list[dict[str, Any]]:
         if not title or not company or not link or not is_http_url(link):
             continue
         link = strip_tracking_params(link)
+        if is_excluded(company, excluded):
+            continue
         if criteria.require_salary and not _clean(raw_item.get("salary"), 200):
             continue  # the person asked to see only postings that state pay
         work_type = _clean(raw_item.get("work_type"), 30)

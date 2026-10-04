@@ -112,3 +112,20 @@ def test_clear_removes_everything_waiting(search):
     client.post("/api/v1/job-search/run", json={"titles": "analyst"})
     assert client.post("/api/v1/job-search/clear").json() == {"cleared": 2}
     assert client.get("/api/v1/job-search/results").json()["results"] == []
+
+
+def test_excluded_companies_and_required_pay_are_left_out(search):
+    client, SessionLocal = search
+    out = client.post(
+        "/api/v1/job-search/run",
+        json={"titles": "analyst", "exclude_companies": "beta care, delta", "require_salary": True},
+    ).json()
+    assert [r["title"] for r in out["results"]] == ["Revenue Cycle Analyst"]  # Beta excluded, others have no pay
+
+
+def test_a_job_added_elsewhere_disappears_from_the_search_list(search):
+    client, SessionLocal = search
+    client.post("/api/v1/job-search/run", json={"titles": "analyst"})
+    _saved_job(SessionLocal)  # the Delta posting now sits on the Jobs page
+    titles = [r["title"] for r in client.get("/api/v1/job-search/results").json()["results"]]
+    assert "Already saved" not in titles and "Billing Analyst" in titles

@@ -155,7 +155,8 @@ export const api = {
   listAnswers: () => request<AnswerOut[]>("/profile/answers"),
   saveAnswer: (key: string, payload: AnswerUpsert) =>
     request<AnswerOut>(`/profile/answers/${key}`, { method: "PUT", body: JSON.stringify(payload) }),
-  listSearchResults: () => request<JobSearchResultOut[]>("/job-search/results"),
+  listSearchResults: () =>
+    request<JobSearchRunOut>("/job-search/results").then((r) => r.results as JobSearchResultOut[]),
   runJobSearch: (criteria: JobSearchCriteria) =>
     request<JobSearchRunOut>("/job-search/run", { method: "POST", body: JSON.stringify(criteria) }),
   addSearchResult: (id: number) =>

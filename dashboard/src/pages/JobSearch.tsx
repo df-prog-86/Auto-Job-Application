@@ -9,6 +9,30 @@ import type { JobSearchCriteria, JobSearchResultOut } from "@/types/api";
 
 const labelClass = "mb-1 block text-xs font-semibold text-ink-500";
 
+const SAVED_KEY = "job-search-criteria";
+
+interface SavedCriteria {
+  titles: string;
+  location: string;
+  workType: JobSearchCriteria["work_type"];
+  keywords: string;
+  exclude: string;
+  targetSalary: string;
+  requireSalary: boolean;
+  within: JobSearchCriteria["posted_within_days"];
+  count: number;
+}
+
+/** The last search, so the boxes are filled in next time. Stays in this browser only. */
+function loadSaved(): Partial<SavedCriteria> {
+  try {
+    const raw = window.localStorage.getItem(SAVED_KEY);
+    return raw ? (JSON.parse(raw) as Partial<SavedCriteria>) : {};
+  } catch {
+    return {};
+  }
+}
+
 function errorText(e: unknown): string {
   if (e instanceof ApiError) return e.message;
   return "Something went wrong. Try again.";
@@ -16,14 +40,16 @@ function errorText(e: unknown): string {
 
 export function JobSearch() {
   const qc = useQueryClient();
-  const [titles, setTitles] = useState("");
-  const [location, setLocation] = useState("");
-  const [workType, setWorkType] = useState<JobSearchCriteria["work_type"]>("any");
-  const [keywords, setKeywords] = useState("");
-  const [targetSalary, setTargetSalary] = useState("");
-  const [requireSalary, setRequireSalary] = useState(false);
-  const [within, setWithin] = useState<JobSearchCriteria["posted_within_days"]>(0);
-  const [count, setCount] = useState(10);
+  const [saved] = useState(loadSaved);
+  const [titles, setTitles] = useState(saved.titles ?? "");
+  const [location, setLocation] = useState(saved.location ?? "");
+  const [workType, setWorkType] = useState<JobSearchCriteria["work_type"]>(saved.workType ?? "any");
+  const [keywords, setKeywords] = useState(saved.keywords ?? "");
+  const [exclude, setExclude] = useState(saved.exclude ?? "");
+  const [targetSalary, setTargetSalary] = useState(saved.targetSalary ?? "");
+  const [requireSalary, setRequireSalary] = useState(saved.requireSalary ?? false);
+  const [within, setWithin] = useState<JobSearchCriteria["posted_within_days"]>(saved.within ?? 0);
+  const [count, setCount] = useState(saved.count ?? 10);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
 
@@ -32,12 +58,19 @@ export function JobSearch() {
 
   const search = useMutation({
     mutationFn: () => {
+      try {
+        const keep: SavedCriteria = { titles, location, workType, keywords, exclude, targetSalary, requireSalary, within, count };
+        window.localStorage.setItem(SAVED_KEY, JSON.stringify(keep));
+      } catch {
+        // saving the boxes is a convenience only
+      }
       const salary = parseInt(targetSalary.replace(/[^0-9]/g, ""), 10);
       return api.runJobSearch({
         titles: titles.trim(),
         location: location.trim() || null,
         work_type: workType,
         keywords: keywords.trim() || null,
+        exclude_companies: exclude.trim() || null,
         target_salary: Number.isFinite(salary) && salary > 0 ? salary : null,
         require_salary: requireSalary,
         posted_within_days: within,
@@ -147,6 +180,17 @@ export function JobSearch() {
               placeholder="80000"
             />
           </div>
+          <div className="sm:col-span-2 lg:col-span-3">
+            <label className={labelClass} htmlFor="js-exclude">Leave out these companies (optional)</label>
+            <input
+              id="js-exclude"
+              className={inputClass}
+              value={exclude}
+              onChange={(e) => setExclude(e.target.value)}
+              placeholder="Separate with commas"
+              maxLength={300}
+            />
+          </div>
           <label className="flex items-center gap-2 text-sm text-ink-700 sm:col-span-2 lg:col-span-3">
             <input
               type="checkbox"
@@ -235,6 +279,10 @@ export function JobSearch() {
 
       <div className="mt-8 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-ink-700">Matches</h2>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={() => search.mutate()} disabled={!canSearch}>
+            {search.isPending ? "Searching..." : "Search again"}
+          </Button>
         {items.length > 0 &&
           (confirmClear ? (
             <span className="flex items-center gap-2 text-xs text-ink-500">
@@ -251,6 +299,7 @@ export function JobSearch() {
               Clear all
             </Button>
           ))}
+        </div>
       </div>
 
       {results.isLoading ? (

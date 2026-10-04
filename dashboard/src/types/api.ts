@@ -343,6 +343,7 @@ export interface JobSearchCriteria {
   location?: string | null;
   work_type: "any" | "remote" | "hybrid" | "onsite";
   keywords?: string | null;
+  exclude_companies?: string | null;
   target_salary?: number | null;
   require_salary: boolean;
   posted_within_days: 0 | 7 | 14 | 30;

@@ -13,6 +13,7 @@ class JobSearchIn(BaseModel):
     titles: str = Field(min_length=2, max_length=300)
     location: str | None = Field(default=None, max_length=200)
     work_type: Literal["any", "remote", "hybrid", "onsite"] = "any"
+    exclude_companies: str | None = Field(default=None, max_length=300)  # comma separated
     keywords: str | None = Field(default=None, max_length=300)
     target_salary: int | None = Field(default=None, ge=0, le=2_000_000)  # midpoint of the pay range wanted
     require_salary: bool = False  # skip postings that do not state pay

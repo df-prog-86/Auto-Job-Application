@@ -17,6 +17,9 @@ export type CanonicalKey =
   | "phone"
   | "location"
   | "city"
+  | "address_line1"
+  | "postal_code"
+  | "phone_device_type"
   | "state"
   | "linkedin"
   | "resume"
@@ -78,6 +81,10 @@ export function classifyField(sig: FieldSignature): Classification {
       return { kind: "canonical", key: "full_name" };
     case "email":
       return { kind: "canonical", key: "email" };
+    case "address-line1":
+      return { kind: "canonical", key: "address_line1" };
+    case "postal-code":
+      return { kind: "canonical", key: "postal_code" };
     case "tel-country-code":
       return { kind: "canonical", key: "phone_country" };
     case "nickname":
@@ -106,6 +113,9 @@ export function classifyField(sig: FieldSignature): Classification {
     return { kind: "canonical", key: "work_authorization" };
   }
 
+  if (/^\s*(street )?address( line)?( 1| one)?\s*\*?\s*$/.test(label) && !/\b(2|two)\b/.test(label)) return { kind: "canonical", key: "address_line1" };
+  if (/^\s*(zip|postal)([ /]*(zip|postal))?( code)?\s*\*?\s*$/.test(label)) return { kind: "canonical", key: "postal_code" };
+  if (/phone (device )?type|type of phone/.test(label)) return { kind: "canonical", key: "phone_device_type" };
   if (/^\s*city\s*\*?\s*$/.test(label)) return { kind: "canonical", key: "city" };
   if (/^\s*state(\s*\/\s*province)?\s*\*?\s*$/.test(label)) return { kind: "canonical", key: "state" };
 
@@ -243,6 +253,21 @@ export function resolveValue(
       return c.email || null;
     case "phone":
       return c.phone || null;
+    case "address_line1": {
+      const v = ctx.answers["address_line1"];
+      return typeof v === "string" && v.trim() ? v.trim() : null;
+    }
+    case "postal_code": {
+      const v = ctx.answers["postal_code"];
+      return typeof v === "string" && v.trim() ? v.trim() : null;
+    }
+    case "phone_device_type": {
+      const v = ctx.answers["phone_device_type"];
+      if (typeof v !== "string" || !v.trim()) return null;
+      if (options.length === 0) return v.trim();
+      const hits = options.filter((o) => o.trim().toLowerCase() === v.trim().toLowerCase());
+      return hits.length === 1 ? hits[0] : null;
+    }
     case "city": {
       const m = /^\s*([^,]+?)\s*,\s*[A-Za-z]{2}\b/.exec(c.location ?? "");
       return m ? m[1] : null;

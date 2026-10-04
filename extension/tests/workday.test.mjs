@@ -175,3 +175,23 @@ test("Workday walker: Apply, Apply Manually, waits at sign-in without touching t
   assert.equal(out.report.pagesAdvanced, 1);
   await page.close();
 });
+
+test("address, postal code and phone type come from the saved answers; Address Line 2 is left alone", async () => {
+  const { page, report } = await run(ctx({ address_line1: "1 Main St", postal_code: "02118", phone_device_type: "Mobile" }));
+  assert.equal(await page.$eval("#a1", (el) => el.value), "1 Main St");
+  assert.equal(await page.$eval("#pc", (el) => el.value), "02118");
+  assert.equal(await page.$eval("#pdt", (b) => b.textContent), "Mobile");
+  assert.equal(await page.$eval("#a2", (el) => el.value), "");
+  assert.ok(!report.flagged.some((f) => /Address Line 1|Postal|Phone Device/.test(f.label)));
+  await page.close();
+});
+
+test("without saved address answers, those required fields are flagged, never guessed", async () => {
+  const { page, report } = await run();
+  assert.equal(await page.$eval("#a1", (el) => el.value), "");
+  assert.equal(await page.$eval("#pc", (el) => el.value), "");
+  for (const label of ["Address Line 1", "Postal Code", "Phone Device Type"]) {
+    assert.ok(report.flagged.some((f) => f.label.startsWith(label)), `${label} flagged`);
+  }
+  await page.close();
+});

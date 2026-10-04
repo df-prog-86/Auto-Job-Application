@@ -65,6 +65,7 @@ const VETERAN_OPTIONS = [
   { value: "decline", label: "I decline to self-identify for protected veteran status" },
   SKIP,
 ];
+const PHONE_TYPE_OPTIONS = ["Mobile", "Landline"].map((o) => ({ value: o, label: o }));
 const SPONSORSHIP_OPTIONS = [
   { value: "no", label: "No" },
   { value: "yes", label: "Yes" },
@@ -404,6 +405,24 @@ function EligibilityCard({ answers, loading }: { answers: AnswerOut[] | undefine
             value={(answerValue(answers, "phone_country") as string | undefined) ?? ""}
             options={PHONE_COUNTRY_OPTIONS}
             onSave={(v) => save("phone_country", "str", v)}
+          />
+          <SelectField
+            label="Phone type"
+            value={(answerValue(answers, "phone_device_type") as string | undefined) ?? ""}
+            options={PHONE_TYPE_OPTIONS}
+            onSave={(v) => save("phone_device_type", "str", v)}
+          />
+          <EditableField
+            label="Street address (line 1)"
+            value={(answerValue(answers, "address_line1") as string | undefined) ?? ""}
+            emptyLabel="Not set"
+            onSave={(v) => save("address_line1", "str", v)}
+          />
+          <EditableField
+            label="Postal code"
+            value={(answerValue(answers, "postal_code") as string | undefined) ?? ""}
+            emptyLabel="Not set"
+            onSave={(v) => save("postal_code", "str", v)}
           />
           <SelectField
             label="Security clearance (optional)"

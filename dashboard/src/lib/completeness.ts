@@ -1,7 +1,7 @@
 import type { AnswerOut, ProfileOut } from "@/types/api";
 
 /** The three work eligibility answers stored in the candidate answer library. */
-export const ELIGIBILITY_KEYS = ["work_authorization", "sponsorship_required", "security_clearance", "phone_country", "eeo_gender", "eeo_race", "eeo_veteran"] as const;
+export const ELIGIBILITY_KEYS = ["work_authorization", "sponsorship_required", "security_clearance", "phone_country", "phone_device_type", "address_line1", "postal_code", "eeo_gender", "eeo_race", "eeo_veteran"] as const;
 
 export function answerValue(answers: AnswerOut[] | undefined, key: string): unknown {
   return answers?.find((a) => a.answer_key === key)?.value;

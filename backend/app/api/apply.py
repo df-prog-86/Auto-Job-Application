@@ -35,6 +35,9 @@ ELIGIBILITY_KEYS = (
     "sponsorship_required",
     "security_clearance",
     "phone_country",
+    "phone_device_type",
+    "address_line1",
+    "postal_code",
     # Voluntary self-identification: only present if the person chose an answer on their Profile.
     "eeo_gender",
     "eeo_race",

@@ -9,7 +9,10 @@
     <button id="pdt" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="dtl" data-automation-id="phone-device-type">Select One</button></div>
   <div><label id="cpl" for="cpc">Country Phone Code<abbr title="required">*</abbr></label>
     <button id="cpc" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="cpl" data-automation-id="countryPhoneCode">Select One</button></div>
+  <div><label for="a1">Address Line 1<abbr title="required">*</abbr></label><input id="a1" type="text" aria-required="true"></div>
+  <div><label for="a2">Address Line 2</label><input id="a2" type="text"></div>
   <div><label for="ct">City<abbr title="required">*</abbr></label><input id="ct" type="text" aria-required="true"></div>
+  <div><label for="pc">Postal Code<abbr title="required">*</abbr></label><input id="pc" type="text" aria-required="true"></div>
   <div><label for="ph">Phone Number<abbr title="required">*</abbr></label><input id="ph" type="tel" data-automation-id="phone-number" aria-required="true"></div>
   <div><label id="stl" for="st">State<abbr title="required">*</abbr></label>
     <button id="st" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="State Select One Required" data-automation-id="addressSection_countryRegion">Select One</button></div>
@@ -33,7 +36,7 @@
   document.getElementById('next').addEventListener('click', () => window.__nextClicks++);
   document.getElementById('app').addEventListener('submit', e => { e.preventDefault(); window.__submitted++; });
   const sets = {
-    pdt: ['Home', 'Mobile', 'Work'],
+    pdt: ['Select One', 'Landline', 'Mobile'],
     cpc: ['Afghanistan (+93)', 'United Kingdom (+44)', 'United States of America (+1)'],
     st: ['Massachusetts', 'New York'],
     gen: ['Select One','Female','Male','Prefer Not to Identify'],

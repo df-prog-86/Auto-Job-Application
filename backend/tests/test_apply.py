@@ -80,6 +80,9 @@ def test_context_matches_job_and_returns_facts_answers_and_resume(app_and_db):
     client.put("/api/v1/profile/answers/sponsorship_required", json={"value_type": "bool", "value": False})
     client.put("/api/v1/profile/answers/phone_country", json={"value_type": "str", "value": "United States (+1)"})
     client.put("/api/v1/profile/answers/eeo_veteran", json={"value_type": "str", "value": "not_protected"})
+    client.put("/api/v1/profile/answers/phone_device_type", json={"value_type": "str", "value": "Mobile"})
+    client.put("/api/v1/profile/answers/address_line1", json={"value_type": "str", "value": "1 Main St"})
+    client.put("/api/v1/profile/answers/postal_code", json={"value_type": "str", "value": "02118"})
     client.patch("/api/v1/profile", json={"preferred_name": "Janie"})
     client.put("/api/v1/profile/answers/q:why do you want this role", json={"value_type": "str", "value": "Mission fit."})
     job_id = _job(SessionLocal)
@@ -101,6 +104,9 @@ def test_context_matches_job_and_returns_facts_answers_and_resume(app_and_db):
         "sponsorship_required": False,
         "phone_country": "United States (+1)",
         "eeo_veteran": "not_protected",
+        "phone_device_type": "Mobile",
+        "address_line1": "1 Main St",
+        "postal_code": "02118",
     }
     assert out["learned_answers"] == {"why do you want this role": "Mission fit."}
     assert out["resume"]["filename"] == "Jane Doe_Resume_Acme_2026.docx"

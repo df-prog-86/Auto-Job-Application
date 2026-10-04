@@ -14,7 +14,8 @@ class JobSearchIn(BaseModel):
     location: str | None = Field(default=None, max_length=200)
     work_type: Literal["any", "remote", "hybrid", "onsite"] = "any"
     keywords: str | None = Field(default=None, max_length=300)
-    min_salary: int | None = Field(default=None, ge=0, le=2_000_000)
+    target_salary: int | None = Field(default=None, ge=0, le=2_000_000)  # midpoint of the pay range wanted
+    require_salary: bool = False  # skip postings that do not state pay
     posted_within_days: Literal[0, 7, 14, 30] = 0  # 0 = any time
     count: int = Field(default=10, ge=3, le=15)
 

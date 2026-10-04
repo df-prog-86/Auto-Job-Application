@@ -47,8 +47,14 @@ def build_messages(criteria: JobSearchIn) -> list[dict[str, str]]:
         wanted.append(f"Work type: {criteria.work_type} only")
     if criteria.keywords:
         wanted.append(f"Must relate to: {criteria.keywords}")
-    if criteria.min_salary:
-        wanted.append(f"Pay of at least ${criteria.min_salary:,} a year when the posting states pay")
+    if criteria.target_salary:
+        low, high = int(criteria.target_salary * 0.85), int(criteria.target_salary * 1.15)
+        wanted.append(
+            f"Yearly pay where the midpoint of the posted pay range is about ${criteria.target_salary:,} "
+            f"(roughly ${low:,} to ${high:,}); postings that state no pay may still be included unless told otherwise below"
+        )
+    if criteria.require_salary:
+        wanted.append("Ignore any posting that does not state its pay or pay range; every result must show pay")
     if criteria.posted_within_days:
         wanted.append(f"Posted within the last {criteria.posted_within_days} days")
     system = (
@@ -127,6 +133,8 @@ async def search_jobs(criteria: JobSearchIn) -> list[dict[str, Any]]:
         if not title or not company or not link or not is_http_url(link):
             continue
         link = strip_tracking_params(link)
+        if criteria.require_salary and not _clean(raw_item.get("salary"), 200):
+            continue  # the person asked to see only postings that state pay
         work_type = _clean(raw_item.get("work_type"), 30)
         work_type = work_type.lower() if work_type and work_type.lower() in WORK_TYPES else None
         items.append(

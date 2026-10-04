@@ -20,7 +20,8 @@ export function JobSearch() {
   const [location, setLocation] = useState("");
   const [workType, setWorkType] = useState<JobSearchCriteria["work_type"]>("any");
   const [keywords, setKeywords] = useState("");
-  const [minSalary, setMinSalary] = useState("");
+  const [targetSalary, setTargetSalary] = useState("");
+  const [requireSalary, setRequireSalary] = useState(false);
   const [within, setWithin] = useState<JobSearchCriteria["posted_within_days"]>(0);
   const [count, setCount] = useState(10);
   const [notice, setNotice] = useState<string | null>(null);
@@ -31,13 +32,14 @@ export function JobSearch() {
 
   const search = useMutation({
     mutationFn: () => {
-      const salary = parseInt(minSalary.replace(/[^0-9]/g, ""), 10);
+      const salary = parseInt(targetSalary.replace(/[^0-9]/g, ""), 10);
       return api.runJobSearch({
         titles: titles.trim(),
         location: location.trim() || null,
         work_type: workType,
         keywords: keywords.trim() || null,
-        min_salary: Number.isFinite(salary) && salary > 0 ? salary : null,
+        target_salary: Number.isFinite(salary) && salary > 0 ? salary : null,
+        require_salary: requireSalary,
         posted_within_days: within,
         count,
       });
@@ -135,16 +137,25 @@ export function JobSearch() {
             </select>
           </div>
           <div>
-            <label className={labelClass} htmlFor="js-salary">Minimum salary (yearly)</label>
+            <label className={labelClass} htmlFor="js-salary">Target salary (midpoint of range, yearly)</label>
             <input
               id="js-salary"
               className={inputClass}
               inputMode="numeric"
-              value={minSalary}
-              onChange={(e) => setMinSalary(e.target.value)}
+              value={targetSalary}
+              onChange={(e) => setTargetSalary(e.target.value)}
               placeholder="80000"
             />
           </div>
+          <label className="flex items-center gap-2 text-sm text-ink-700 sm:col-span-2 lg:col-span-3">
+            <input
+              type="checkbox"
+              checked={requireSalary}
+              onChange={(e) => setRequireSalary(e.target.checked)}
+              className="h-4 w-4 rounded border-ink-300 text-brand-500 focus:ring-brand-200"
+            />
+            Only show jobs that post their salary
+          </label>
           <div className="sm:col-span-2">
             <label className={labelClass} htmlFor="js-keywords">Keywords (optional)</label>
             <input

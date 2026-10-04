@@ -8,6 +8,7 @@ questions for the Needs Attention page; it never submits anything.
 from __future__ import annotations
 
 import datetime as dt
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -99,6 +100,27 @@ def _history(profile, resume_doc) -> tuple[list[ApplyExperience], list[ApplyEduc
     return experience, education
 
 
+MAX_SKILLS = 25
+
+
+def _skills(profile, job: Job) -> list[str]:
+    """The candidate's skills for a skills box, those the posting mentions first (never invented)."""
+    text = (job.description or "").lower()
+    seen: set[str] = set()
+    names: list[str] = []
+    for skill in profile.skills:
+        name = (skill.canonical_skill or "").strip()
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            names.append(name)
+
+    def mentioned(name: str) -> bool:
+        return bool(text) and re.search(rf"(?<![a-z0-9]){re.escape(name.lower())}(?![a-z0-9])", text) is not None
+
+    ranked = [n for n in names if mentioned(n)] + [n for n in names if not mentioned(n)]
+    return ranked[:MAX_SKILLS]
+
+
 def _split_name(full_name: str) -> tuple[str, str]:
     parts = full_name.split()
     if not parts:
@@ -161,6 +183,7 @@ def get_apply_context(payload: ApplyContextIn, db: Session = Depends(get_db)) ->
         document_id=resume_doc.id, filename=Path(resume_doc.local_path).name, format=resume_doc.format
     )
     out.experience, out.education = _history(profile, resume_doc)
+    out.skills = _skills(profile, job)
     for answer in db.query(CandidateAnswer).filter(CandidateAnswer.profile_id == profile.id).all():
         raw = answer.value.get("raw") if isinstance(answer.value, dict) else None
         if answer.answer_key in ELIGIBILITY_KEYS:

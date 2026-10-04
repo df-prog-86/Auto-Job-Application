@@ -12,7 +12,7 @@
 import { normalizeQuestion } from "@/form-engine/canonical";
 import { discoverFields } from "@/form-engine/discover";
 import type { FormField } from "@/form-engine/discover";
-import { currentValue, fillField, readDropdownOptions, setNativeValue } from "@/form-engine/fill";
+import { currentValue, fillCombobox, fillField, readDropdownOptions, setNativeValue } from "@/form-engine/fill";
 import { mark } from "@/form-engine/highlight";
 import type { ApplyContext, ApplyEducation, ApplyExperience, FillReport } from "@/form-engine/types";
 
@@ -358,6 +358,41 @@ async function fillEduRow(doc: Document, row: HTMLElement, n: number, e: ApplyEd
 export interface HistoryResult {
   /** Row containers, so the general pass leaves their fields to this file. */
   rows: HTMLElement[];
+  /** Other controls this file handled (the skills search box). */
+  controls: HTMLElement[];
+}
+
+const MAX_SKILL_MISSES = 3;
+const MAX_SKILLS_FILLED = 15;
+
+/** The skills search box: typed, matched exactly, and added chip by chip. Left alone if any skill is already there. */
+async function fillSkills(doc: Document, ctx: ApplyContext, report: FillReport): Promise<HTMLElement | null> {
+  const input = Array.from(doc.querySelectorAll<HTMLInputElement>("input[data-uxi-widget-type='selectinput']")).find(
+    (i) => /^skills(--|$)/i.test(i.id) || /skills/i.test(doc.querySelector(`label[for="${CSS.escape(i.id)}"]`)?.textContent ?? ""),
+  );
+  if (!input) return null;
+  const box = input.closest<HTMLElement>("[data-automation-id='multiSelectContainer']") ?? input.parentElement ?? input;
+  const chips = () => box.querySelectorAll("[data-automation-id='selectedItem']:not([role='option'])").length;
+  const wanted = (ctx.skills ?? []).map((s) => s.trim()).filter(Boolean);
+  if (wanted.length === 0 || chips() > 0) return box;
+  let added = 0;
+  let misses = 0;
+  for (const skill of wanted) {
+    if (added >= MAX_SKILLS_FILLED || misses >= MAX_SKILL_MISSES) break;
+    const before = chips();
+    const ok = await fillCombobox(input, skill, { exactOnly: true });
+    await sleep(120);
+    if (ok && chips() > before) {
+      added++;
+      misses = 0;
+    } else {
+      misses++;
+    }
+  }
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  input.blur();
+  if (added > 0) done(report, `Skills: ${added} added`, box);
+  return box;
 }
 
 /** Fills the repeating rows on the page, if it has any. Returns the rows it owns. */
@@ -392,5 +427,9 @@ export async function fillHistory(doc: Document, ctx: ApplyContext, report: Fill
   }
   owned.push(...web);
 
-  return { rows: owned };
+  const controls: HTMLElement[] = [];
+  const skills = await fillSkills(doc, ctx, report);
+  if (skills) controls.push(skills);
+
+  return { rows: owned, controls };
 }

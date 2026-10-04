@@ -56,6 +56,7 @@ export async function fillPage(
     const cls: Classification = classifyField(sig);
 
     if (isDateInput(field.el)) continue;
+    if (history.controls.some((c) => c.contains(field.el))) continue;
     if (history.rows.some((row) => row.contains(field.el))) {
       if (field.required && field.kind !== "checkbox" && currentValue(field) === "") flag(report, field);
       continue;

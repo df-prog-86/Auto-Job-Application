@@ -4,6 +4,11 @@
 <h4>Education</h4><div id="edubox"></div><button type="button" data-automation-id="add-button" id="addedu">Add</button>
 <h4>Certifications</h4><div id="certbox"></div><button type="button" data-automation-id="add-button" id="addcert">Add</button>
 <h4>Skills</h4>
+<div data-automation-id="multiSelectContainer" id="skillbox"><label for="skills--skills">Type to Add Skills</label>
+  <div id="chips"></div>
+  <input id="skills--skills" type="text" placeholder="Search" data-uxi-widget-type="selectinput">
+  <div data-automation-id="promptAriaInstruction">0 items selected</div></div>
+<ul id="menu" role="listbox"></ul>
 <button type="button" data-automation-id="pageFooterNextButton" id="next">Save and Continue</button>
 </form></main>
 <ul role="listbox" id="pop" hidden></ul>
@@ -53,4 +58,19 @@
   adder('addwork', 'workbox', workRow); adder('addedu', 'edubox', eduRow);
   document.getElementById('addcert').addEventListener('click', () => { window.__certAdds++; });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  // Skills search: Enter lists an echo of the typed text plus the catalog entries that match it exactly or by prefix.
+  const CATALOG = ['SQL', 'SQL Server', 'Microsoft Excel', 'Tableau', 'Python'];
+  const sk = document.getElementById('skills--skills'), menu = document.getElementById('menu'), chips = document.getElementById('chips');
+  window.__chips = () => Array.from(chips.children).map(c => c.textContent);
+  sk.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    menu.innerHTML = '';
+    const q = sk.value.trim().toLowerCase(); if (!q) return;
+    const echo = document.createElement('li'); echo.setAttribute('role', 'option'); echo.setAttribute('data-automation-id', 'selectedItem'); echo.textContent = sk.value; menu.appendChild(echo);
+    CATALOG.filter(c => c.toLowerCase().startsWith(q)).forEach(c => {
+      const li = document.createElement('li'); li.setAttribute('role', 'option'); li.setAttribute('data-automation-id', 'menuItem'); li.textContent = c;
+      li.addEventListener('click', () => { const chip = document.createElement('div'); chip.setAttribute('data-automation-id', 'selectedItem'); chip.textContent = c; chips.appendChild(chip); menu.innerHTML = ''; sk.value = ''; });
+      menu.appendChild(li);
+    });
+  });
 </script></body></html>

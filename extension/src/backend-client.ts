@@ -28,6 +28,7 @@ export interface ApplyContextResponse {
   resume: { document_id: number; filename: string; format: string } | null;
   experience: ApplyExperience[];
   education: ApplyEducation[];
+  skills?: string[];
   candidates: { id: number; title: string; company: string; url: string; proceeding: boolean }[];
   problem: string | null;
 }

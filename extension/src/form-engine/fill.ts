@@ -150,6 +150,8 @@ export interface ComboboxHints {
   typeText?: string;
   /** Other spellings of the entry to pick, tried as exact matches. */
   alternates?: string[];
+  /** Only an exact match is ever picked (skills: "SQL" must never become "SQL Server"). */
+  exactOnly?: boolean;
 }
 
 /**
@@ -182,7 +184,7 @@ function closeCombobox(el: HTMLInputElement): void {
   el.blur();
 }
 
-async function fillCombobox(el: HTMLInputElement, value: string, hints: ComboboxHints = {}): Promise<boolean> {
+export async function fillCombobox(el: HTMLInputElement, value: string, hints: ComboboxHints = {}): Promise<boolean> {
   const doc = el.ownerDocument;
   el.focus();
   openCombobox(el);
@@ -204,8 +206,8 @@ async function fillCombobox(el: HTMLInputElement, value: string, hints: Combobox
     // An exact match wins. A partial match is used only when exactly one
     // option fits, so "Boston" is never silently resolved to the wrong Boston.
     const norm = (o: HTMLElement) => normalizeQuestion(o.textContent ?? "");
-    const starts = options.filter((o) => norm(o).startsWith(wanted));
-    const contains = wanted.length > 2 ? options.filter((o) => norm(o).includes(wanted)) : [];
+    const starts = hints.exactOnly ? [] : options.filter((o) => norm(o).startsWith(wanted));
+    const contains = hints.exactOnly || wanted.length <= 2 ? [] : options.filter((o) => norm(o).includes(wanted));
     const pick =
       options.find((o) => exactSet.has(norm(o))) ??
       (starts.length === 1 ? starts[0] : undefined) ??

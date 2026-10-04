@@ -295,9 +295,10 @@ test("experience: with no saved history the rows are left blank and the required
 });
 
 // ---- Tegria style: sections start empty with an "Add" button, ids carry the row, degrees are codes ----
-async function runTegria(h = history()) {
+async function runTegria(h = history(), setup) {
   const page = await browser.newPage();
   await page.goto(pathToFileURL(resolve(here, "fixtures/workday-experience-tegria.html")).href);
+  if (setup) await page.evaluate(setup);
   await page.evaluate(bundle);
   const report = await page.evaluate(([x, r]) => window.__jobAgentFill(x, r), [{ ...ctx(), ...h }, resume]);
   return { page, report };
@@ -339,5 +340,28 @@ test("Tegria style: Business Administration or an unknown degree is not forced o
   const h = history(); h.education[0].degree = "Bachelor of Business Administration";
   const { page } = await runTegria(h);
   assert.equal((await tegriaRows(page, "edubox"))[0].deg, "Select One");
+  await page.close();
+});
+
+test("skills: each saved skill is typed and added only on an exact match; partial matches and misses are skipped", async () => {
+  const { page, report } = await runTegria({ ...history(), skills: ["SQL", "Tableau", "Microsoft Excel", "Cobol", "Python"] });
+  // "Cobol" has no catalog entry (the box only echoes it); it is never added, and the others still are.
+  assert.deepEqual(await page.evaluate(() => window.__chips()), ["SQL", "Tableau", "Microsoft Excel", "Python"]);
+  assert.ok(report.filled.some((f) => /Skills: 4 added/.test(f)), report.filled.join(","));
+  await page.close();
+});
+
+test("skills: 'SQL Server' is never added for 'SQL' when only the longer name exists", async () => {
+  const { page } = await runTegria({ ...history(), skills: ["SQL Serv"] });
+  assert.deepEqual(await page.evaluate(() => window.__chips()), [], "SQL Serv is a prefix of SQL Server, not an exact match");
+  await page.close();
+});
+
+test("skills: a box that already has skills is left alone", async () => {
+  const { page } = await runTegria({ ...history(), skills: ["Python"] }, () => {
+    const c = document.createElement("div"); c.setAttribute("data-automation-id", "selectedItem"); c.textContent = "Mine";
+    document.getElementById("chips").appendChild(c);
+  });
+  assert.deepEqual(await page.evaluate(() => window.__chips()), ["Mine"]);
   await page.close();
 });

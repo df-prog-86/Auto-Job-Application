@@ -249,3 +249,18 @@ def test_context_returns_roles_with_bullets_from_the_resume_used_for_the_job(app
     assert acme["description"] == "\u2022 Tailored bullet one\n\u2022 Tailored bullet two"
     assert beta["current"] is False and beta["end_date"] == "2021-03" and beta["description"] == "\u2022 Older bullet"
     assert out["education"][0]["institution"] == "State University" and out["education"][0]["end_date"] == "2018-05"
+
+
+def test_context_skills_put_the_ones_in_the_posting_first(app_and_db):
+    client, SessionLocal = app_and_db
+    client.post("/api/v1/profile/commit", json=_COMMIT)
+    for name in ["Python", "Tableau", "SQL", "Excel", "sql"]:
+        client.post("/api/v1/profile/skills", json={"canonical_skill": name})
+    job_id = _job(SessionLocal)
+    from app.models.jobs import Job
+
+    with SessionLocal() as db:
+        db.get(Job, job_id).description = "We need strong SQL and Tableau; Excelling is not a skill."
+        db.commit()
+    out = client.post("/api/v1/apply/context", json={"url": "https://x.com", "job_id": job_id}, headers=_token(client)).json()
+    assert out["skills"] == ["Tableau", "SQL", "Python", "Excel"]  # posting words first, no duplicates, no partial-word hits

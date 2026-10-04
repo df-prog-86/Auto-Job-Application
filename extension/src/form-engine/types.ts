@@ -39,6 +39,8 @@ export interface ApplyContext {
   learned_answers: Record<string, string>;
   experience?: ApplyExperience[];
   education?: ApplyEducation[];
+  /** Skills for a skills box, those named in the job posting first. */
+  skills?: string[];
 }
 
 export interface FlaggedField {

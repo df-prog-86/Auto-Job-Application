@@ -66,6 +66,7 @@ class ApplyContextOut(BaseModel):
     resume: ApplyResume | None = None
     experience: list[ApplyExperience] = []
     education: list[ApplyEducation] = []
+    skills: list[str] = []  # the candidate's skills, ones named in the job posting first
     # When the page didn't match a saved job: the saved jobs the user can pick from.
     candidates: list[ApplyJob] = []
     problem: str | None = None

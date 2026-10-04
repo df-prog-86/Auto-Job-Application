@@ -1,0 +1,56 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Workday experience (empty sections)</title></head><body>
+<main><form id="app">
+<h4>Work Experience</h4><div id="workbox"></div><button type="button" data-automation-id="add-button" id="addwork">Add</button>
+<h4>Education</h4><div id="edubox"></div><button type="button" data-automation-id="add-button" id="addedu">Add</button>
+<h4>Certifications</h4><div id="certbox"></div><button type="button" data-automation-id="add-button" id="addcert">Add</button>
+<h4>Skills</h4>
+<button type="button" data-automation-id="pageFooterNextButton" id="next">Save and Continue</button>
+</form></main>
+<ul role="listbox" id="pop" hidden></ul>
+<script>
+  window.__nextClicks = 0; window.__submitted = 0; window.__adds = 0; window.__certAdds = 0;
+  document.getElementById('next').addEventListener('click', () => window.__nextClicks++);
+  document.getElementById('app').addEventListener('submit', e => { e.preventDefault(); window.__submitted++; });
+  let seq = 100;
+  const pop = document.getElementById('pop'); let open = null;
+  function close() { if (open) open.setAttribute('aria-expanded', 'false'); pop.hidden = true; pop.innerHTML = ''; open = null; }
+  const date = (id, label, month) => `<fieldset><legend><label><span>${label}<abbr aria-hidden="true">*</abbr></span></label></legend>
+    <div data-automation-id="dateInputWrapper" id="${id}">${month ? `<input id="${id}-dateSectionMonth-input" data-automation-id="dateSectionMonth-input" aria-label="Month">` : ''}<input id="${id}-dateSectionYear-input" data-automation-id="dateSectionYear-input" aria-label="Year"></div></fieldset>`;
+  function workRow(n) {
+    const p = `workExperience-${n}`;
+    return `<div class="row" role="group"><div><span>Work Experience ${document.querySelectorAll('#workbox .row').length + 1}</span><button type="button" class="del">Delete</button></div>
+      <div><label for="${p}--jobTitle">Job Title*</label><input id="${p}--jobTitle" type="text"></div>
+      <div><label for="${p}--companyName">Company*</label><input id="${p}--companyName" type="text"></div>
+      <div><label for="${p}--location">Location</label><input id="${p}--location" type="text"></div>
+      <div><label for="${p}--currentlyWorkHere">I currently work here</label><input id="${p}--currentlyWorkHere" type="checkbox" class="cur"></div>
+      <div class="from">${date(p + '--startDate', 'From', true)}</div><div class="to">${date(p + '--endDate', 'To', true)}</div>
+      <div><label for="${p}--roleDescription">Role Description</label><textarea id="${p}--roleDescription"></textarea></div></div>`;
+  }
+  function eduRow(n) {
+    const p = `education-${n}`;
+    return `<div class="row" role="group"><div><span>Education ${document.querySelectorAll('#edubox .row').length + 1}</span><button type="button" class="del">Delete</button></div>
+      <div><label for="${p}--schoolName">School or University*</label><input id="${p}--schoolName" type="text"></div>
+      <div><label for="${p}--degree">Degree*</label><button type="button" id="${p}--degree" class="deg" aria-haspopup="listbox" aria-expanded="false" aria-label="Degree Select One Required">Select One</button></div>
+      <div><label for="${p}--fieldOfStudy">Field of Study</label><input id="${p}--fieldOfStudy" type="text"></div>
+      <div><label for="${p}--gradeAverage">Overall Result (GPA)</label><input id="${p}--gradeAverage" type="text"></div>
+      <div class="from">${date(p + '--firstYearAttended', 'From', false)}</div><div class="to">${date(p + '--lastYearAttended', 'To (Actual or Expected)', false)}</div></div>`;
+  }
+  const DEGREES = ['Select One', 'GED', 'High School', 'AA', 'AS', 'BA', 'BS', 'MA', 'MS', 'MBA', 'PhD', 'D.Sc', 'JD'];
+  function wire(box) {
+    box.querySelectorAll('.cur').forEach(c => c.addEventListener('change', () => { c.closest('.row').querySelector('.to').hidden = c.checked; }));
+    box.querySelectorAll('.deg').forEach(deg => deg.addEventListener('click', () => {
+      if (open === deg) return close(); close(); open = deg; deg.setAttribute('aria-expanded', 'true');
+      DEGREES.forEach(t => { const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = t;
+        li.addEventListener('click', () => { deg.textContent = t; close(); }); pop.appendChild(li); });
+      pop.hidden = false;
+    }));
+  }
+  function relabel(btn, box) { btn.textContent = box.children.length ? 'Add Another' : 'Add'; }
+  function adder(btnId, boxId, make) {
+    const btn = document.getElementById(btnId), box = document.getElementById(boxId);
+    btn.addEventListener('click', () => { window.__adds++; box.insertAdjacentHTML('beforeend', make(++seq)); wire(box); relabel(btn, box); });
+  }
+  adder('addwork', 'workbox', workRow); adder('addedu', 'edubox', eduRow);
+  document.getElementById('addcert').addEventListener('click', () => { window.__certAdds++; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+</script></body></html>

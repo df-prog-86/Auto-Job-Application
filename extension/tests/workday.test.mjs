@@ -293,3 +293,51 @@ test("experience: with no saved history the rows are left blank and the required
   assert.equal(await page.evaluate(() => window.__adds), 0);
   await page.close();
 });
+
+// ---- Tegria style: sections start empty with an "Add" button, ids carry the row, degrees are codes ----
+async function runTegria(h = history()) {
+  const page = await browser.newPage();
+  await page.goto(pathToFileURL(resolve(here, "fixtures/workday-experience-tegria.html")).href);
+  await page.evaluate(bundle);
+  const report = await page.evaluate(([x, r]) => window.__jobAgentFill(x, r), [{ ...ctx(), ...h }, resume]);
+  return { page, report };
+}
+const tegriaRows = (page, box) => page.$$eval(`#${box} .row`, (rows) => rows.map((r) => ({
+  texts: Array.from(r.querySelectorAll("input[type=text], textarea")).map((i) => i.value),
+  cur: r.querySelector(".cur")?.checked,
+  dates: Array.from(r.querySelectorAll("[data-automation-id^=dateSection]")).map((i) => i.value),
+  deg: r.querySelector(".deg")?.textContent,
+})));
+
+test("Tegria style: empty sections get a row per role/school via Add, then Add Another", async () => {
+  const { page, report } = await runTegria();
+  const work = await tegriaRows(page, "workbox");
+  assert.equal(work.length, 2);
+  assert.deepEqual(work[0].texts, ["Senior Analyst", "Acme Health", "Boston, MA", "Built denial dashboards\nCut AR days by 12%"]);
+  assert.equal(work[0].cur, true);
+  assert.deepEqual(work[0].dates, ["03", "2021", "", ""]);
+  assert.deepEqual(work[1].dates, ["06", "2018", "02", "2021"]);
+  const edu = await tegriaRows(page, "edubox");
+  assert.equal(edu.length, 1);
+  assert.equal(edu[0].deg, "BS", "Bachelor of Science -> the BS code");
+  assert.deepEqual(edu[0].texts, ["State University", "Finance", ""]);
+  assert.deepEqual(edu[0].dates, ["2014", "2018"]);
+  assert.equal(await page.evaluate(() => window.__certAdds), 0, "Certifications is never touched");
+  assert.equal(await page.evaluate(() => window.__nextClicks), 0);
+  assert.ok(!report.flagged.some((f) => /Work Experience|Education/.test(f.label)), JSON.stringify(report.flagged));
+  await page.close();
+});
+
+test("Tegria style: with no saved history nothing is added", async () => {
+  const { page } = await runTegria({ experience: [], education: [] });
+  assert.equal((await tegriaRows(page, "workbox")).length, 0);
+  assert.equal(await page.evaluate(() => window.__adds), 0);
+  await page.close();
+});
+
+test("Tegria style: Business Administration or an unknown degree is not forced onto a code", async () => {
+  const h = history(); h.education[0].degree = "Bachelor of Business Administration";
+  const { page } = await runTegria(h);
+  assert.equal((await tegriaRows(page, "edubox"))[0].deg, "Select One");
+  await page.close();
+});

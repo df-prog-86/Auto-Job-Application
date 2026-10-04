@@ -54,6 +54,22 @@ const isAddAnother = (b: Element) => /^add another$/i.test(clean(b.textContent))
 
 /** The containers of each numbered row, in page order. */
 export function findRows(doc: Document, kind: Kind): HTMLElement[] {
+  // Workday names every control after its row ("workExperience-156--jobTitle"); the row is what holds them all.
+  const prefixes = new Set<string>();
+  for (const e of Array.from(doc.querySelectorAll<HTMLElement>("[id*='--']"))) {
+    const m = /^([A-Za-z]+-\d+)--/.exec(e.id);
+    if (m && PANEL[kind].test(m[1])) prefixes.add(m[1]);
+  }
+  if (prefixes.size > 0) {
+    const rows: HTMLElement[] = [];
+    for (const prefix of prefixes) {
+      const parts = Array.from(doc.querySelectorAll<HTMLElement>(`[id^="${prefix}--"]`));
+      let box: HTMLElement | null = parts[0];
+      while (box && !parts.every((x) => box!.contains(x))) box = box.parentElement;
+      if (box && box !== doc.body) rows.push(box);
+    }
+    return rows;
+  }
   const byId = Array.from(doc.querySelectorAll<HTMLElement>("[data-automation-id]")).filter((e) =>
     PANEL[kind].test(e.getAttribute("data-automation-id") ?? ""),
   );
@@ -113,9 +129,44 @@ async function clickAddAnother(doc: Document, last: HTMLElement): Promise<boolea
   return true;
 }
 
-/** Makes sure there are `want` rows, pressing "Add Another" as needed. */
+const SECTION_TITLE: Record<Kind, RegExp> = { work: /^work experience$/i, edu: /^education$/i, web: /^websites?$/i };
+
+/** The "Add" button under a section's title, for sections that start with no rows. */
+function sectionAddButton(doc: Document, kind: Kind): HTMLButtonElement | null {
+  const title = Array.from(doc.querySelectorAll("h1, h2, h3, h4, h5")).find((h) => SECTION_TITLE[kind].test(clean(h.textContent)));
+  if (!title) return null;
+  const buttons = Array.from(doc.querySelectorAll<HTMLButtonElement>("button")).filter((b) => /^add( another)?$/i.test(clean(b.textContent)));
+  return buttons.find((b) => !!(title.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)) ?? null;
+}
+
+async function pressAdd(btn: HTMLButtonElement): Promise<void> {
+  const form = btn.closest("form");
+  const block = (e: Event) => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  form?.addEventListener("submit", block, true);
+  try {
+    btn.click();
+    await sleep(200);
+  } finally {
+    form?.removeEventListener("submit", block, true);
+  }
+}
+
+/** Makes sure there are `want` rows, pressing "Add" or "Add Another" as needed. */
 async function ensureRows(doc: Document, kind: Kind, want: number): Promise<HTMLElement[]> {
   let rows = findRows(doc, kind);
+  if (rows.length === 0) {
+    const first = sectionAddButton(doc, kind);
+    if (first) {
+      await pressAdd(first);
+      for (let i = 0; i < 24 && rows.length === 0; i++) {
+        await sleep(125);
+        rows = findRows(doc, kind);
+      }
+    }
+  }
   while (rows.length > 0 && rows.length < want) {
     const before = rows.length;
     if (!(await clickAddAnother(doc, rows[rows.length - 1]))) break;
@@ -254,6 +305,17 @@ async function fillWorkRow(doc: Document, row: HTMLElement, n: number, e: ApplyE
 export function degreeChoice(degree: string | null | undefined, options: string[]): string | null {
   const d = clean(degree).toLowerCase();
   if (!d) return null;
+  // Some employers list bare codes (BS, BA, MS, MBA, PhD ...): match those exactly.
+  const squash = (t: string) => t.toLowerCase().replace(/[^a-z]/g, "");
+  let code = "";
+  if (/\bmba\b|master of business/.test(d)) code = "mba";
+  else if (/juris doctor|\bj\.?d\.?\b/.test(d)) code = "jd";
+  else if (/ph\.?\s?d|doctor of philosophy/.test(d)) code = "phd";
+  else if (/bachelor|\bb\.?\s?[as]\.?\b/.test(d)) code = /science|\bb\.?\s?s\b|\bb\.?\s?sc\b/.test(d) ? "bs" : /arts|\bb\.?\s?a\b/.test(d) ? "ba" : "";
+  else if (/master|\bm\.?\s?[as]\.?\b/.test(d)) code = /science|\bm\.?\s?s\b|\bm\.?\s?sc\b/.test(d) ? "ms" : /arts|\bm\.?\s?a\b/.test(d) ? "ma" : "";
+  else if (/associate|\ba\.?\s?a\.?\s?s?\b/.test(d)) code = /science|applied/.test(d) ? "as" : /arts/.test(d) ? "aa" : "";
+  const coded = code ? options.filter((o) => squash(o) === code) : [];
+  if (coded.length === 1) return coded[0];
   let keyword = "";
   if (/\bmba\b|master|\bm\.?\s?s\.?c?\b|\bm\.?a\.?\b/.test(d)) keyword = /\bmba\b/.test(d) ? "mba" : "master";
   else if (/bachelor|\bb\.?\s?s\.?c?\b|\bb\.?a\.?\b/.test(d)) keyword = "bachelor";
@@ -304,7 +366,7 @@ export async function fillHistory(doc: Document, ctx: ApplyContext, report: Fill
 
   const work = findRows(doc, "work");
   const jobs = (ctx.experience ?? []).slice(0, MAX_ROWS);
-  if (work.length > 0 && jobs.length > 0 && work.every((r) => rowIsEmpty(r, doc))) {
+  if (jobs.length > 0 && (work.length > 0 ? work.every((r) => rowIsEmpty(r, doc)) : !!sectionAddButton(doc, "work"))) {
     const rows = await ensureRows(doc, "work", jobs.length);
     for (const [i, job] of jobs.entries()) {
       if (rows[i]) await fillWorkRow(doc, rows[i], i + 1, job, report);
@@ -314,7 +376,7 @@ export async function fillHistory(doc: Document, ctx: ApplyContext, report: Fill
 
   const edu = findRows(doc, "edu");
   const schools = (ctx.education ?? []).slice(0, MAX_ROWS);
-  if (edu.length > 0 && schools.length > 0 && edu.every((r) => rowIsEmpty(r, doc))) {
+  if (schools.length > 0 && (edu.length > 0 ? edu.every((r) => rowIsEmpty(r, doc)) : !!sectionAddButton(doc, "edu"))) {
     const rows = await ensureRows(doc, "edu", schools.length);
     for (const [i, school] of schools.entries()) {
       if (rows[i]) await fillEduRow(doc, rows[i], i + 1, school, report);

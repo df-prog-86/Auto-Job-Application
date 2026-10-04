@@ -55,6 +55,8 @@ class LLMClient:
         json_schema: dict[str, Any] | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4000,
+        extra: dict[str, Any] | None = None,
+        timeout: float = 60.0,
     ) -> ChatCompletionResult:
         base_url, api_key = self._require_configured()
 
@@ -64,13 +66,15 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if extra:
+            payload.update(extra)  # provider options such as OpenRouter's {"plugins": [{"id": "web"}]}
         if json_schema is not None:
             payload["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {"name": "structured_response", "strict": True, "schema": json_schema},
             }
 
-        async with httpx.AsyncClient(base_url=base_url, timeout=60.0) as client:
+        async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
             resp = await client.post(
                 "/chat/completions",
                 json=payload,

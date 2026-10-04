@@ -13,6 +13,7 @@ interface NavItem {
 const WORK: NavItem[] = [
   { to: "/", label: "Home" },
   { to: "/jobs", label: "Jobs" },
+  { to: "/job-search", label: "Job Search" },
   { to: "/needs-attention", label: "Needs Attention" },
 ];
 

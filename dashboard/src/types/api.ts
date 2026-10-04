@@ -337,3 +337,37 @@ export interface PendingQuestionOut {
   status: string;
   answer_text?: string | null;
 }
+
+export interface JobSearchCriteria {
+  titles: string;
+  location?: string | null;
+  work_type: "any" | "remote" | "hybrid" | "onsite";
+  keywords?: string | null;
+  min_salary?: number | null;
+  posted_within_days: 0 | 7 | 14 | 30;
+  count: number;
+}
+
+export interface JobSearchResultOut {
+  id: number;
+  title: string;
+  company: string;
+  location?: string | null;
+  work_type?: string | null;
+  salary_text?: string | null;
+  summary?: string | null;
+  url: string;
+  grounded: boolean;
+  status: string;
+}
+
+export interface JobSearchRunOut {
+  found: number;
+  skipped: number;
+  results: JobSearchResultOut[];
+}
+
+export interface AddSearchResultOut {
+  job: JobOut;
+  from_summary: boolean;
+}

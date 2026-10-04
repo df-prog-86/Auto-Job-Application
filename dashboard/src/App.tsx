@@ -4,6 +4,7 @@ import { NavShell } from "@/components/NavShell";
 import { Accounts } from "@/pages/Accounts";
 import { Applications } from "@/pages/Applications";
 import { Home } from "@/pages/Home";
+import { JobSearch } from "@/pages/JobSearch";
 import { Jobs } from "@/pages/Jobs";
 import { NeedsAttention } from "@/pages/NeedsAttention";
 import { Pairing } from "@/pages/Pairing";
@@ -19,6 +20,7 @@ export function App() {
         <Route path="work-eligibility" element={<Navigate to="/profile" replace />} />
         <Route path="preferences" element={<Preferences />} />
         <Route path="jobs" element={<Jobs />} />
+        <Route path="job-search" element={<JobSearch />} />
         <Route path="applications" element={<Applications />} />
         <Route path="needs-attention" element={<NeedsAttention />} />
         <Route path="accounts" element={<Accounts />} />

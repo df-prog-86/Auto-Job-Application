@@ -7,7 +7,11 @@ import type {
   EducationInput,
   EmploymentInput,
   HealthResponse,
+  AddSearchResultOut,
   JobDetailOut,
+  JobSearchCriteria,
+  JobSearchResultOut,
+  JobSearchRunOut,
   JobOut,
   ManualJobInput,
   MasterRole,
@@ -151,6 +155,14 @@ export const api = {
   listAnswers: () => request<AnswerOut[]>("/profile/answers"),
   saveAnswer: (key: string, payload: AnswerUpsert) =>
     request<AnswerOut>(`/profile/answers/${key}`, { method: "PUT", body: JSON.stringify(payload) }),
+  listSearchResults: () => request<JobSearchResultOut[]>("/job-search/results"),
+  runJobSearch: (criteria: JobSearchCriteria) =>
+    request<JobSearchRunOut>("/job-search/run", { method: "POST", body: JSON.stringify(criteria) }),
+  addSearchResult: (id: number) =>
+    request<AddSearchResultOut>(`/job-search/results/${id}/add`, { method: "POST" }),
+  removeSearchResult: (id: number) =>
+    request<JobSearchResultOut>(`/job-search/results/${id}/remove`, { method: "POST" }),
+  clearSearchResults: () => request<{ cleared: number }>("/job-search/clear", { method: "POST" }),
   clearQuestions: (ids?: number[]) =>
     request<{ cleared: number }>("/needs-attention/clear", { method: "POST", body: JSON.stringify(ids ? { ids } : {}) }),
   forgetAnswer: (key: string) => request<void>(`/profile/answers/${encodeURIComponent(key)}`, { method: "DELETE" }),

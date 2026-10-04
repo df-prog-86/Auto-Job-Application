@@ -84,3 +84,27 @@ test("willingness questions use the person's saved yes/no, and history questions
   // Nothing saved: left for the person.
   assert.equal(resolveValue("criminal_check", ctx({}), ["Yes", "No"]), null);
 });
+
+test("years of experience and highest education come from the saved profile", () => {
+  assert.deepEqual(classifyField(sig("Please indicate how many years of experience you have in the field in which you are applying.")), { kind: "canonical", key: "years_experience" });
+  assert.deepEqual(classifyField(sig("Please indicate your highest level of education")), { kind: "canonical", key: "highest_education" });
+  // One tool or skill is not the whole field.
+  assert.equal(classifyField(sig("How many years of experience do you have with SQL?")).kind, "unknown");
+  const c = {
+    ...ctx(),
+    experience: [
+      { start_date: "2014-06", end_date: "2018-05", current: false },
+      { start_date: "2017-01", end_date: "2019-12", current: false }, // overlaps: counted once
+      { start_date: "2021-03", end_date: null, current: true },
+    ],
+    education: [
+      { degree: "Bachelor's Degree", end_date: "2014-05" },
+      { degree: "Master's Degree", end_date: "2099-05" }, // not finished yet
+    ],
+  };
+  const years = ["Select One", "No Experience", "Less than 1 year", "1-3 years", "3-6 years", "6-10 years", "10+ years"];
+  assert.equal(resolveValue("years_experience", c, years), "10+ years");
+  const levels = ["Select One", "Professional Certificate", "Bachelor’s / College Degree (3 or 4 years)", "Master’s Degree", "Doctoral Degree"];
+  assert.equal(resolveValue("highest_education", c, levels), "Bachelor’s / College Degree (3 or 4 years)");
+  assert.equal(resolveValue("years_experience", ctx(), years), null); // nothing saved: left for the person
+});

@@ -29,7 +29,9 @@ export type CanonicalKey =
   | "background_check"
   | "criminal_check"
   | "drug_screen"
-  | "age_18";
+  | "age_18"
+  | "years_experience"
+  | "highest_education";
 
 export type VoluntaryTopic = "gender" | "race" | "hispanic" | "veteran" | "other";
 
@@ -116,6 +118,17 @@ export function classifyField(sig: FieldSignature): Classification {
   if (willing && /drug (screen|test)|drug and alcohol|substance (screen|test)/.test(label)) return { kind: "canonical", key: "drug_screen" };
   if (willing && /criminal (record|background|history)? ?check|criminal record/.test(label)) return { kind: "canonical", key: "criminal_check" };
   if (willing && /background (check|investigation|screening)/.test(label)) return { kind: "canonical", key: "background_check" };
+  // Total years of work, only when the question is about the whole field, not one tool ("years of SQL").
+  if (
+    /years of (\w+ ){0,2}experience|experience.{0,30}\byears\b|how many years/.test(label) &&
+    /in the field|in this field|in your field|in the industry|total|overall|professional|relevant|work experience|applying/.test(label) &&
+    !/\b(with|using|managing|supervis\w*|leading|manag\w*|of experience (with|in) [a-z]{3,} (?!field))/.test(label.replace(/in the field|in this field|in your field|in the industry/g, ""))
+  ) {
+    return { kind: "canonical", key: "years_experience" };
+  }
+  if (/highest (level of )?(education|degree)|highest education|level of education (completed|attained)/.test(label)) {
+    return { kind: "canonical", key: "highest_education" };
+  }
   if (/(?:\b18\b|eighteen)[^?]{0,20}(years|yrs|age|older|over)|at least (18|eighteen)|over (the age of )?(18|eighteen)/.test(label) && !/\b(ever|convicted)\b/.test(label)) {
     return { kind: "canonical", key: "age_18" };
   }
@@ -182,6 +195,89 @@ function yesNo(options: string[], wantYes: boolean): string | null {
 
 function isYesNoOptions(options: string[]): boolean {
   return options.some((o) => ["yes", "no"].includes(normalizeQuestion(o)));
+}
+
+/** Months since year 0 for "YYYY-MM" or "YYYY-MM-DD"; null when unreadable. */
+function monthIndex(d?: string | null): number | null {
+  const m = /^(\d{4})-(\d{2})/.exec(d ?? "");
+  return m ? Number(m[1]) * 12 + Number(m[2]) - 1 : null;
+}
+
+/** Years of work, with overlapping roles counted once. Null if no role has a readable start. */
+export function totalYears(ctx: ApplyContext, now: Date = new Date()): number | null {
+  const nowIdx = now.getFullYear() * 12 + now.getMonth();
+  const spans: [number, number][] = [];
+  for (const e of ctx.experience ?? []) {
+    const start = monthIndex(e.start_date);
+    if (start === null) continue;
+    const end = e.current || !e.end_date ? nowIdx : (monthIndex(e.end_date) ?? nowIdx);
+    if (end >= start) spans.push([start, end]);
+  }
+  if (spans.length === 0) return null;
+  spans.sort((a, b) => a[0] - b[0]);
+  let months = 0;
+  let [curS, curE] = spans[0];
+  for (const [s, e] of spans.slice(1)) {
+    if (s <= curE) curE = Math.max(curE, e);
+    else {
+      months += curE - curS;
+      [curS, curE] = [s, e];
+    }
+  }
+  months += curE - curS;
+  return months / 12;
+}
+
+/** Picks the one range ("1-3 years", "10+ years", "Less than 1 year") that holds the value; none if it is on a boundary. */
+export function yearsBucket(years: number | null, options: string[]): string | null {
+  if (years === null) return null;
+  const hits = options.filter((o) => {
+    const t = o.toLowerCase();
+    if (/^select/.test(t)) return false;
+    let m: RegExpExecArray | null;
+    if (/\bno experience\b|^none$/.test(t)) return years === 0;
+    if ((m = /less than (\d+)/.exec(t))) return years > 0 && years < Number(m[1]);
+    if ((m = /(\d+)\s*(?:\+|or more|and (?:above|over))/.exec(t))) return years > Number(m[1]);
+    if ((m = /(\d+)\s*(?:-|to|–)\s*(\d+)/.exec(t))) return years > Number(m[1]) && years < Number(m[2]);
+    return false;
+  });
+  return hits.length === 1 ? hits[0] : null;
+}
+
+const DEGREE_RANK: [RegExp, number][] = [
+  [/doctor|ph\.?\s?d|\bj\.?d\b|\bm\.?d\b/i, 5],
+  [/master|\bmba\b|\bm\.?\s?[as]\b|\bm\.?sc?\b/i, 4],
+  [/bachelor|\bb\.?\s?[as]\b|\bb\.?sc?\b/i, 3],
+  [/associate|\ba\.?\s?[as]\b/i, 2],
+  [/certificate/i, 1],
+  [/high school|\bged\b|secondary/i, 0],
+];
+
+/** The highest finished degree in the profile (a graduation date still in the future does not count). */
+export function highestDegree(ctx: ApplyContext, now: Date = new Date()): number | null {
+  const nowIdx = now.getFullYear() * 12 + now.getMonth();
+  let best: number | null = null;
+  for (const e of ctx.education ?? []) {
+    const end = monthIndex(e.end_date);
+    if (end !== null && end > nowIdx) continue;
+    const hit = DEGREE_RANK.find(([re]) => re.test(e.degree ?? ""));
+    if (hit && (best === null || hit[1] > best)) best = hit[1];
+  }
+  return best;
+}
+
+export function educationChoice(rank: number | null, options: string[]): string | null {
+  if (rank === null) return null;
+  const word: Record<number, RegExp> = {
+    5: /doctor|ph\.?d/i,
+    4: /master/i,
+    3: /bachelor/i,
+    2: /associate/i,
+    1: /certificate/i,
+    0: /high school|\bged\b|secondary/i,
+  };
+  const hits = options.filter((o) => word[rank].test(o));
+  return hits.length === 1 ? hits[0] : null;
 }
 
 const US_STATES: Record<string, string> = {
@@ -330,6 +426,10 @@ export function resolveValue(
       if (options.length === 0) return saved ? "Yes" : "No";
       return yesNo(options, saved);
     }
+    case "years_experience":
+      return yearsBucket(totalYears(ctx), options);
+    case "highest_education":
+      return educationChoice(highestDegree(ctx), options);
     case "security_clearance": {
       const level = ctx.answers["security_clearance"];
       if (typeof level !== "string" || !level) return null;

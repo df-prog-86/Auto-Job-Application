@@ -132,9 +132,17 @@ export async function fillPage(
       if (options.length === 0 && cls.key === "phone_country") options = ["(unreadable)"];
     }
 
+    // Workday's month/day/year boxes take a real date, never words like "two weeks after an offer".
+    const dateWidget =
+      cls.kind === "canonical" &&
+      cls.key === "start_availability" &&
+      !!(field.outlineEl ?? field.el).querySelector?.('[data-automation-id^="dateSection"], [data-automation-id="dateInputWrapper"]');
+
     const value =
       cls.kind === "canonical"
-        ? resolveValue(cls.key, ctx, options)
+        ? dateWidget
+          ? null
+          : resolveValue(cls.key, ctx, options)
         : learnedAnswer(field.label, ctx, field.kind === "select" || field.kind === "radio" || field.kind === "yesno" || field.kind === "dropdown" ? options : []);
 
     let hints: ComboboxHints | undefined;

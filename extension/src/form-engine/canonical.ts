@@ -508,7 +508,14 @@ export function resolveVoluntary(topic: VoluntaryTopic, answers: Record<string, 
     const v = saved("eeo_veteran");
     if (!v) return null;
     if (v === "decline") return only(options, DECLINE);
-    if (v === "not_protected") return only(options, /\bi am not\b|\bnot an? (protected )?veteran\b|\bnon-?veteran\b/i);
+    // "Not a veteran" and "a veteran who is not protected" are different answers; a form that mixes them
+    // is only answered when exactly one choice fits.
+    if (v === "not_veteran") {
+      return only(options, /\b(am|is) not an? veteran\b|\bnon-?veteran\b|^not an? veteran\b/i) ?? only(options, /not an? protected veteran/i);
+    }
+    if (v === "not_protected") {
+      return only(options, /(just|but|yet) not an? protected veteran/i) ?? only(options, /^(?!.*\bnot an? veteran\b).*not an? protected veteran/i);
+    }
     return only(options, /identify as one or more|\b(am|is) a (protected )?veteran\b|^yes\b/i);
   }
   if (topic === "hispanic") {

@@ -256,6 +256,14 @@ export async function readComboboxOptions(el: HTMLInputElement): Promise<string[
   return options;
 }
 
+/** Ticks one box (never a consent box; the caller decides which). Workday hides the real input behind a styled one. */
+export async function fillCheckbox(box: HTMLInputElement): Promise<boolean> {
+  if (box.checked) return true;
+  box.click();
+  await sleep(150);
+  return box.checked;
+}
+
 export async function fillField(field: FormField, value: string, hints?: ComboboxHints): Promise<boolean> {
   switch (field.kind) {
     case "text":

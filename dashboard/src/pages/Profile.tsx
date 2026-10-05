@@ -62,7 +62,8 @@ const RACE_OPTIONS = [
 ];
 const VETERAN_OPTIONS = [
   { value: "protected", label: "I identify as one or more of the classifications of protected veteran" },
-  { value: "not_protected", label: "I am not a protected veteran" },
+  { value: "not_veteran", label: "I am not a veteran" },
+  { value: "not_protected", label: "I am a veteran, but not a protected veteran" },
   { value: "decline", label: "I decline to self-identify for protected veteran status" },
   SKIP,
 ];

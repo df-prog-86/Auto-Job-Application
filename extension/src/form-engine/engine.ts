@@ -13,7 +13,7 @@ import type { Classification } from "@/form-engine/canonical";
 import { discoverFields } from "@/form-engine/discover";
 import type { FormField } from "@/form-engine/discover";
 import type { ComboboxHints } from "@/form-engine/fill";
-import { base64ToFile, currentValue, fillField, fillFile, readComboboxOptions, readDropdownOptions } from "@/form-engine/fill";
+import { base64ToFile, currentValue, fillCheckbox, fillField, fillFile, readComboboxOptions, readDropdownOptions } from "@/form-engine/fill";
 import { clearMarks, mark, showBanner } from "@/form-engine/highlight";
 import { trackFlagged } from "@/form-engine/learn";
 import { fillHistory, isDateInput } from "@/form-engine/workday-history";
@@ -86,6 +86,18 @@ export async function fillPage(
       continue;
     }
     if (field.kind === "checkbox") {
+      // The one exception: a race/ethnicity group on a self-identification page, ticked only from the single
+      // choice the person saved on their Profile.
+      const legend = field.el.closest("fieldset")?.closest("[data-automation-id^='formField']")?.querySelector("legend")?.textContent ?? "";
+      if (/\brace\b|ethnicity/i.test(legend) && !CONSENT.test(field.label)) {
+        const mine = resolveVoluntary("race", ctx.answers, [field.label]);
+        if (mine && !(field.el as HTMLInputElement).checked && (await fillCheckbox(field.el as HTMLInputElement))) {
+          done(report, field);
+        } else {
+          report.voluntarySkipped++;
+        }
+        continue;
+      }
       // Consent and acknowledgement boxes are always the candidate's own click.
       if (field.required) flag(report, field);
       continue;

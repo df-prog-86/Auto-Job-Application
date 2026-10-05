@@ -17,7 +17,7 @@ await build({
   outfile: out,
   alias: { "@": resolve(root, "src") },
 });
-const { classifyField, resolveValue, resolvePhoneCountry } = await import(pathToFileURL(out).href);
+const { classifyField, resolveValue, resolvePhoneCountry, resolveVoluntary } = await import(pathToFileURL(out).href);
 
 const sig = (label, extra = {}) => ({ label, name: "", id: "", autocomplete: "", inputType: "text", ...extra });
 const ctx = (answers = {}, candidate = {}) => ({
@@ -122,4 +122,28 @@ test("relocation, desired salary and start date use the person's saved answers",
   assert.equal(resolveValue("desired_salary", ctx(answers), []), "$90,000 to $110,000");
   assert.equal(resolveValue("start_availability", ctx(answers), []), "Two weeks after an offer");
   assert.equal(resolveValue("start_availability", ctx(), []), null);
+});
+
+
+test("veteran status: not a veteran and a veteran who is not protected are different choices", () => {
+  const brg = [
+    "Select One",
+    "I IDENTIFY AS ONE OR MORE OF THE CLASSIFICATIONS OF PROTECTED VETERANS LISTED ABOVE",
+    "I IDENTIFY AS A VETERAN, JUST NOT A PROTECTED VETERAN",
+    "I AM NOT A VETERAN",
+    "I DO NOT WISH TO SELF IDENTIFY",
+  ];
+  assert.equal(resolveVoluntary("veteran", { eeo_veteran: "not_veteran" }, brg), "I AM NOT A VETERAN");
+  assert.equal(resolveVoluntary("veteran", { eeo_veteran: "not_protected" }, brg), "I IDENTIFY AS A VETERAN, JUST NOT A PROTECTED VETERAN");
+  assert.equal(resolveVoluntary("veteran", { eeo_veteran: "decline" }, brg), "I DO NOT WISH TO SELF IDENTIFY");
+  const plain = ["I am not a protected veteran", "I identify as one or more of the classifications of protected veteran"];
+  assert.equal(resolveVoluntary("veteran", { eeo_veteran: "not_veteran" }, plain), "I am not a protected veteran");
+  assert.equal(resolveVoluntary("veteran", {}, brg), null);
+});
+
+test("race choices match the one option the person saved", () => {
+  assert.equal(resolveVoluntary("race", { eeo_race: "white" }, ["White (United States of America)"]), "White (United States of America)");
+  assert.equal(resolveVoluntary("race", { eeo_race: "white" }, ["Asian (United States of America)"]), null);
+  assert.equal(resolveVoluntary("race", { eeo_race: "decline" }, ["I do not wish to answer. (United States of America)"]), "I do not wish to answer. (United States of America)");
+  assert.equal(resolveVoluntary("race", {}, ["White (United States of America)"]), null);
 });

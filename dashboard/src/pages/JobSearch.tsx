@@ -4,7 +4,8 @@ import { Link } from "react-router-dom";
 
 import { api, ApiError } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
-import { Badge, Button, Card, inputClass } from "@/components/ui";
+import { GapDetails, scoreColor, scoreLabel } from "@/components/match";
+import { Badge, Button, Card, Ring, inputClass } from "@/components/ui";
 import { formatPosted } from "@/lib/jobText";
 import type { JobSearchCriteria, JobSearchResultOut } from "@/types/api";
 
@@ -102,6 +103,11 @@ export function JobSearch() {
     },
   });
 
+  const score = useMutation({
+    mutationFn: (id: number) => api.scoreSearchResult(id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["job-search-results"] }),
+  });
+
   const remove = useMutation({
     mutationFn: (id: number) => api.removeSearchResult(id),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["job-search-results"] }),
@@ -115,7 +121,7 @@ export function JobSearch() {
     },
   });
 
-  const busyId = add.isPending ? add.variables : remove.isPending ? remove.variables : null;
+  const busyId = add.isPending ? add.variables : remove.isPending ? remove.variables : score.isPending ? score.variables : null;
   const canSearch = titles.trim().length >= 2 && !search.isPending;
 
   return (
@@ -273,9 +279,9 @@ export function JobSearch() {
           )}
         </p>
       )}
-      {(add.isError || remove.isError) && (
+      {(add.isError || remove.isError || score.isError) && (
         <p className="mt-4 rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700" role="alert">
-          {errorText(add.error ?? remove.error)}
+          {errorText(add.error ?? remove.error ?? score.error)}
         </p>
       )}
 
@@ -317,6 +323,8 @@ export function JobSearch() {
               key={r.id}
               r={r}
               busy={busyId === r.id}
+              scoring={score.isPending && score.variables === r.id}
+              onScore={() => score.mutate(r.id)}
               onAdd={() => add.mutate(r.id)}
               onRemove={() => remove.mutate(r.id)}
             />
@@ -330,11 +338,15 @@ export function JobSearch() {
 function ResultCard({
   r,
   busy,
+  scoring,
+  onScore,
   onAdd,
   onRemove,
 }: {
   r: JobSearchResultOut;
   busy: boolean;
+  scoring: boolean;
+  onScore: () => void;
   onAdd: () => void;
   onRemove: () => void;
 }) {
@@ -351,13 +363,40 @@ function ResultCard({
           {!r.grounded && <Badge tone="warning">Link not verified</Badge>}
         </div>
         {r.summary && <p className="mt-3 text-sm leading-relaxed text-ink-700">{r.summary}</p>}
+        {r.match_score != null && (
+          <div className="mt-4 flex items-start gap-3 rounded-2xl bg-brand-50/60 p-4">
+            <Ring value={r.match_score} size={52} stroke={6} color={scoreColor(r.match_score)}>
+              <span className="text-sm font-bold text-ink-900">{Math.round(r.match_score * 100)}</span>
+            </Ring>
+            <div className="min-w-0">
+              <div className="text-sm font-bold" style={{ color: scoreColor(r.match_score) }}>
+                {scoreLabel(r.match_score)} <span className="font-normal text-ink-400">match with your resume</span>
+              </div>
+              {r.match_summary && <p className="mt-1 text-sm leading-relaxed text-ink-700">{r.match_summary}</p>}
+              {r.match_gaps && r.match_gaps.length > 0 && <GapDetails gaps={r.match_gaps} />}
+              {r.match_from_page === false && (
+                <p className="mt-2 text-xs text-amber-700">
+                  The posting page couldn't be read, so this score used only the short summary above. Treat it as a rough guide.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <Button variant="primary" size="sm" onClick={onAdd} disabled={busy}>
             {busy ? "Working..." : "Add to jobs"}
           </Button>
+          <Button size="sm" onClick={onScore} disabled={busy}>
+            {scoring ? "Scoring..." : r.match_score != null ? "Score again" : "Score match"}
+          </Button>
           <Button size="sm" onClick={onRemove} disabled={busy}>
             Remove
           </Button>
+          {scoring && (
+            <span className="animate-pulse text-xs text-ink-400">
+              Reading the posting and comparing it with your resume. This can take up to a minute.
+            </span>
+          )}
           <a
             href={r.url}
             target="_blank"

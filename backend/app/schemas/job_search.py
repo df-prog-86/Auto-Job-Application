@@ -30,6 +30,10 @@ class JobSearchResultOut(BaseModel):
     work_type: str | None
     salary_text: str | None
     posted_at: dt.date | None = None
+    match_score: float | None = None
+    match_summary: str | None = None
+    match_gaps: list[str] | None = None
+    match_from_page: bool | None = None
     summary: str | None
     url: str
     grounded: bool

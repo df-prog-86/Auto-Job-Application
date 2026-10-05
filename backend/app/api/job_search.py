@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.models.job_search import JobSearchResult
-from app.models.jobs import Job
+from app.models.jobs import Job, JobEvaluation
 from app.schemas.discovery import JobOut
 from app.schemas.job_search import (
     AddResultOut,
@@ -22,9 +22,11 @@ from app.schemas.job_search import (
 )
 from app.services.discovery import manual_extraction, web_search
 from app.services.discovery.base import RawJobPosting
-from app.services.discovery.normalization import parse_salary
+from app.repositories.profile_repository import get_current_profile
+from app.services.discovery.normalization import html_to_text, parse_salary
 from app.services.discovery.pipeline import ingest_manual_posting
 from app.services.llm.exceptions import LLMError, LLMNotConfiguredError
+from app.services.qualification.pipeline import QualificationError, score_against
 
 router = APIRouter(prefix="/api/v1/job-search", tags=["job-search"])
 
@@ -91,17 +93,11 @@ def _get_new(db: Session, result_id: int) -> JobSearchResult:
     return row
 
 
-@router.post("/results/{result_id}/add", response_model=AddResultOut)
-async def add_result(result_id: int, db: Session = Depends(get_db)) -> AddResultOut:
-    """
-    Adds the posting to the jobs list. The posting page is read first (the same way as pasting a link);
-    if the site won't let it be read, the search summary is used instead so the job is not lost.
-    """
-    row = _get_new(db, result_id)
-    posting: RawJobPosting | None = None
+async def _read_posting(db: Session, row: JobSearchResult) -> RawJobPosting | None:
+    """Reads the posting page and pulls out its requirements. None when the site will not let it be read."""
     try:
         page = await manual_extraction.fetch_page(row.url)
-        posting = await manual_extraction.extract_job_posting(
+        return await manual_extraction.extract_job_posting(
             db,
             url=row.url,
             json_ld_blocks=page.json_ld_blocks,
@@ -109,7 +105,52 @@ async def add_result(result_id: int, db: Session = Depends(get_db)) -> AddResult
             page_title=page.title,
         )
     except (manual_extraction.ManualExtractionError, LLMError, httpx.HTTPError):
-        posting = None
+        return None
+
+
+@router.post("/results/{result_id}/score", response_model=JobSearchResultOut)
+async def score_result(result_id: int, db: Session = Depends(get_db)) -> JobSearchResultOut:
+    """
+    Match score for one result, only when the person asks. The posting page is read first so the score
+    is based on the real requirements; if the site blocks that, the short search summary is used and
+    the result says so. Costs one or two AI calls and adds nothing to the jobs list.
+    """
+    row = _get_new(db, result_id)
+    if get_current_profile(db) is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Upload your resume on the Profile page first.")
+    if not row.description:
+        posting = await _read_posting(db, row)
+        if posting is not None and posting.description_html:
+            row.description = html_to_text(posting.description_html)[:12000]
+            row.match_from_page = True
+        else:
+            row.description = row.summary
+            row.match_from_page = False
+    if not row.description:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No requirements could be read for this posting, so it can't be scored. Open the posting to check it yourself.",
+        )
+    try:
+        result = await score_against(db, title=row.title, company=row.company, description=row.description)
+    except QualificationError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    row.match_score = round(result.match_percentage / 100, 3)
+    row.match_summary = result.summary
+    row.match_gaps = list(result.gaps)
+    db.commit()
+    db.refresh(row)
+    return JobSearchResultOut.model_validate(row)
+
+
+@router.post("/results/{result_id}/add", response_model=AddResultOut)
+async def add_result(result_id: int, db: Session = Depends(get_db)) -> AddResultOut:
+    """
+    Adds the posting to the jobs list. The posting page is read first (the same way as pasting a link);
+    if the site won't let it be read, the search summary is used instead so the job is not lost.
+    """
+    row = _get_new(db, result_id)
+    posting = await _read_posting(db, row)
 
     from_summary = posting is None
     if posting is None:
@@ -118,7 +159,9 @@ async def add_result(result_id: int, db: Session = Depends(get_db)) -> AddResult
             title=row.title,
             company=row.company,
             location=row.location,
-            description_html=f"<p>{html.escape(row.summary or '')}</p>" if row.summary else None,
+            description_html=(
+                f"<p>{html.escape(row.description or row.summary or '')}</p>" if (row.description or row.summary) else None
+            ),
             application_url=row.url,
             salary_text=row.salary_text,
         )
@@ -136,6 +179,18 @@ async def add_result(result_id: int, db: Session = Depends(get_db)) -> AddResult
         job.salary = pay
     if job.posted_at is None and row.posted_at:
         job.posted_at = row.posted_at
+    # A score asked for on this page goes with the job, so it is not asked for twice.
+    if row.match_score is not None and not job.evaluations:
+        db.add(
+            JobEvaluation(
+                job_id=job.id,
+                overall_score=row.match_score,
+                summary=row.match_summary or "",
+                gaps=list(row.match_gaps or []),
+                model_used="resume_job_match_v1",
+                evaluation_version="2",
+            )
+        )
     row.status = "added"
     row.job_id = job.id
     db.commit()

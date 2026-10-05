@@ -355,6 +355,10 @@ export interface JobSearchCriteria {
 
 export interface JobSearchResultOut {
   id: number;
+  match_score?: number | null;
+  match_summary?: string | null;
+  match_gaps?: string[] | null;
+  match_from_page?: boolean | null;
   posted_at?: string | null;
   title: string;
   company: string;

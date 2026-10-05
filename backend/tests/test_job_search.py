@@ -203,3 +203,90 @@ def test_postings_older_than_the_window_are_left_out(search):
     client, _ = search
     out = client.post("/api/v1/job-search/run", json={"titles": "analyst", "posted_within_days": 7}).json()
     assert "Billing Analyst" not in [r["title"] for r in out["results"]]  # posted in 2020
+
+
+_PROFILE = {
+    "extraction": {
+        "contact": {"name": "Jane Doe", "email": "jane@example.com"},
+        "employment": [
+            {"employer": "Acme Corp", "title": "Billing Analyst", "start_date": "2021-04", "end_date": None,
+             "source_text": "Worked denials and payer follow up."}
+        ],
+        "education": [],
+        "skills": ["SQL"],
+        "certifications": [],
+        "projects": [],
+    },
+    "approved_claims": [],
+    "resume_filename": "resume.docx",
+}
+
+
+def _profile(client):
+    return client.post("/api/v1/profile/commit", json=_PROFILE).json()
+
+
+class _FakeMatchRouter:
+    def __init__(self, db):
+        pass
+
+    async def get_structured(self, **kwargs):
+        from app.services.llm.schemas import ResumeJobMatchResult
+
+        assert "Denial work" in kwargs["messages"][1]["content"]  # the posting's requirements were provided
+        return ResumeJobMatchResult(match_percentage=81, summary="Strong billing background.", gaps=["Epic Resolute"])
+
+
+def test_match_score_is_asked_for_after_the_requirements_are_read_and_travels_with_the_job(search, monkeypatch):
+    from app.services.discovery import manual_extraction
+    from app.services.discovery.base import RawJobPosting
+
+    client, _ = search
+    _profile(client)
+
+    async def page(url):
+        return manual_extraction.FetchedPage(url=url, json_ld_blocks=[], body_text="x", title="x")
+
+    async def extract(db, **kwargs):
+        return RawJobPosting(external_job_id=None, title="Revenue Cycle Analyst", company="Acme Health", location=None,
+                             description_html="<p>Denial work and payer trends. 3+ years.</p>", application_url=kwargs["url"])
+
+    monkeypatch.setattr(manual_extraction, "fetch_page", page)
+    monkeypatch.setattr(manual_extraction, "extract_job_posting", extract)
+    monkeypatch.setattr("app.services.qualification.pipeline.ModelRouter", _FakeMatchRouter)
+
+    out = client.post("/api/v1/job-search/run", json={"titles": "analyst"}).json()
+    acme = next(r for r in out["results"] if r["title"] == "Revenue Cycle Analyst")
+    assert acme["match_score"] is None  # never scored on its own
+
+    scored = client.post(f"/api/v1/job-search/results/{acme['id']}/score").json()
+    assert scored["match_score"] == 0.81 and scored["match_from_page"] is True
+    assert scored["match_gaps"] == ["Epic Resolute"]
+
+    job = client.post(f"/api/v1/job-search/results/{acme['id']}/add").json()["job"]
+    assert job["evaluation"]["overall_score"] == 0.81  # no second scoring needed on the Jobs page
+
+
+def test_match_score_needs_a_profile_and_says_when_only_the_summary_was_used(search, monkeypatch):
+    from app.services.discovery import manual_extraction
+
+    client, _ = search
+    out = client.post("/api/v1/job-search/run", json={"titles": "analyst"}).json()
+    first = out["results"][0]
+    assert client.post(f"/api/v1/job-search/results/{first['id']}/score").status_code == 409  # no resume yet
+
+    _profile(client)
+
+    async def blocked(url):
+        raise manual_extraction.ManualExtractionError("blocked")
+
+    class _Router(_FakeMatchRouter):
+        async def get_structured(self, **kwargs):
+            from app.services.llm.schemas import ResumeJobMatchResult
+
+            return ResumeJobMatchResult(match_percentage=40, summary="Partial.", gaps=[])
+
+    monkeypatch.setattr(manual_extraction, "fetch_page", blocked)
+    monkeypatch.setattr("app.services.qualification.pipeline.ModelRouter", _Router)
+    scored = client.post(f"/api/v1/job-search/results/{first['id']}/score").json()
+    assert scored["match_score"] == 0.4 and scored["match_from_page"] is False

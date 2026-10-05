@@ -54,7 +54,8 @@ def _salvage_match(raw: str) -> ResumeJobMatchResult | None:
     )
 
 
-async def qualify_job(db: Session, job: Job) -> JobEvaluation:
+async def score_against(db: Session, *, title: str, company: str, description: str | None) -> ResumeJobMatchResult:
+    """One resume-vs-posting comparison. Nothing is saved; callers decide what to keep."""
     profile = get_current_profile(db)
     resume_text = summarize_candidate(profile)
 
@@ -79,9 +80,9 @@ async def qualify_job(db: Session, job: Job) -> JobEvaluation:
             "content": (
                 "Candidate background:\n---\n"
                 f"{resume_text or '(no resume or profile on file yet)'}\n---\n\n"
-                f"Job: {job.title} at {job.company}\n\n"
+                f"Job: {title} at {company}\n\n"
                 "Job description:\n---\n"
-                f"{job.description or '(no description available)'}\n---"
+                f"{description or '(no description available)'}\n---"
             ),
         },
     ]
@@ -102,6 +103,11 @@ async def qualify_job(db: Session, job: Job) -> JobEvaluation:
         raise QualificationError(
             f"Couldn't score this job ({exc}). If this keeps happening, check the AI provider settings."
         ) from exc
+    return result
+
+
+async def qualify_job(db: Session, job: Job) -> JobEvaluation:
+    result = await score_against(db, title=job.title, company=job.company, description=job.description)
 
     evaluation = db.query(JobEvaluation).filter(JobEvaluation.job_id == job.id).first()
     if evaluation is None:

@@ -159,6 +159,8 @@ export const api = {
     request<JobSearchRunOut>("/job-search/results").then((r) => r.results as JobSearchResultOut[]),
   runJobSearch: (criteria: JobSearchCriteria) =>
     request<JobSearchRunOut>("/job-search/run", { method: "POST", body: JSON.stringify(criteria) }),
+  scoreSearchResult: (id: number) =>
+    request<JobSearchResultOut>(`/job-search/results/${id}/score`, { method: "POST" }),
   addSearchResult: (id: number) =>
     request<AddSearchResultOut>(`/job-search/results/${id}/add`, { method: "POST" }),
   removeSearchResult: (id: number) =>

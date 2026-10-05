@@ -5,21 +5,10 @@ import type { ReactNode } from "react";
 import { api, ApiError, documentDownloadUrl } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge, Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
+import { GapDetails, scoreColor, scoreLabel } from "@/components/match";
 import { completeApplication } from "@/lib/extensionBridge";
 import { formatPosted, formatSalary } from "@/lib/jobText";
 import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api";
-
-function scoreColor(score: number): string {
-  if (score >= 0.75) return "#12b76a";
-  if (score >= 0.5) return "#f59e0b";
-  return "#9a99b3";
-}
-
-function scoreLabel(score: number): string {
-  if (score >= 0.75) return "Strong fit";
-  if (score >= 0.5) return "Partial fit";
-  return "Weak fit";
-}
 
 /**
  * Jobs you found yourself and added by link (or with Save this job in the
@@ -555,24 +544,6 @@ function JobCard({ job }: { job: JobOut }) {
 }
 
 /** Collapsed by default. The summary above answers "why this score"; this is the detail. */
-function GapDetails({ gaps }: { gaps: string[] }) {
-  return (
-    <details className="mt-2 text-sm text-ink-500">
-      <summary className="cursor-pointer select-none text-xs font-semibold text-brand-600 hover:text-brand-700">
-        See what's missing ({gaps.length})
-      </summary>
-      <ul className="mt-2 space-y-1.5 pl-1">
-        {gaps.map((gap) => (
-          <li key={gap} className="flex gap-2 text-xs leading-relaxed">
-            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
-            {gap}
-          </li>
-        ))}
-      </ul>
-    </details>
-  );
-}
-
 function AddJobByUrl() {
   const queryClient = useQueryClient();
   const [url, setUrl] = useState("");

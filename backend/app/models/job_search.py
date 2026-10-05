@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import JSON, Boolean, Date, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Date, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -25,6 +25,12 @@ class JobSearchResult(Base, TimestampMixin):
     work_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
     salary_text: Mapped[str | None] = mapped_column(String(200), nullable=True)
     posted_at: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    # The posting's requirements as read from its page, kept so scoring and adding do not read it twice.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    match_score: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0 to 1, set when the person asks
+    match_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    match_gaps: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    match_from_page: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # False = scored from the short summary only
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     url: Mapped[str] = mapped_column(String(1000), index=True)
     url_key: Mapped[str] = mapped_column(String(1000), index=True)  # host + path, for de-duplication

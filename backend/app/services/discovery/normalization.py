@@ -7,6 +7,7 @@ network, no database.
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 import re
 from html.parser import HTMLParser
@@ -109,6 +110,20 @@ _SALARY_PATTERN = re.compile(
     r"(?:\s?[-–—to]+\s?\$?\s?(\d{2,3}(?:,\d{3})?(?:\.\d+)?)\s?(?:k)?)?",
     re.IGNORECASE,
 )
+
+
+def parse_posted_date(value: object) -> dt.date | None:
+    """A posting date from "2026-09-30" or a full ISO timestamp. None if unreadable or in the future."""
+    if not isinstance(value, str):
+        return None
+    match = re.match(r"\s*(\d{4})-(\d{2})-(\d{2})", value)
+    if not match:
+        return None
+    try:
+        day = dt.date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return None
+    return day if day <= dt.date.today() else None
 
 
 def parse_salary(text: str | None) -> dict:

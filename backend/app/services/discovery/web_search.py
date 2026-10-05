@@ -10,6 +10,7 @@ suggestions; a job is added to the list when the person clicks Add.
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import ipaddress
 import json
 import re
@@ -20,7 +21,7 @@ import httpx
 
 from app.config import settings
 from app.schemas.job_search import JobSearchIn
-from app.services.discovery.normalization import strip_tracking_params
+from app.services.discovery.normalization import parse_posted_date, strip_tracking_params
 from app.services.llm.client import LLMClient
 from app.services.llm.exceptions import LLMNotConfiguredError
 
@@ -192,7 +193,8 @@ def build_messages(criteria: JobSearchIn) -> list[dict[str, str]]:
         "If you find fewer than requested, return fewer; if you find none, return an empty list. "
         "Reply with ONLY a JSON array, no other text. Each item has exactly these keys: "
         '"title", "company", "location" (or null), "work_type" ("remote", "hybrid", "onsite" or "unknown"), '
-        '"salary" (text from the posting, or null), "url" (direct link to that posting), '
+        '"salary" (text from the posting, or null), "posted" (the date the posting says it was published, as YYYY-MM-DD, or null if it does not say; never guess), '
+        '"url" (direct link to that posting), '
         '"summary" (one or two plain sentences taken from the posting, no hype).'
     )
     user = f"Find up to {criteria.count} current job postings that match:\n" + "\n".join(f"- {w}" for w in wanted)
@@ -265,6 +267,9 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
                 continue  # posted pay is clearly under the floor
         if criteria.require_salary and not _clean(raw_item.get("salary"), 200):
             continue  # the person asked to see only postings that state pay
+        posted = parse_posted_date(_clean(raw_item.get("posted"), 40))
+        if posted and criteria.posted_within_days and (dt.date.today() - posted).days > criteria.posted_within_days:
+            continue  # clearly older than the window asked for
         work_type = _clean(raw_item.get("work_type"), 30)
         work_type = work_type.lower() if work_type and work_type.lower() in WORK_TYPES else None
         items.append(
@@ -274,6 +279,7 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
                 "location": _clean(raw_item.get("location"), 300),
                 "work_type": work_type,
                 "salary_text": _clean(raw_item.get("salary"), 200),
+                "posted_at": posted,
                 "summary": _clean(raw_item.get("summary"), 800),
                 "url": link,
                 "url_key": url_key(link),

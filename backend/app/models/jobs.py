@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -32,6 +32,7 @@ class Job(Base, TimestampMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     description_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     canonical_application_url: Mapped[str] = mapped_column(String(1000))
+    posted_at: Mapped[dt.date | None] = mapped_column(Date, nullable=True)  # when the employer posted it, if known
     first_seen: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     last_seen: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(30), default="open")  # open/closed/unknown

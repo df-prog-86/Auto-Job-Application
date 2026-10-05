@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import html
 
 import httpx
@@ -21,6 +22,7 @@ from app.schemas.job_search import (
 )
 from app.services.discovery import manual_extraction, web_search
 from app.services.discovery.base import RawJobPosting
+from app.services.discovery.normalization import parse_salary
 from app.services.discovery.pipeline import ingest_manual_posting
 from app.services.llm.exceptions import LLMError, LLMNotConfiguredError
 
@@ -121,7 +123,19 @@ async def add_result(result_id: int, db: Session = Depends(get_db)) -> AddResult
             salary_text=row.salary_text,
         )
 
+    if posting.posted_at is None and row.posted_at:
+        posting.posted_at = dt.datetime(row.posted_at.year, row.posted_at.month, row.posted_at.day, tzinfo=dt.timezone.utc)
     job, created = ingest_manual_posting(db, posting, source_label="web_search")
+    # Keep the pay range the search showed, even when the page itself could not be read for it.
+    pay_text = posting.salary_text or row.salary_text
+    if pay_text:
+        pay = dict(job.salary or {})
+        if "min" not in pay and "max" not in pay:
+            pay = {**parse_salary(pay_text), **pay}
+        pay["text"] = pay_text
+        job.salary = pay
+    if job.posted_at is None and row.posted_at:
+        job.posted_at = row.posted_at
     row.status = "added"
     row.job_id = job.id
     db.commit()

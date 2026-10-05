@@ -16,6 +16,7 @@ JobPosting markup at all.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 from dataclasses import dataclass
@@ -25,7 +26,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.services.discovery.base import RawJobPosting
-from app.services.discovery.normalization import html_to_text
+from app.services.discovery.normalization import html_to_text, parse_posted_date
 from app.services.llm.exceptions import LLMError
 from app.services.llm.router import ModelRouter
 from app.services.llm.schemas import JobPostingExtraction
@@ -160,7 +161,13 @@ def _posting_from_jsonld(item: dict, page_url: str) -> RawJobPosting | None:
         location=_location_from_jsonld(item),
         description_html=str(description_html) if description_html else None,
         application_url=str(apply_url),
+        posted_at=_posted_at(item.get("datePosted")),
     )
+
+
+def _posted_at(value: object) -> dt.datetime | None:
+    day = parse_posted_date(value)
+    return dt.datetime(day.year, day.month, day.day, tzinfo=dt.timezone.utc) if day else None
 
 
 def _location_from_jsonld(item: dict) -> str | None:

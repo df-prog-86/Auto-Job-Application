@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text
+import datetime as dt
+
+from sqlalchemy import JSON, Boolean, Date, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -22,6 +24,7 @@ class JobSearchResult(Base, TimestampMixin):
     location: Mapped[str | None] = mapped_column(String(300), nullable=True)
     work_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
     salary_text: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    posted_at: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     url: Mapped[str] = mapped_column(String(1000), index=True)
     url_key: Mapped[str] = mapped_column(String(1000), index=True)  # host + path, for de-duplication

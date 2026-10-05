@@ -11,9 +11,9 @@ from app.services.llm.client import ChatCompletionResult
 
 ITEMS = [
     {"title": "Revenue Cycle Analyst", "company": "Acme Health", "location": "Remote, US", "work_type": "remote",
-     "salary": "$85,000", "url": "https://acme.wd5.myworkdayjobs.com/en-US/careers/job/Remote/Analyst_R1?utm_source=x",
+     "salary": "$85,000 - $95,000", "posted": "2026-09-30", "url": "https://acme.wd5.myworkdayjobs.com/en-US/careers/job/Remote/Analyst_R1?utm_source=x",
      "summary": "Analyze denials and payer trends."},
-    {"title": "Billing Analyst", "company": "Beta Care", "location": "Boston, MA", "work_type": "hybrid", "salary": None,
+    {"title": "Billing Analyst", "company": "Beta Care", "location": "Boston, MA", "work_type": "hybrid", "salary": None, "posted": "2020-01-01",
      "url": "https://jobs.betacare.com/postings/42", "summary": "Own claim edits."},
     {"title": "No link", "company": "Gamma", "location": None, "work_type": "unknown", "salary": None,
      "url": "not a url", "summary": "x"},
@@ -178,3 +178,28 @@ def test_salary_minimum_is_a_floor_on_the_pay_midpoint_with_five_percent_slack(s
     titles = [r["title"] for r in low["results"]]
     assert "Revenue Cycle Analyst" not in titles  # posted $85,000 is under the $95,000 floor
     assert "Billing Analyst" in titles  # no posted pay stays unless the pay box is ticked
+
+
+def test_posted_date_and_pay_range_follow_the_job_into_the_jobs_list(search, monkeypatch):
+    from app.services.discovery import manual_extraction
+
+    client, _ = search
+
+    async def blocked(url):
+        raise manual_extraction.ManualExtractionError("blocked")
+
+    monkeypatch.setattr(manual_extraction, "fetch_page", blocked)
+    out = client.post("/api/v1/job-search/run", json={"titles": "analyst"}).json()
+    acme = next(r for r in out["results"] if r["title"] == "Revenue Cycle Analyst")
+    assert acme["posted_at"] == "2026-09-30" and acme["salary_text"] == "$85,000 - $95,000"
+
+    job = client.post(f"/api/v1/job-search/results/{acme['id']}/add").json()["job"]
+    assert job["posted_at"] == "2026-09-30"
+    assert job["salary"]["text"] == "$85,000 - $95,000"
+    assert job["salary"]["min"] == 85000 and job["salary"]["max"] == 95000
+
+
+def test_postings_older_than_the_window_are_left_out(search):
+    client, _ = search
+    out = client.post("/api/v1/job-search/run", json={"titles": "analyst", "posted_within_days": 7}).json()
+    assert "Billing Analyst" not in [r["title"] for r in out["results"]]  # posted in 2020

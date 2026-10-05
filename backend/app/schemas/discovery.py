@@ -115,6 +115,7 @@ class JobOut(BaseModel):
     location: str | None
     remote_type: str | None
     salary: dict
+    posted_at: dt.date | None = None
     canonical_application_url: str
     first_seen: dt.datetime
     last_seen: dt.datetime

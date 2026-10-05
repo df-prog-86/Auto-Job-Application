@@ -232,6 +232,7 @@ def ingest_manual_posting(db: Session, posting: RawJobPosting, *, source_label: 
             location=posting.location,
             remote_type=remote_type,
             salary=parse_salary(posting.salary_text or description_text),
+            posted_at=posting.posted_at.date() if posting.posted_at else None,
             description=description_text,
             description_hash=compute_description_hash(description_text),
             canonical_application_url=canonical_url,
@@ -252,6 +253,8 @@ def ingest_manual_posting(db: Session, posting: RawJobPosting, *, source_label: 
         )
     else:
         job.last_seen = now
+        if job.posted_at is None and posting.posted_at:
+            job.posted_at = posting.posted_at.date()
         new_hash = compute_description_hash(description_text)
         if new_hash and new_hash != job.description_hash:
             job.description = description_text

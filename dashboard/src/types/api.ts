@@ -237,6 +237,7 @@ export interface TailorResumeOut {
 
 export interface JobOut {
   id: number;
+  posted_at?: string | null;
   ats?: string | null;
   company: string;
   title: string;
@@ -354,6 +355,7 @@ export interface JobSearchCriteria {
 
 export interface JobSearchResultOut {
   id: number;
+  posted_at?: string | null;
   title: string;
   company: string;
   location?: string | null;

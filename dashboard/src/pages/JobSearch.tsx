@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge, Button, Card, inputClass } from "@/components/ui";
+import { formatPosted } from "@/lib/jobText";
 import type { JobSearchCriteria, JobSearchResultOut } from "@/types/api";
 
 const labelClass = "mb-1 block text-xs font-semibold text-ink-500";
@@ -337,7 +338,8 @@ function ResultCard({
   onAdd: () => void;
   onRemove: () => void;
 }) {
-  const meta = [r.company, r.location, r.work_type, r.salary_text].filter(Boolean).join("  |  ");
+  const posted = formatPosted(r.posted_at);
+  const meta = [r.company, r.location, r.work_type, r.salary_text, posted ? `Posted ${posted}` : null].filter(Boolean).join("  |  ");
   return (
     <li>
       <Card className="p-5">

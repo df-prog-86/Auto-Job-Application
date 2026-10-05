@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -28,6 +29,7 @@ class JobSearchResultOut(BaseModel):
     location: str | None
     work_type: str | None
     salary_text: str | None
+    posted_at: dt.date | None = None
     summary: str | None
     url: str
     grounded: bool

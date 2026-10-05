@@ -6,6 +6,7 @@ import { api, ApiError, documentDownloadUrl } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge, Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
 import { completeApplication } from "@/lib/extensionBridge";
+import { formatPosted, formatSalary } from "@/lib/jobText";
 import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api";
 
 function scoreColor(score: number): string {
@@ -341,6 +342,8 @@ function JobCard({ job }: { job: JobOut }) {
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-400">
               <span>{job.location || "Location not listed"}</span>
               {job.remote_type && <span className="capitalize">{job.remote_type}</span>}
+              {formatPosted(job.posted_at) && <span>Posted {formatPosted(job.posted_at)}</span>}
+              {formatSalary(job.salary) && <span>{formatSalary(job.salary)}</span>}
               <span>Added {new Date(job.first_seen).toLocaleDateString()}</span>
             </div>
           </div>

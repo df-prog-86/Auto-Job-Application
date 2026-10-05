@@ -31,7 +31,10 @@ export type CanonicalKey =
   | "drug_screen"
   | "age_18"
   | "years_experience"
-  | "highest_education";
+  | "highest_education"
+  | "relocation"
+  | "desired_salary"
+  | "start_availability";
 
 export type VoluntaryTopic = "gender" | "race" | "hispanic" | "veteran" | "other";
 
@@ -118,6 +121,21 @@ export function classifyField(sig: FieldSignature): Classification {
   if (willing && /drug (screen|test)|drug and alcohol|substance (screen|test)/.test(label)) return { kind: "canonical", key: "drug_screen" };
   if (willing && /criminal (record|background|history)? ?check|criminal record/.test(label)) return { kind: "canonical", key: "criminal_check" };
   if (willing && /background (check|investigation|screening)/.test(label)) return { kind: "canonical", key: "background_check" };
+  // Preferences the person saved once on their Profile. Never matched on a date picker.
+  if (/\brelocat/.test(label) && !/assistance|reimburs|package|stipend|bonus|cost/.test(label)) {
+    return { kind: "canonical", key: "relocation" };
+  }
+  if (
+    /(desired|expected|target|required|preferred|minimum|anticipated)\s+(annual\s+|base\s+|yearly\s+)?(salary|compensation|pay)|salary\s+(range|expectations?|requirements?|desired)|compensation\s+expectations?|pay\s+expectations?/.test(label)
+  ) {
+    return { kind: "canonical", key: "desired_salary" };
+  }
+  if (
+    sig.inputType !== "date" &&
+    /available to start|availability to start|when (would|can|are|will) you (be )?(available|start|able to start)|earliest (possible )?(start )?date|date available|when can you start/.test(label)
+  ) {
+    return { kind: "canonical", key: "start_availability" };
+  }
   // Total years of work, only when the question is about the whole field, not one tool ("years of SQL").
   if (
     /years of (\w+ ){0,2}experience|experience.{0,30}\byears\b|how many years/.test(label) &&
@@ -425,6 +443,24 @@ export function resolveValue(
       if (typeof saved !== "boolean") return null; // never guessed
       if (options.length === 0) return saved ? "Yes" : "No";
       return yesNo(options, saved);
+    }
+    case "relocation": {
+      const saved = ctx.answers["relocation_ok"];
+      if (typeof saved !== "boolean") return null; // never guessed
+      if (options.length === 0) return saved ? "Yes" : "No";
+      return yesNo(options, saved);
+    }
+    case "desired_salary": {
+      const v = ctx.answers["desired_salary"];
+      if (typeof v !== "string" || !v.trim()) return null;
+      if (options.length === 0) return v.trim();
+      return options.find((o) => normalizeQuestion(o) === normalizeQuestion(v)) ?? null;
+    }
+    case "start_availability": {
+      const v = ctx.answers["available_to_start"];
+      if (typeof v !== "string" || !v.trim()) return null;
+      if (options.length === 0) return v.trim();
+      return options.find((o) => normalizeQuestion(o) === normalizeQuestion(v)) ?? null;
     }
     case "years_experience":
       return yearsBucket(totalYears(ctx), options);

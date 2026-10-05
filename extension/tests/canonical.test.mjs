@@ -108,3 +108,18 @@ test("years of experience and highest education come from the saved profile", ()
   assert.equal(resolveValue("highest_education", c, levels), "Bachelor’s / College Degree (3 or 4 years)");
   assert.equal(resolveValue("years_experience", ctx(), years), null); // nothing saved: left for the person
 });
+
+
+test("relocation, desired salary and start date use the person's saved answers", () => {
+  assert.deepEqual(classifyField(sig("Would you be interested in relocating?")), { kind: "canonical", key: "relocation" });
+  assert.equal(classifyField(sig("Do you need relocation assistance?")).kind, "unknown");
+  assert.deepEqual(classifyField(sig("What is your desired salary range?")), { kind: "canonical", key: "desired_salary" });
+  assert.deepEqual(classifyField(sig("When would you be available to start?")), { kind: "canonical", key: "start_availability" });
+  assert.equal(classifyField(sig("When would you be available to start?", { inputType: "date" })).kind, "unknown");
+  const answers = { relocation_ok: false, desired_salary: "$90,000 to $110,000", available_to_start: "Two weeks after an offer" };
+  assert.equal(resolveValue("relocation", ctx(answers), ["Select One", "Yes", "No"]), "No");
+  assert.equal(resolveValue("relocation", ctx(), ["Select One", "Yes", "No"]), null); // nothing saved, never guessed
+  assert.equal(resolveValue("desired_salary", ctx(answers), []), "$90,000 to $110,000");
+  assert.equal(resolveValue("start_availability", ctx(answers), []), "Two weeks after an offer");
+  assert.equal(resolveValue("start_availability", ctx(), []), null);
+});

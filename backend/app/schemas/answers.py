@@ -25,6 +25,9 @@ STANDARD_ANSWER_KEYS = [
     "criminal_check_ok",
     "drug_screen_ok",
     "age_18_plus",
+    "relocation_ok",
+    "desired_salary",
+    "available_to_start",
 ]
 
 

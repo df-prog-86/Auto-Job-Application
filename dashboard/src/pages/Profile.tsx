@@ -495,6 +495,27 @@ function EligibilityCard({ answers, loading }: { answers: AnswerOut[] | undefine
             />
           </AnswerGroup>
 
+          <AnswerGroup title="Job preferences">
+            <SelectField
+              label="Open to relocating?"
+              value={yesNo("relocation_ok")}
+              options={yesNoOptions}
+              onSave={(v) => save("relocation_ok", "bool", v)}
+            />
+            <EditableField
+              label="Desired salary (as you want it written)"
+              value={(answerValue(answers, "desired_salary") as string | undefined) ?? ""}
+              emptyLabel="For example $90,000 to $110,000"
+              onSave={(v) => save("desired_salary", "str", v)}
+            />
+            <EditableField
+              label="Available to start"
+              value={(answerValue(answers, "available_to_start") as string | undefined) ?? ""}
+              emptyLabel="For example Two weeks after an offer"
+              onSave={(v) => save("available_to_start", "str", v)}
+            />
+          </AnswerGroup>
+
           <AnswerGroup title="Address and phone">
             <EditableField
               label="Street address (line 1)"

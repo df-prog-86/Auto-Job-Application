@@ -123,6 +123,8 @@ class JobOut(BaseModel):
     application_status: str
     applied_at: dt.datetime | None = None
     applied_via: str | None = None
+    interviewing_at: dt.datetime | None = None
+    followup_done_at: dt.datetime | None = None
     evaluation: JobEvaluationOut | None = None
     documents: list[GeneratedDocumentOut] = []
     already_existed: bool = False  # set only when adding a job by link

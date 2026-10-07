@@ -36,3 +36,11 @@ export function missingItems(profile: ProfileOut | undefined, answers: AnswerOut
   });
   return missing;
 }
+
+/** How much of the profile is filled in, 0 to 100, from the same checks as missingItems. */
+export function profilePercent(profile: ProfileOut | undefined, answers: AnswerOut[] | undefined): number {
+  if (!profile) return 0;
+  const total = 8 + 3 * profile.employment_history.length + 1 + 2 * profile.education.length;
+  const missing = missingItems(profile, answers).length;
+  return Math.max(0, Math.min(100, Math.round(100 * (1 - missing / total))));
+}

@@ -251,6 +251,8 @@ export interface JobOut {
   application_status: ApplicationStatus;
   applied_at?: string | null;
   applied_via?: "manual" | "extension" | null;
+  interviewing_at?: string | null;
+  followup_done_at?: string | null;
   evaluation?: JobEvaluationOut | null;
   documents: GeneratedDocumentOut[];
   already_existed?: boolean;

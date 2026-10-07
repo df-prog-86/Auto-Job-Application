@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { api, ApiError, documentDownloadUrl } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
@@ -15,7 +16,7 @@ import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api"
  * browser extension). Nothing runs automatically: scoring, proceeding and
  * tailoring each happen only when you click.
  */
-type Stage = "all" | "to-score" | "going" | "ready" | "applied";
+type Stage = "all" | "to-score" | "going" | "ready" | "applied" | "interviewing";
 type SortBy = "newest" | "fit";
 
 const STAGES: { value: Stage; label: string }[] = [
@@ -24,6 +25,7 @@ const STAGES: { value: Stage; label: string }[] = [
   { value: "going", label: "Going after" },
   { value: "ready", label: "Ready to apply" },
   { value: "applied", label: "Applied" },
+  { value: "interviewing", label: "Interviewing" },
 ];
 
 function hasResumeDoc(job: JobOut): boolean {
@@ -33,7 +35,8 @@ function hasResumeDoc(job: JobOut): boolean {
 function inStage(job: JobOut, stage: Stage): boolean {
   const going = job.application_status === "proceeding";
   const applied = !!job.applied_at;
-  if (stage === "applied") return applied;
+  if (stage === "interviewing") return !!job.interviewing_at;
+  if (stage === "applied") return applied && !job.interviewing_at;
   if (stage === "to-score") return !going && !applied;
   if (stage === "going") return going && !applied;
   if (stage === "ready") return going && hasResumeDoc(job) && !applied;
@@ -42,7 +45,9 @@ function inStage(job: JobOut, stage: Stage): boolean {
 
 export function Jobs() {
   const jobsQuery = useQuery({ queryKey: ["jobs"], queryFn: api.listJobs });
-  const [stage, setStage] = useState<Stage>("all");
+  const [params] = useSearchParams();
+  const wanted = params.get("stage");
+  const [stage, setStage] = useState<Stage>(() => (STAGES.some((s) => s.value === wanted) ? (wanted as Stage) : "all"));
   const [sortBy, setSortBy] = useState<SortBy>("newest");
   const all = jobsQuery.data ?? [];
   const visible = all
@@ -130,6 +135,7 @@ function Progress({ job }: { job: JobOut }) {
     { label: "Going after", done: job.application_status === "proceeding" },
     { label: "Resume ready", done: job.documents.some((d) => d.document_type === "resume") },
     { label: "Applied", done: !!job.applied_at },
+    { label: "Interviewing", done: !!job.interviewing_at },
   ];
   return (
     <ol className="flex items-center" aria-label="Progress">
@@ -284,6 +290,10 @@ function JobCard({ job }: { job: JobOut }) {
       return refresh();
     },
   });
+  const interviewingMutation = useMutation<JobOut, ApiError, void>({
+    mutationFn: () => (job.interviewing_at ? api.markNotInterviewing(job.id) : api.markInterviewing(job.id)),
+    onSuccess: refresh,
+  });
   const notAppliedMutation = useMutation<JobOut, ApiError, void>({
     mutationFn: () => api.markNotApplied(job.id),
     onSuccess: refresh,
@@ -302,7 +312,7 @@ function JobCard({ job }: { job: JobOut }) {
   });
 
   const error =
-    proceedMutation.error ?? requalifyMutation.error ?? tailorMutation.error ?? originalMutation.error ?? undoMutation.error ?? appliedMutation.error ?? notAppliedMutation.error ?? deleteMutation.error;
+    proceedMutation.error ?? requalifyMutation.error ?? tailorMutation.error ?? originalMutation.error ?? undoMutation.error ?? appliedMutation.error ?? interviewingMutation.error ?? notAppliedMutation.error ?? deleteMutation.error;
 
   const scoreButtonLabel = requalifyMutation.isPending
     ? evaluation
@@ -382,6 +392,9 @@ function JobCard({ job }: { job: JobOut }) {
                   Undo proceeding
                 </MenuItem>
               )}
+              <MenuItem onClick={() => interviewingMutation.mutate()} disabled={interviewingMutation.isPending}>
+                {job.interviewing_at ? "Not interviewing" : "Mark as interviewing"}
+              </MenuItem>
               {job.applied_at ? (
                 <MenuItem onClick={() => notAppliedMutation.mutate()} disabled={notAppliedMutation.isPending}>
                   Not applied after all

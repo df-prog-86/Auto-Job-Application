@@ -260,6 +260,45 @@ def mark_applied(job_id: int, payload: MarkAppliedIn | None = None, db: Session 
     return JobOut.model_validate(job)
 
 
+@router.post("/{job_id}/interviewing", response_model=JobOut)
+def mark_interviewing(job_id: int, db: Session = Depends(get_db)) -> JobOut:
+    """The candidate moved to interviews. An interview means they applied, so that is recorded too."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    now = dt.datetime.now(dt.timezone.utc)
+    job.interviewing_at = now
+    if job.applied_at is None:
+        job.applied_at = now
+        job.applied_via = "manual"
+    db.commit()
+    db.refresh(job)
+    return JobOut.model_validate(job)
+
+
+@router.post("/{job_id}/not-interviewing", response_model=JobOut)
+def mark_not_interviewing(job_id: int, db: Session = Depends(get_db)) -> JobOut:
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    job.interviewing_at = None
+    db.commit()
+    db.refresh(job)
+    return JobOut.model_validate(job)
+
+
+@router.post("/{job_id}/follow-up-done", response_model=JobOut)
+def follow_up_done(job_id: int, db: Session = Depends(get_db)) -> JobOut:
+    """Clears the Home follow-up reminder for this job."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    job.followup_done_at = dt.datetime.now(dt.timezone.utc)
+    db.commit()
+    db.refresh(job)
+    return JobOut.model_validate(job)
+
+
 @router.post("/{job_id}/unapplied", response_model=JobOut)
 def mark_not_applied(job_id: int, db: Session = Depends(get_db)) -> JobOut:
     """Takes back "Mark as applied" (or a submission the extension saw by mistake)."""
@@ -268,6 +307,7 @@ def mark_not_applied(job_id: int, db: Session = Depends(get_db)) -> JobOut:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
     job.applied_at = None
     job.applied_via = None
+    job.interviewing_at = None
     db.commit()
     db.refresh(job)
     return JobOut.model_validate(job)

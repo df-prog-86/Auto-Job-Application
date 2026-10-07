@@ -8,32 +8,10 @@ import { GapDetails, scoreColor, scoreLabel } from "@/components/match";
 import { Badge, Button, Card, Ring, inputClass } from "@/components/ui";
 import { formatPosted } from "@/lib/jobText";
 import type { JobSearchCriteria, JobSearchResultOut } from "@/types/api";
+import { SAVED_KEY, loadSavedCriteria as loadSaved, toApiCriteria } from "@/lib/searchCriteria";
+import type { SavedCriteria } from "@/lib/searchCriteria";
 
 const labelClass = "mb-1 block text-xs font-semibold text-ink-500";
-
-const SAVED_KEY = "job-search-criteria";
-
-interface SavedCriteria {
-  titles: string;
-  location: string;
-  workType: JobSearchCriteria["work_type"];
-  keywords: string;
-  exclude: string;
-  targetSalary: string;
-  requireSalary: boolean;
-  within: JobSearchCriteria["posted_within_days"];
-  count: number;
-}
-
-/** The last search, so the boxes are filled in next time. Stays in this browser only. */
-function loadSaved(): Partial<SavedCriteria> {
-  try {
-    const raw = window.localStorage.getItem(SAVED_KEY);
-    return raw ? (JSON.parse(raw) as Partial<SavedCriteria>) : {};
-  } catch {
-    return {};
-  }
-}
 
 function errorText(e: unknown): string {
   if (e instanceof ApiError) return e.message;
@@ -66,18 +44,9 @@ export function JobSearch() {
       } catch {
         // saving the boxes is a convenience only
       }
-      const salary = parseInt(targetSalary.replace(/[^0-9]/g, ""), 10);
-      return api.runJobSearch({
-        titles: titles.trim(),
-        location: location.trim() || null,
-        work_type: workType,
-        keywords: keywords.trim() || null,
-        exclude_companies: exclude.trim() || null,
-        target_salary: Number.isFinite(salary) && salary > 0 ? salary : null,
-        require_salary: requireSalary,
-        posted_within_days: within,
-        count,
-      });
+      return api.runJobSearch(
+        toApiCriteria({ titles, location, workType, keywords, exclude, targetSalary, requireSalary, within, count }),
+      );
     },
     onSuccess: (r) => {
       setNotice(

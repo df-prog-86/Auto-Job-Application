@@ -552,3 +552,18 @@ def test_follow_up_draft_without_an_llm_is_a_clear_error(app_and_db, monkeypatch
     client, _ = app_and_db
     job = _add_job(client, monkeypatch)
     assert client.post(f"/api/v1/jobs/{job['id']}/follow-up-draft").status_code == 502
+
+
+def test_interviewing_implies_applied_and_follow_up_can_be_cleared(app_and_db, monkeypatch):
+    client, _ = app_and_db
+    job = _add_job(client, monkeypatch)
+    out = client.post(f"/api/v1/jobs/{job['id']}/interviewing").json()
+    assert out["interviewing_at"] and out["applied_at"]
+    done = client.post(f"/api/v1/jobs/{job['id']}/follow-up-done").json()
+    assert done["followup_done_at"]
+    out = client.post(f"/api/v1/jobs/{job['id']}/not-interviewing").json()
+    assert out["interviewing_at"] is None and out["applied_at"]
+    out = client.post(f"/api/v1/jobs/{job['id']}/interviewing").json()
+    out = client.post(f"/api/v1/jobs/{job['id']}/unapplied").json()
+    assert out["applied_at"] is None and out["interviewing_at"] is None
+    assert client.post("/api/v1/jobs/9999/interviewing").status_code == 404

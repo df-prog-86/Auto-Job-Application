@@ -7,6 +7,7 @@ compliance concerns that govern the automated per-employer discovery loop."""
 
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -23,6 +24,7 @@ from app.schemas.discovery import (
     JobDetailOut,
     JobOut,
     ManualJobIn,
+    MarkAppliedIn,
     TailorResumeOut,
 )
 from app.services.discovery import manual_extraction
@@ -216,6 +218,39 @@ def undo_proceed(job_id: int, db: Session = Depends(get_db)) -> JobOut:
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
     job.application_status = "not_started"
+    db.commit()
+    db.refresh(job)
+    return JobOut.model_validate(job)
+
+
+@router.post("/{job_id}/applied", response_model=JobOut)
+def mark_applied(job_id: int, payload: MarkAppliedIn | None = None, db: Session = Depends(get_db)) -> JobOut:
+    """The candidate says they sent this application (optionally on an earlier day)."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    now = dt.datetime.now(dt.timezone.utc)
+    day = payload.applied_on if payload and payload.applied_on else None
+    if day is not None:
+        if day > now.date():
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="That date is in the future.")
+        job.applied_at = dt.datetime.combine(day, dt.time(12, 0), tzinfo=dt.timezone.utc)
+    else:
+        job.applied_at = now
+    job.applied_via = "manual"
+    db.commit()
+    db.refresh(job)
+    return JobOut.model_validate(job)
+
+
+@router.post("/{job_id}/unapplied", response_model=JobOut)
+def mark_not_applied(job_id: int, db: Session = Depends(get_db)) -> JobOut:
+    """Takes back "Mark as applied" (or a submission the extension saw by mistake)."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    job.applied_at = None
+    job.applied_via = None
     db.commit()
     db.refresh(job)
     return JobOut.model_validate(job)

@@ -42,6 +42,12 @@ class Job(Base, TimestampMixin):
     # candidate explicitly clicking "Proceed with Application" (spec-adjacent
     # design decision: ranking is automatic, acting on a rank never is).
     application_status: Mapped[str] = mapped_column(String(30), default="not_started")
+    # When the candidate actually sent the application, and how we learned of it
+    # ("manual" = they said so, "extension" = the extension saw the confirmation
+    # page). Kept apart from application_status so applying never disturbs the
+    # "proceeding" gate that the fill flow relies on.
+    applied_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    applied_via: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     sources: Mapped[list["JobSource"]] = relationship(
         back_populates="job", cascade="all, delete-orphan"

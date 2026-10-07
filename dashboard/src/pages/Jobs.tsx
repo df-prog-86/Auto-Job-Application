@@ -15,7 +15,7 @@ import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api"
  * browser extension). Nothing runs automatically: scoring, proceeding and
  * tailoring each happen only when you click.
  */
-type Stage = "all" | "to-score" | "going" | "ready";
+type Stage = "all" | "to-score" | "going" | "ready" | "applied";
 type SortBy = "newest" | "fit";
 
 const STAGES: { value: Stage; label: string }[] = [
@@ -23,6 +23,7 @@ const STAGES: { value: Stage; label: string }[] = [
   { value: "to-score", label: "Not yet going after" },
   { value: "going", label: "Going after" },
   { value: "ready", label: "Ready to apply" },
+  { value: "applied", label: "Applied" },
 ];
 
 function hasResumeDoc(job: JobOut): boolean {
@@ -31,9 +32,11 @@ function hasResumeDoc(job: JobOut): boolean {
 
 function inStage(job: JobOut, stage: Stage): boolean {
   const going = job.application_status === "proceeding";
-  if (stage === "to-score") return !going;
-  if (stage === "going") return going;
-  if (stage === "ready") return going && hasResumeDoc(job);
+  const applied = !!job.applied_at;
+  if (stage === "applied") return applied;
+  if (stage === "to-score") return !going && !applied;
+  if (stage === "going") return going && !applied;
+  if (stage === "ready") return going && hasResumeDoc(job) && !applied;
   return true;
 }
 
@@ -126,6 +129,7 @@ function Progress({ job }: { job: JobOut }) {
     { label: "Scored", done: !!job.evaluation },
     { label: "Going after", done: job.application_status === "proceeding" },
     { label: "Resume ready", done: job.documents.some((d) => d.document_type === "resume") },
+    { label: "Applied", done: !!job.applied_at },
   ];
   return (
     <ol className="flex items-center" aria-label="Progress">
@@ -270,6 +274,20 @@ function JobCard({ job }: { job: JobOut }) {
     mutationFn: () => api.undoProceed(job.id),
     onSuccess: refresh,
   });
+  const [markingApplied, setMarkingApplied] = useState(false);
+  const [appliedOn, setAppliedOn] = useState(() => new Date().toLocaleDateString("en-CA"));
+  const today = new Date().toLocaleDateString("en-CA");
+  const appliedMutation = useMutation<JobOut, ApiError, void>({
+    mutationFn: () => api.markApplied(job.id, appliedOn || undefined),
+    onSuccess: () => {
+      setMarkingApplied(false);
+      return refresh();
+    },
+  });
+  const notAppliedMutation = useMutation<JobOut, ApiError, void>({
+    mutationFn: () => api.markNotApplied(job.id),
+    onSuccess: refresh,
+  });
   const deleteMutation = useMutation<void, ApiError, void>({
     mutationFn: () => api.deleteJob(job.id),
     onSuccess: refresh,
@@ -284,7 +302,7 @@ function JobCard({ job }: { job: JobOut }) {
   });
 
   const error =
-    proceedMutation.error ?? requalifyMutation.error ?? tailorMutation.error ?? originalMutation.error ?? undoMutation.error ?? deleteMutation.error;
+    proceedMutation.error ?? requalifyMutation.error ?? tailorMutation.error ?? originalMutation.error ?? undoMutation.error ?? appliedMutation.error ?? notAppliedMutation.error ?? deleteMutation.error;
 
   const scoreButtonLabel = requalifyMutation.isPending
     ? evaluation
@@ -364,6 +382,13 @@ function JobCard({ job }: { job: JobOut }) {
                   Undo proceeding
                 </MenuItem>
               )}
+              {job.applied_at ? (
+                <MenuItem onClick={() => notAppliedMutation.mutate()} disabled={notAppliedMutation.isPending}>
+                  Not applied after all
+                </MenuItem>
+              ) : (
+                <MenuItem onClick={() => setMarkingApplied(true)}>Mark as applied</MenuItem>
+              )}
               <MenuItem danger onClick={() => setConfirmingDelete(true)}>
                 Delete job
               </MenuItem>
@@ -382,10 +407,45 @@ function JobCard({ job }: { job: JobOut }) {
           <Progress job={job} />
         </div>
 
+        {job.applied_at && (
+          <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            Applied {new Date(job.applied_at).toLocaleDateString()}
+            {job.applied_via === "extension"
+              ? ". The extension saw the confirmation page. Use the menu if that's wrong."
+              : "."}
+          </p>
+        )}
+
+        {markingApplied && !job.applied_at && (
+          <div className="mt-3 flex flex-wrap items-end gap-3 rounded-2xl bg-brand-50/60 p-4">
+            <label className="text-xs font-semibold text-ink-600">
+              Day you applied
+              <input
+                type="date"
+                value={appliedOn}
+                max={today}
+                onChange={(e) => setAppliedOn(e.target.value)}
+                className={`${inputClass} mt-1 block`}
+              />
+            </label>
+            <Button variant="primary" onClick={() => appliedMutation.mutate()} disabled={appliedMutation.isPending}>
+              {appliedMutation.isPending ? "Saving…" : "Save"}
+            </Button>
+            <Button variant="secondary" onClick={() => setMarkingApplied(false)}>
+              Cancel
+            </Button>
+          </div>
+        )}
+
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {!evaluation && !proceeding && (
             <Button variant="primary" onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
               {scoreButtonLabel}
+            </Button>
+          )}
+          {!job.applied_at && !markingApplied && (
+            <Button variant="secondary" onClick={() => setMarkingApplied(true)}>
+              Mark as applied
             </Button>
           )}
           {!proceeding && (

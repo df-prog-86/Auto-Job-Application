@@ -93,6 +93,14 @@ export const backend = {
       true,
     ),
 
+  /** The employer's "application received" page was seen for this job. */
+  applySubmitted: (jobId: number) =>
+    request<void>(
+      "/api/v1/apply/submitted",
+      { method: "POST", body: JSON.stringify({ job_id: jobId }) },
+      true,
+    ),
+
   /** Answers the person gave themselves on a form, kept so the same question is filled next time. */
   learnAnswers: (answers: { label: string; value: string }[]) =>
     request<{ saved: number }>(

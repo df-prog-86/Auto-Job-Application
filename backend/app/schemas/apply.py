@@ -108,6 +108,10 @@ class ApplyReportIn(BaseModel):
     flagged: list[FlaggedField] = []
 
 
+class ApplySubmittedIn(BaseModel):
+    job_id: int
+
+
 class PendingQuestionOut(BaseModel):
     id: int
     job_id: int

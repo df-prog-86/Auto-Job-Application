@@ -151,6 +151,12 @@ export const api = {
   requalifyJob: (id: number) => request<JobOut>(`/jobs/${id}/qualify`, { method: "POST" }),
   masterStatus: () => request<{ saved: boolean; updated_at: string | null }>("/profile/master"),
   undoProceed: (id: number) => request<JobOut>(`/jobs/${id}/unproceed`, { method: "POST" }),
+  markApplied: (id: number, appliedOn?: string) =>
+    request<JobOut>(`/jobs/${id}/applied`, {
+      method: "POST",
+      body: JSON.stringify(appliedOn ? { applied_on: appliedOn } : {}),
+    }),
+  markNotApplied: (id: number) => request<JobOut>(`/jobs/${id}/unapplied`, { method: "POST" }),
   deleteJob: (id: number) => request<void>(`/jobs/${id}`, { method: "DELETE" }),
   listAnswers: () => request<AnswerOut[]>("/profile/answers"),
   saveAnswer: (key: string, payload: AnswerUpsert) =>

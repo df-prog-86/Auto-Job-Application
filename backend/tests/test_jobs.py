@@ -508,3 +508,17 @@ def test_original_resume_is_an_unchanged_copy_and_the_master_is_untouched(app_an
 
     listed = client.get("/api/v1/jobs").json()[0]
     assert [d["document_type"] for d in listed["documents"]] == ["resume"]
+
+
+def test_mark_applied_with_a_date_and_take_it_back(app_and_db, monkeypatch):
+    client, _ = app_and_db
+    job = _add_job(client, monkeypatch)
+    assert job["applied_at"] is None
+    out = client.post(f"/api/v1/jobs/{job['id']}/applied", json={"applied_on": "2026-10-01"}).json()
+    assert out["applied_at"].startswith("2026-10-01") and out["applied_via"] == "manual"
+    out = client.post(f"/api/v1/jobs/{job['id']}/applied").json()  # no date: today
+    assert out["applied_at"] is not None
+    assert client.post(f"/api/v1/jobs/{job['id']}/applied", json={"applied_on": "2999-01-01"}).status_code == 422
+    out = client.post(f"/api/v1/jobs/{job['id']}/unapplied").json()
+    assert out["applied_at"] is None and out["applied_via"] is None
+    assert client.post("/api/v1/jobs/9999/applied").status_code == 404

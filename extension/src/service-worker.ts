@@ -13,6 +13,7 @@
 import { backend, downloadDocumentBase64 } from "@/backend-client";
 import type { ApplyContext, FillReport } from "@/form-engine/types";
 import type { CapturedPage, ExtensionMessage, FillPageResult } from "@/messaging/types";
+import { looksSubmitted } from "@/form-engine/submitted";
 import { isSupportedApplicationUrl } from "@/security/ats-hosts";
 import { getStoredToken, setStoredToken } from "@/security/token-store";
 
@@ -77,6 +78,7 @@ async function fillApplicationPage(tabId: number, jobId?: number): Promise<FillP
   });
   const report = results[0]?.result as FillReport | undefined;
   if (!report) return { ok: false, error: "Couldn't read this page. Reload it and try again." };
+  await watchTab(tabId, ctx.job.id).catch(() => undefined);
 
   // Only the questions left blank go back to the app (never the filled values),
   // and the address is sent without its query string.
@@ -101,6 +103,68 @@ async function fillApplicationPage(tabId: number, jobId?: number): Promise<FillP
     stoppedBecause: report.stoppedBecause,
   };
 }
+
+// ---- Noticing a submission: tabs we filled are watched for the employer's "received" page ----
+
+const WATCH_KEY = "jobAgent.watchedTabs";
+const WATCH_MAX_MS = 8 * 3600_000;
+
+type Watched = Record<string, { jobId: number; at: number }>;
+
+async function readWatched(): Promise<Watched> {
+  const stored = await chrome.storage.session.get(WATCH_KEY);
+  const all = (stored[WATCH_KEY] ?? {}) as Watched;
+  const fresh: Watched = {};
+  for (const [id, w] of Object.entries(all)) if (Date.now() - w.at < WATCH_MAX_MS) fresh[id] = w;
+  return fresh;
+}
+
+async function watchTab(tabId: number, jobId: number): Promise<void> {
+  const all = await readWatched();
+  all[String(tabId)] = { jobId, at: Date.now() };
+  await chrome.storage.session.set({ [WATCH_KEY]: all });
+}
+
+async function unwatchTab(tabId: number): Promise<void> {
+  const all = await readWatched();
+  delete all[String(tabId)];
+  await chrome.storage.session.set({ [WATCH_KEY]: all });
+}
+
+/** Looks at one watched tab; marks the job applied (once) when it shows the confirmation. */
+async function checkWatchedTab(tabId: number, jobId: number): Promise<void> {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab) return void (await unwatchTab(tabId));
+  if (!tab.url || !isSupportedApplicationUrl(tab.url)) return;
+  const [res] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => (document.body?.innerText || "").slice(0, 4000),
+  });
+  const text = typeof res?.result === "string" ? res.result : "";
+  if (!looksSubmitted(tab.url, text)) return;
+  await backend.applySubmitted(jobId);
+  await unwatchTab(tabId);
+  notify("Marked as applied", "It looks like that application went through. You can undo this on the Jobs page.");
+}
+
+async function checkAllWatched(): Promise<void> {
+  const all = await readWatched();
+  for (const [id, w] of Object.entries(all)) {
+    await checkWatchedTab(Number(id), w.jobId).catch(() => undefined);
+  }
+}
+
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status !== "complete" && info.url === undefined && info.title === undefined) return;
+  void (async () => {
+    const w = (await readWatched())[String(tabId)];
+    if (w) await checkWatchedTab(tabId, w.jobId);
+  })().catch(() => undefined);
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void unwatchTab(tabId).catch(() => undefined);
+});
 
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8765";
 
@@ -187,6 +251,7 @@ async function startWorkdayWalker(run: WorkdayRun): Promise<void> {
     skills: ctx.skills,
     certifications: ctx.certifications,
   };
+  await watchTab(run.tabId, run.jobId).catch(() => undefined);
   await chrome.scripting.executeScript({ target: { tabId: run.tabId }, files: ["content/fill-page.js"] });
   await chrome.scripting.executeScript({
     target: { tabId: run.tabId },
@@ -294,6 +359,7 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== HEALTH_CHECK_ALARM) return;
+  void checkAllWatched().catch(() => undefined); // catches confirmations that appear without a page load
   void backend
     .health()
     .then(() => chrome.storage.local.set({ "jobAgent.backendReachable": true }))

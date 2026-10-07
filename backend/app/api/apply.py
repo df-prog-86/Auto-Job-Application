@@ -27,6 +27,7 @@ from app.schemas.apply import (
     ApplyExperience,
     ApplyJob,
     ApplyReportIn,
+    ApplySubmittedIn,
     LearnedIn,
     ApplyResume,
     CandidateFacts,
@@ -168,7 +169,7 @@ def get_apply_context(payload: ApplyContextIn, db: Session = Depends(get_db)) ->
 
     if job is None:
         return ApplyContextOut(
-            candidates=[_apply_job(j) for j in jobs if j.application_status == "proceeding"],
+            candidates=[_apply_job(j) for j in jobs if j.application_status == "proceeding" and j.applied_at is None],
             problem="This page doesn't match a job you've saved. Pick the job it belongs to.",
         )
 
@@ -276,6 +277,19 @@ def save_learned(payload: LearnedIn, db: Session = Depends(get_db)) -> dict[str,
         saved += 1
     db.commit()
     return {"saved": saved}
+
+
+@router.post("/submitted", status_code=status.HTTP_204_NO_CONTENT)
+def report_submitted(payload: ApplySubmittedIn, db: Session = Depends(get_db)) -> None:
+    """The extension saw the employer's "application received" page for this job.
+    Records the date once; a job already marked applied keeps its first date."""
+    job = db.get(Job, payload.job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    if job.applied_at is None:
+        job.applied_at = dt.datetime.now(dt.timezone.utc)
+        job.applied_via = "extension"
+        db.commit()
 
 
 @router.post("/report", status_code=status.HTTP_204_NO_CONTENT)

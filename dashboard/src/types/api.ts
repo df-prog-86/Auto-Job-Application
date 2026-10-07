@@ -249,6 +249,8 @@ export interface JobOut {
   last_seen: string;
   status: string;
   application_status: ApplicationStatus;
+  applied_at?: string | null;
+  applied_via?: "manual" | "extension" | null;
   evaluation?: JobEvaluationOut | null;
   documents: GeneratedDocumentOut[];
   already_existed?: boolean;

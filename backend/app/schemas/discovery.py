@@ -121,12 +121,20 @@ class JobOut(BaseModel):
     last_seen: dt.datetime
     status: str
     application_status: str
+    applied_at: dt.datetime | None = None
+    applied_via: str | None = None
     evaluation: JobEvaluationOut | None = None
     documents: list[GeneratedDocumentOut] = []
     already_existed: bool = False  # set only when adding a job by link
 
     class Config:
         from_attributes = True
+
+
+class MarkAppliedIn(BaseModel):
+    """The day the application went in; left out means today."""
+
+    applied_on: dt.date | None = None
 
 
 class JobDetailOut(JobOut):

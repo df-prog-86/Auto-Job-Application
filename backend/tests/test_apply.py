@@ -352,3 +352,16 @@ def test_needs_attention_can_be_cleared_and_closes_what_the_profile_now_answers(
     assert len(client.get("/api/v1/needs-attention").json()) == 1
     assert client.post("/api/v1/needs-attention/clear", json={}).json() == {"cleared": 1}
     assert client.get("/api/v1/needs-attention").json() == []
+
+
+def test_extension_reports_a_submission_once_and_the_first_date_stands(app_and_db):
+    client, SessionLocal = app_and_db
+    job_id = _job(SessionLocal)
+    headers = _token(client)
+    assert client.post("/api/v1/apply/submitted", json={"job_id": job_id}).status_code == 401
+    assert client.post("/api/v1/apply/submitted", json={"job_id": 9999}, headers=headers).status_code == 404
+    assert client.post("/api/v1/apply/submitted", json={"job_id": job_id}, headers=headers).status_code == 204
+    first = client.get(f"/api/v1/jobs/{job_id}").json()
+    assert first["applied_via"] == "extension" and first["applied_at"]
+    assert client.post("/api/v1/apply/submitted", json={"job_id": job_id}, headers=headers).status_code == 204
+    assert client.get(f"/api/v1/jobs/{job_id}").json()["applied_at"] == first["applied_at"]

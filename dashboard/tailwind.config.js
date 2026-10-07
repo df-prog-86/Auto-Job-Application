@@ -22,10 +22,11 @@ export default {
           400: "#8f8ea8",
           300: "#b9b8cc",
         },
-        canvas: "#f7f6ff",
+        canvas: "#f4f2fb",
       },
       fontFamily: {
         sans: [
+          "Plus Jakarta Sans",
           "ui-rounded",
           "SF Pro Rounded",
           "Inter",
@@ -42,8 +43,8 @@ export default {
         "3xl": "1.75rem",
       },
       boxShadow: {
-        soft: "0 1px 2px rgba(60, 50, 140, 0.04), 0 8px 24px -8px rgba(60, 50, 140, 0.10)",
-        lift: "0 2px 4px rgba(60, 50, 140, 0.06), 0 16px 32px -12px rgba(60, 50, 140, 0.18)",
+        soft: "0 1px 2px rgba(31, 27, 46, 0.05), 0 10px 28px rgba(75, 50, 184, 0.07)",
+        lift: "0 2px 4px rgba(31, 27, 46, 0.06), 0 16px 36px -8px rgba(75, 50, 184, 0.22)",
         glow: "0 6px 18px -4px rgba(91, 87, 245, 0.45)",
       },
       keyframes: {

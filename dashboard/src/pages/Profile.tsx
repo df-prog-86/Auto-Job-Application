@@ -357,7 +357,7 @@ function SectionNav() {
   return (
     <nav
       aria-label="Profile sections"
-      className="sticky top-0 z-10 -mx-1 flex gap-1.5 overflow-x-auto rounded-2xl border border-white bg-white/90 px-2 py-2 shadow-soft backdrop-blur"
+      className="sticky top-0 z-10 -mx-1 flex gap-1.5 overflow-x-auto rounded-2xl bg-white/90 px-2 py-2 shadow-soft backdrop-blur"
     >
       {PROFILE_SECTIONS.map((sec) => (
         <button

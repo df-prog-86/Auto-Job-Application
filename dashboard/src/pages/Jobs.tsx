@@ -104,7 +104,7 @@ export function Jobs() {
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value === "fit" ? "fit" : "newest")}
-              className="rounded-full border border-ink-300/70 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700"
+              className="rounded-full border border-[#ddd8f3] bg-white px-3 py-1.5 text-xs font-semibold text-ink-700"
             >
               <option value="newest">Newest first</option>
               <option value="fit">Best fit first</option>
@@ -197,7 +197,7 @@ function MoreMenu({ children }: { children: ReactNode }) {
       </button>
       {open && (
         <div
-          className="absolute right-0 z-10 mt-1 w-52 animate-rise rounded-2xl border border-white bg-white p-1.5 shadow-lift"
+          className="absolute right-0 z-10 mt-1 w-52 animate-rise rounded-2xl bg-white p-1.5 shadow-lift"
           onClick={() => setOpen(false)}
         >
           {children}
@@ -537,7 +537,7 @@ function JobCard({ job }: { job: JobOut }) {
                   <a
                     key={d.id}
                     href={documentDownloadUrl(d.id)}
-                    className="rounded-full border border-ink-300/80 bg-white px-4 py-2 text-sm font-semibold text-ink-700 transition hover:border-brand-400 hover:text-brand-700"
+                    className="rounded-full border border-[#ddd8f3] bg-white px-4 py-2 text-sm font-semibold text-ink-700 transition hover:border-brand-400 hover:text-brand-700"
                   >
                     What changed
                   </a>

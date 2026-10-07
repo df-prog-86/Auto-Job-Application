@@ -456,7 +456,7 @@ function WeeklyGoal({
               max={30}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="w-20 rounded-xl border border-ink-300/70 bg-white px-3 py-1.5 text-sm"
+              className="w-20 rounded-xl border border-[#ddd8f3] bg-white px-3 py-1.5 text-sm"
             />
             <Button size="sm" variant="primary" onClick={save} disabled={saving}>
               {saving ? "Saving…" : "Save"}
@@ -769,7 +769,7 @@ function FollowUpCard({ items }: { items: FollowUp[] }) {
                     setCopied(false);
                   }}
                   rows={6}
-                  className="mt-2 w-full rounded-xl border border-ink-300/70 bg-white px-3 py-2 text-sm leading-relaxed text-ink-900"
+                  className="mt-2 w-full rounded-xl border border-[#ddd8f3] bg-white px-3 py-2 text-sm leading-relaxed text-ink-900"
                 />
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Button size="sm" variant="primary" onClick={() => void copy(`Subject: ${draft.subject}\n\n${draft.body}`)}>

@@ -49,9 +49,9 @@ function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
             to={item.to}
             end={item.to === "/"}
             className={({ isActive }) =>
-              `flex items-center justify-between rounded-xl px-3 py-2 text-sm font-semibold transition ${
+              `flex items-center justify-between rounded-full px-3.5 py-2.5 text-sm font-bold transition ${
                 isActive
-                  ? "bg-brand-50 text-brand-700"
+                  ? "bg-brand-100 text-brand-700"
                   : item.soon
                     ? "text-ink-400 hover:bg-white/70"
                     : "text-ink-500 hover:bg-white/70 hover:text-ink-900"
@@ -71,7 +71,7 @@ function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
 export function NavShell() {
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <aside className="shrink-0 border-b border-white/70 bg-white/60 px-4 py-5 backdrop-blur md:sticky md:top-0 md:h-screen md:w-60 md:border-b-0 md:border-r md:py-7">
+      <aside className="shrink-0 bg-white/80 px-4 py-5 shadow-soft backdrop-blur md:sticky md:top-0 md:h-screen md:w-60 md:py-7">
         <div className="mb-3 flex items-center gap-3 px-2 md:mb-9">
           <LogoMark />
           <div>
@@ -85,7 +85,7 @@ export function NavShell() {
         </nav>
       </aside>
       <main className="min-w-0 flex-1 px-4 py-8 md:px-10 md:py-10">
-        <div className="mx-auto max-w-4xl">
+        <div className="mx-auto max-w-5xl">
           <Outlet />
         </div>
       </main>

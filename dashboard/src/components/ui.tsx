@@ -3,7 +3,7 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 /** Shared building blocks so every page feels like one app. */
 
 export const inputClass =
-  "w-full rounded-xl border border-ink-300/70 bg-white px-3.5 py-2 text-sm text-ink-900 placeholder:text-ink-400 transition focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200";
+  "w-full rounded-xl border border-[#ddd8f3] bg-white px-3.5 py-2 text-sm text-ink-900 placeholder:text-ink-400 transition focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200";
 
 export function Card({
   children,
@@ -13,7 +13,7 @@ export function Card({
   className?: string;
 }) {
   return (
-    <section className={`rounded-2xl border border-white bg-white/90 shadow-soft ${className}`}>
+    <section className={`rounded-2xl bg-white shadow-soft ${className}`}>
       {children}
     </section>
   );
@@ -24,7 +24,7 @@ type Variant = "primary" | "secondary" | "ghost" | "danger";
 const VARIANTS: Record<Variant, string> = {
   primary:
     "bg-gradient-to-b from-brand-400 to-brand-500 text-white shadow-glow hover:from-brand-500 hover:to-brand-600",
-  secondary: "border border-ink-300/80 bg-white text-ink-700 hover:border-brand-400 hover:text-brand-700",
+  secondary: "border border-[#ddd8f3] bg-white text-brand-700 hover:bg-brand-50",
   ghost: "text-ink-500 hover:bg-brand-50 hover:text-brand-700",
   danger: "bg-red-600 text-white hover:bg-red-700",
 };
@@ -35,11 +35,11 @@ export function Button({
   className = "",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: "sm" | "md" }) {
-  const sizing = size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm";
+  const sizing = size === "sm" ? "px-3.5 py-2 text-[13px]" : "px-5 py-2.5 text-sm";
   return (
     <button
       {...props}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-full font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${sizing} ${VARIANTS[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-full font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${sizing} ${VARIANTS[variant]} ${className}`}
     />
   );
 }

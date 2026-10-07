@@ -255,12 +255,12 @@ export function Home() {
                   type="button"
                   aria-pressed={on}
                   onClick={() => setOpenStage(on ? null : s.key)}
-                  className={`relative rounded-2xl border-2 bg-white p-4 text-left shadow-soft transition hover:border-brand-200 ${
+                  className={`relative rounded-2xl border-2 bg-white px-5 pb-4 pt-5 text-left shadow-soft transition hover:border-brand-200 ${
                     on ? "border-brand-500" : "border-transparent"
                   }`}
                 >
                   <div className={`text-xs font-semibold ${on ? "text-brand-600" : "text-ink-500"}`}>{s.label}</div>
-                  <div className="mt-0.5 text-3xl font-extrabold tracking-tight text-ink-900">{stages[s.key].length}</div>
+                  <div className="mt-1 text-4xl font-extrabold tracking-tight text-ink-900">{stages[s.key].length}</div>
                   {stalled === s.key && (
                     <div className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-bold text-amber-700">
                       <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
@@ -276,7 +276,7 @@ export function Home() {
       )}
 
       {allDone && (
-        <div className="grid items-stretch gap-6 lg:grid-cols-[3fr_2fr]">
+        <div className="grid items-stretch gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
           <MatchesCard matches={matches} loading={resultsQuery.isLoading} />
           <FollowUpCard items={due} />
         </div>
@@ -642,7 +642,7 @@ function MatchesCard({ matches, loading }: { matches: JobSearchResultOut[]; load
           ) : (
             <Link to="/job-search">
               <Button size="sm" tabIndex={-1}>
-                Set up a search
+                Open Job Search
               </Button>
             </Link>
           )}

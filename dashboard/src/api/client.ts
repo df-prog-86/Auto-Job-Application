@@ -156,6 +156,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(appliedOn ? { applied_on: appliedOn } : {}),
     }),
+  draftFollowUp: (id: number, kind: "after_applying" | "after_interview" = "after_applying") =>
+    request<{ subject: string; body: string }>(`/jobs/${id}/follow-up-draft`, {
+      method: "POST",
+      body: JSON.stringify({ kind }),
+    }),
   markNotApplied: (id: number) => request<JobOut>(`/jobs/${id}/unapplied`, { method: "POST" }),
   deleteJob: (id: number) => request<void>(`/jobs/${id}`, { method: "DELETE" }),
   listAnswers: () => request<AnswerOut[]>("/profile/answers"),

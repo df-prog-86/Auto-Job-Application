@@ -137,6 +137,15 @@ class MarkAppliedIn(BaseModel):
     applied_on: dt.date | None = None
 
 
+class FollowUpIn(BaseModel):
+    kind: str = "after_applying"  # or "after_interview"
+
+
+class FollowUpOut(BaseModel):
+    subject: str
+    body: str
+
+
 class JobDetailOut(JobOut):
     description: str | None
 

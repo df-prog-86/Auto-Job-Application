@@ -522,3 +522,33 @@ def test_mark_applied_with_a_date_and_take_it_back(app_and_db, monkeypatch):
     out = client.post(f"/api/v1/jobs/{job['id']}/unapplied").json()
     assert out["applied_at"] is None and out["applied_via"] is None
     assert client.post("/api/v1/jobs/9999/applied").status_code == 404
+
+
+class _FakeDraftRouter:
+    def __init__(self, db):
+        pass
+
+    async def get_structured(self, **kwargs):
+        from app.services.followup.draft import FollowUpDraft
+
+        user = kwargs["messages"][-1]["content"]
+        return FollowUpDraft(subject="Checking in — Data Analyst", body=f"Hello, {user[:20]} – thanks.")
+
+
+def test_follow_up_draft_is_returned_not_saved_and_has_no_long_dashes(app_and_db, monkeypatch):
+    client, _ = app_and_db
+    job = _add_job(client, monkeypatch)
+    monkeypatch.setattr("app.services.followup.draft.ModelRouter", _FakeDraftRouter)
+    resp = client.post(f"/api/v1/jobs/{job['id']}/follow-up-draft", json={"kind": "after_interview"})
+    assert resp.status_code == 200
+    out = resp.json()
+    assert out["subject"] == "Checking in , Data Analyst"
+    assert "—" not in out["body"] and "–" not in out["body"]
+    assert client.post(f"/api/v1/jobs/{job['id']}/follow-up-draft").status_code == 200  # kind is optional
+    assert client.post("/api/v1/jobs/9999/follow-up-draft").status_code == 404
+
+
+def test_follow_up_draft_without_an_llm_is_a_clear_error(app_and_db, monkeypatch):
+    client, _ = app_and_db
+    job = _add_job(client, monkeypatch)
+    assert client.post(f"/api/v1/jobs/{job['id']}/follow-up-draft").status_code == 502

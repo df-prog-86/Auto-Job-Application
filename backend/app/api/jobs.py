@@ -22,6 +22,8 @@ from app.schemas.discovery import (
     CaptureJobIn,
     GeneratedDocumentOut,
     JobDetailOut,
+    FollowUpIn,
+    FollowUpOut,
     JobOut,
     ManualJobIn,
     MarkAppliedIn,
@@ -29,6 +31,7 @@ from app.schemas.discovery import (
 )
 from app.services.discovery import manual_extraction
 from app.services.discovery.pipeline import ingest_manual_posting
+from app.services.followup.draft import FollowUpDraftError, draft_follow_up
 from app.services.qualification.pipeline import qualify_job
 from app.services.resume.service import (
     MasterMissingError,
@@ -221,6 +224,20 @@ def undo_proceed(job_id: int, db: Session = Depends(get_db)) -> JobOut:
     db.commit()
     db.refresh(job)
     return JobOut.model_validate(job)
+
+
+@router.post("/{job_id}/follow-up-draft", response_model=FollowUpOut)
+async def follow_up_draft(job_id: int, payload: FollowUpIn | None = None, db: Session = Depends(get_db)) -> FollowUpOut:
+    """A short message the person can edit and send themselves. Nothing is sent or saved."""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    kind = "after_interview" if payload and payload.kind == "after_interview" else "after_applying"
+    try:
+        draft = await draft_follow_up(db, job, kind)
+    except FollowUpDraftError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return FollowUpOut(subject=draft.subject, body=draft.body)
 
 
 @router.post("/{job_id}/applied", response_model=JobOut)

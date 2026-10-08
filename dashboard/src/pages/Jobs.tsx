@@ -5,7 +5,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { api, ApiError, documentDownloadUrl } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
-import { Badge, Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
+import { Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
 import { GapDetails, scoreColor, scoreLabel } from "@/components/match";
 import { completeApplication } from "@/lib/extensionBridge";
 import { formatLocation, formatPosted, formatSalary } from "@/lib/jobText";
@@ -311,14 +311,6 @@ function JobCard({ job }: { job: JobOut }) {
   const error =
     proceedMutation.error ?? requalifyMutation.error ?? tailorMutation.error ?? originalMutation.error ?? undoMutation.error ?? appliedMutation.error ?? notAppliedMutation.error ?? deleteMutation.error;
 
-  const scoreButtonLabel = requalifyMutation.isPending
-    ? evaluation
-      ? "Re-scoring…"
-      : "Scoring…"
-    : evaluation
-      ? "Re-score match"
-      : "Score match";
-
   const detailsButton = (
     <button
       type="button"
@@ -420,7 +412,9 @@ function JobCard({ job }: { job: JobOut }) {
                 </Ring>
               </div>
             ) : (
-              <Badge>Not scored</Badge>
+              <Button size="sm" variant="primary" onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
+                {requalifyMutation.isPending ? "Scoring…" : "Score"}
+              </Button>
             )}
           </div>
         </div>
@@ -468,11 +462,6 @@ function JobCard({ job }: { job: JobOut }) {
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {readyCollapsed && applyBlock}
-          {!evaluation && !proceeding && (
-            <Button variant="primary" onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
-              {scoreButtonLabel}
-            </Button>
-          )}
           {!job.applied_at && !markingApplied && !(proceeding && hasResume) && (
             <Button variant="secondary" onClick={() => setMarkingApplied(true)}>
               Mark as applied

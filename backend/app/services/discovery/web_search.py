@@ -154,6 +154,147 @@ async def drop_closed(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]]
     return kept, len(items) - len(kept)
 
 
+# Sites that list other companies' jobs. A link here is a middleman: the real posting lives on the employer's own
+# careers page or applicant-tracking page, which is where the application is filled and where it can be read.
+AGGREGATOR_DOMAINS = frozenset(
+    {
+        "linkedin.com", "indeed.com", "ziprecruiter.com", "glassdoor.com", "monster.com", "simplyhired.com",
+        "careerbuilder.com", "talent.com", "jooble.org", "adzuna.com", "dice.com", "theladders.com", "lensa.com",
+        "jobrapido.com", "snagajob.com", "wellfound.com", "jobright.ai", "remoteok.com", "weworkremotely.com",
+        "flexjobs.com", "learn4good.com", "jobs2careers.com", "neuvoo.com", "jobcase.com", "joblist.com",
+        "jobget.com", "zippia.com", "joinhandshake.com", "simplify.jobs", "himalayas.app", "remotive.com",
+        "workingnomads.com", "craigslist.org", "facebook.com", "builtin.com", "builtinnyc.com", "builtinboston.com",
+        "builtinchicago.com", "builtinaustin.com", "builtinla.com", "builtinseattle.com", "builtinsf.com",
+        "builtincolorado.com",
+    }
+)
+MAX_RESOLVE = 8  # job-board results looked up per search, to keep the cost and wait predictable
+
+
+def is_aggregator(url: str) -> bool:
+    """True when the link is on a job board or aggregator rather than the employer's own site."""
+    host = (urlsplit(url.strip()).hostname or "").lower().removeprefix("www.")
+    return any(host == d or host.endswith(f".{d}") for d in AGGREGATOR_DOMAINS)
+
+
+_TITLE_STOP = {"the", "and", "for", "with", "of", "to", "a", "an", "in", "at", "ii", "iii", "i", "sr", "jr", "senior", "junior"}
+
+
+def _title_words(title: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", title.lower()) if len(w) > 2 and w not in _TITLE_STOP}
+
+
+def parse_object(text: str) -> dict[str, Any]:
+    """The first JSON object in the model's answer, tolerating code fences and a lead-in."""
+    cleaned = re.sub(r"```(?:json)?", "", text).strip()
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start == -1 or end <= start:
+        return {}
+    try:
+        data = json.loads(cleaned[start : end + 1])
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def build_resolve_messages(item: dict[str, Any]) -> list[dict[str, str]]:
+    system = (
+        "You find the original posting of a job that was found on a job board. Using web search, find the same job "
+        "(same employer, same role, same location) on the employer's own careers website or its applicant-tracking "
+        "page (Workday, Greenhouse, Lever, Ashby, iCIMS, SmartRecruiters, Taleo and similar). "
+        "HARD REQUIREMENT: the posting must be live and accepting applications today; open the page and confirm it. "
+        "The link must be the page for that one job, never a page of many jobs, a search page, a login or sign-up page, "
+        "a job board, an aggregator or a recruiter page. Never guess, build or edit a link: it must come from a page you opened. "
+        'Reply with ONLY a JSON object, no other text: {"url": "<link to the employer posting>"} or {"url": null} if you cannot find it.'
+    )
+    where = f" in {item['location']}" if item.get("location") else ""
+    user = (
+        f"Job: {item['title']}\nEmployer: {item['company']}{where}\n"
+        f"Found on this job board page (do not return this page): {item['url']}"
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+async def _original_is_acceptable(item: dict[str, Any], url: str, grounded: bool) -> bool:
+    """The found link must be a real, open, employer-side page for this job, not a lookalike."""
+    if not is_http_url(url) or not is_public_host(url) or is_aggregator(url):
+        return False
+    if await check_live(url) is False:
+        return False
+    # When the page can be read, it must actually be about this job. Pages built with scripts (many Workday sites)
+    # cannot be read here, so those must have been returned by the search engine itself.
+    text = ""
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, max_redirects=5) as client:
+            resp = await client.get(url, headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
+        if resp.status_code == 200:
+            body = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", resp.text[:400000], flags=re.I | re.S)
+            text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body)).lower()
+    except httpx.HTTPError:
+        text = ""
+    if len(text) >= 500:
+        words = _title_words(item["title"])
+        if words and sum(1 for w in words if w in text) / len(words) < 0.5:
+            return False
+        return True
+    return grounded
+
+
+async def resolve_original_sources(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """
+    For results found on job boards, looks up the same job on the employer's own site and swaps the link.
+    A board result with no verified original is dropped: those links usually cannot be read, scored or filled.
+    Returns the items and how many were dropped.
+    """
+    todo = [i for i in items if is_aggregator(i["url"])]
+    if not todo:
+        return items, 0
+    model = settings.PRIMARY_FAST_MODEL
+    gate = asyncio.Semaphore(3)
+
+    async def one(item: dict[str, Any]) -> dict[str, Any] | None:
+        async with gate:
+            try:
+                result = await LLMClient().chat_completion(
+                    model=model,
+                    messages=build_resolve_messages(item),
+                    temperature=0.0,
+                    max_tokens=400,
+                    extra={"plugins": [{"id": "web", "max_results": 5}]},
+                    timeout=90.0,
+                )
+            except Exception:  # a failed lookup just means no original found
+                return None
+            found = parse_object(result.content).get("url")
+            link = _clean(found, 1000)
+            if not link or not is_http_url(link):
+                return None
+            link = strip_tracking_params(link)
+            grounded = url_key(link) in cited_urls(result.raw)
+            if not await _original_is_acceptable(item, link, grounded):
+                return None
+            return {**item, "url": link, "url_key": url_key(link), "grounded": grounded}
+
+    attempt = todo[:MAX_RESOLVE]
+    resolved = await asyncio.gather(*(one(i) for i in attempt))
+    replacement = {id(i): r for i, r in zip(attempt, resolved)}
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    dropped = 0
+    for item in items:
+        if is_aggregator(item["url"]):
+            item = replacement.get(id(item))  # type: ignore[assignment]
+            if item is None:
+                dropped += 1
+                continue
+        if item["url_key"] in seen:
+            dropped += 1
+            continue
+        seen.add(item["url_key"])
+        out.append(item)
+    return out, dropped
+
+
 def build_messages(criteria: JobSearchIn) -> list[dict[str, str]]:
     wanted = [f"Job title or role: {criteria.titles}"]
     if criteria.location:
@@ -286,4 +427,6 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
                 "grounded": url_key(link) in grounded_keys,
             }
         )
-    return await drop_closed(items)
+    items, not_found = await resolve_original_sources(items)
+    kept, closed = await drop_closed(items)
+    return kept, closed + not_found

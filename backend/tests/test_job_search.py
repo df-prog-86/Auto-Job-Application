@@ -308,3 +308,94 @@ def test_match_score_says_when_the_posting_is_closed(search, monkeypatch):
     monkeypatch.setattr(manual_extraction, "fetch_page", gone)
     refused = client.post(f"/api/v1/job-search/results/{first['id']}/score")
     assert refused.status_code == 410 and "closed" in refused.json()["detail"]
+
+
+# ---- original source lookup for results found on job boards ----
+
+def test_job_boards_are_recognised_but_employer_sites_are_not():
+    from app.services.discovery.web_search import is_aggregator
+
+    assert is_aggregator("https://www.linkedin.com/jobs/view/123")
+    assert is_aggregator("https://uk.indeed.com/viewjob?jk=1")
+    assert is_aggregator("https://chicago.builtin.com/job/x")
+    assert not is_aggregator("https://acme.wd5.myworkdayjobs.com/en-US/careers/job/1")
+    assert not is_aggregator("https://boards.greenhouse.io/acme/jobs/1")
+    assert not is_aggregator("https://notlinkedin.example.com/jobs/1")
+
+
+def _board_items():
+    base = {"company": "Acme Health", "location": None, "work_type": "remote", "salary": None, "summary": "x"}
+    return [
+        {**base, "title": "Revenue Cycle Analyst", "url": "https://www.linkedin.com/jobs/view/1", "url_key": "linkedin.com/jobs/view/1"},
+        {**base, "title": "Billing Analyst", "url": "https://www.indeed.com/viewjob?jk=2", "url_key": "indeed.com/viewjob?jk=2"},
+        {**base, "title": "Claims Analyst", "url": "https://jobs.acme.com/claims", "url_key": "jobs.acme.com/claims"},
+    ]
+
+
+def _resolver(monkeypatch, answers, accept=True):
+    from app.config import settings
+    from app.services.discovery import web_search
+
+    monkeypatch.setattr(settings, "PRIMARY_FAST_MODEL", "test/model")
+
+    async def fake(self, **kwargs):
+        prompt = json.dumps(kwargs["messages"])
+        for title, url in answers.items():
+            if title in prompt:
+                return ChatCompletionResult(content=json.dumps({"url": url}), input_tokens=1, output_tokens=1, raw={})
+        return ChatCompletionResult(content="null", input_tokens=1, output_tokens=1, raw={})
+
+    async def acceptable(item, url, grounded):
+        return accept
+
+    monkeypatch.setattr(web_search.LLMClient, "chat_completion", fake)
+    monkeypatch.setattr(web_search, "_original_is_acceptable", acceptable)
+    return web_search
+
+
+def test_board_result_is_swapped_for_the_employers_own_posting(monkeypatch):
+    import asyncio
+
+    ws = _resolver(monkeypatch, {"Revenue Cycle Analyst": "https://acme.wd5.myworkdayjobs.com/en-US/careers/job/R1?utm_source=x"})
+    out, dropped = asyncio.run(ws.resolve_original_sources(_board_items()))
+    by_title = {i["title"]: i for i in out}
+    assert by_title["Revenue Cycle Analyst"]["url"] == "https://acme.wd5.myworkdayjobs.com/en-US/careers/job/R1"
+    assert "Billing Analyst" not in by_title  # no original found, so the board link is dropped
+    assert by_title["Claims Analyst"]["url"] == "https://jobs.acme.com/claims"  # employer links are untouched
+    assert dropped == 1
+
+
+def test_board_result_is_dropped_when_the_found_link_does_not_check_out(monkeypatch):
+    import asyncio
+
+    ws = _resolver(monkeypatch, {"Revenue Cycle Analyst": "https://acme.example.com/jobs/1"}, accept=False)
+    out, dropped = asyncio.run(ws.resolve_original_sources(_board_items()))
+    assert [i["title"] for i in out] == ["Claims Analyst"] and dropped == 2
+
+
+def test_two_board_results_pointing_at_one_original_are_merged(monkeypatch):
+    import asyncio
+
+    same = "https://acme.example.com/jobs/1"
+    ws = _resolver(monkeypatch, {"Revenue Cycle Analyst": same, "Billing Analyst": same})
+    out, dropped = asyncio.run(ws.resolve_original_sources(_board_items()))
+    assert sorted(i["title"] for i in out) == ["Claims Analyst", "Revenue Cycle Analyst"] and dropped == 1
+
+
+def test_only_the_first_few_board_results_are_looked_up(monkeypatch):
+    import asyncio
+
+    ws = _resolver(monkeypatch, {})
+    base = _board_items()[0]
+    many = [{**base, "title": f"Role {n}", "url": f"https://www.linkedin.com/jobs/view/{n}", "url_key": f"linkedin.com/jobs/view/{n}"}
+            for n in range(ws.MAX_RESOLVE + 4)]
+    out, dropped = asyncio.run(ws.resolve_original_sources(many))
+    assert out == [] and dropped == len(many)
+
+
+def test_a_board_page_is_never_accepted_as_the_original(monkeypatch):
+    import asyncio
+    from app.services.discovery import web_search as ws
+
+    ok = asyncio.run(ws._original_is_acceptable(_board_items()[0], "https://www.indeed.com/viewjob?jk=9", True))
+    assert ok is False

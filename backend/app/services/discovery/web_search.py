@@ -295,6 +295,63 @@ async def resolve_original_sources(items: list[dict[str, Any]]) -> tuple[list[di
     return out, dropped
 
 
+_DATE_JSON = re.compile(r'"datePosted"\s*:\s*"(\d{4}-\d{2}-\d{2})')
+_DATE_META = re.compile(
+    r'<meta[^>]+(?:property|name|itemprop)=["\'](?:article:published_time|datePosted|og:published_time|date)["\'][^>]*content=["\'](\d{4}-\d{2}-\d{2})',
+    re.I,
+)
+_DATE_AGO = re.compile(r"posted\s+(today|yesterday|(\d{1,3})\+?\s+(day|week|month)s?\s+ago)", re.I)
+
+
+def extract_posted_date(html: str) -> dt.date | None:
+    """The date a posting page says it was published: structured data first, then plain "Posted 3 days ago" text."""
+    for pattern in (_DATE_JSON, _DATE_META):
+        found = pattern.search(html)
+        if found:
+            day = parse_posted_date(found.group(1))
+            if day:
+                return day
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.I | re.S)
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text))
+    ago = _DATE_AGO.search(text)
+    if not ago:
+        return None
+    today = dt.date.today()
+    word = ago.group(1).lower()
+    if word == "today":
+        return today
+    if word == "yesterday":
+        return today - dt.timedelta(days=1)
+    unit = {"day": 1, "week": 7, "month": 30}[ago.group(3).lower()]
+    return today - dt.timedelta(days=int(ago.group(2)) * unit)
+
+
+async def fill_posted_dates(items: list[dict[str, Any]], within_days: int) -> tuple[list[dict[str, Any]], int]:
+    """
+    Results the AI gave no date for get one from the posting page itself. When a date window was asked for,
+    postings that are clearly older are dropped. Still no date means it is kept, and shown as "date not listed".
+    """
+    gate = asyncio.Semaphore(5)
+
+    async def one(item: dict[str, Any]) -> None:
+        if item.get("posted_at") or not is_public_host(item["url"]):
+            return
+        async with gate:
+            try:
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, max_redirects=5) as client:
+                    resp = await client.get(item["url"], headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
+                if resp.status_code == 200:
+                    item["posted_at"] = extract_posted_date(resp.text[:600000])
+            except Exception:
+                return
+
+    await asyncio.gather(*(one(i) for i in items))
+    if not within_days:
+        return items, 0
+    kept = [i for i in items if not i.get("posted_at") or (dt.date.today() - i["posted_at"]).days <= within_days]
+    return kept, len(items) - len(kept)
+
+
 def build_messages(criteria: JobSearchIn) -> list[dict[str, str]]:
     wanted = [f"Job title or role: {criteria.titles}"]
     if criteria.location:
@@ -428,5 +485,6 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
             }
         )
     items, not_found = await resolve_original_sources(items)
+    items, too_old = await fill_posted_dates(items, criteria.posted_within_days)
     kept, closed = await drop_closed(items)
-    return kept, closed + not_found
+    return kept, closed + not_found + too_old

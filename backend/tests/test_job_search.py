@@ -49,7 +49,11 @@ def search(monkeypatch, app_and_db):
     async def unknown(url):
         return None  # tests never visit real sites
 
+    async def no_dates(items, within_days):
+        return items, 0  # tests never visit real sites
+
     monkeypatch.setattr(web_search, "check_live", unknown)
+    monkeypatch.setattr(web_search, "fill_posted_dates", no_dates)
     monkeypatch.setattr(web_search.LLMClient, "chat_completion", fake)
     return app_and_db
 
@@ -399,3 +403,30 @@ def test_a_board_page_is_never_accepted_as_the_original(monkeypatch):
 
     ok = asyncio.run(ws._original_is_acceptable(_board_items()[0], "https://www.indeed.com/viewjob?jk=9", True))
     assert ok is False
+
+
+def test_posted_date_is_read_from_the_posting_page():
+    import datetime as dt
+    from app.services.discovery.web_search import extract_posted_date
+
+    assert extract_posted_date('<script type="application/ld+json">{"datePosted": "2026-09-30T00:00:00"}</script>') == dt.date(2026, 9, 30)
+    assert extract_posted_date('<meta property="article:published_time" content="2026-09-12T10:00:00Z">') == dt.date(2026, 9, 12)
+    assert extract_posted_date("<p>Posted yesterday</p>") == dt.date.today() - dt.timedelta(days=1)
+    assert extract_posted_date("<p>Posted 2 weeks ago</p>") == dt.date.today() - dt.timedelta(days=14)
+    assert extract_posted_date("<p>No date here</p>") is None
+
+
+def test_date_window_drops_old_postings_but_keeps_undated_ones(monkeypatch):
+    import asyncio
+    import datetime as dt
+    from app.services.discovery import web_search as ws
+
+    async def no_visit(self, *a, **k):
+        raise RuntimeError("tests never visit real sites")
+
+    monkeypatch.setattr(ws.httpx.AsyncClient, "get", no_visit)
+    today = dt.date.today()
+    mk = lambda n, d: {"title": n, "url": f"https://jobs.example.com/{n}", "posted_at": d}
+    items = [mk("new", today - dt.timedelta(days=3)), mk("old", today - dt.timedelta(days=40)), mk("undated", None)]
+    kept, dropped = asyncio.run(ws.fill_posted_dates(items, 14))
+    assert [i["title"] for i in kept] == ["new", "undated"] and dropped == 1

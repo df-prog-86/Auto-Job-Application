@@ -733,7 +733,7 @@ function ResultCard({
                 )}
                 {r.work_type && <span className="capitalize">{r.work_type}</span>}
                 {r.salary_text && <span>{r.salary_text}</span>}
-                {posted && <span>Posted {posted}</span>}
+                <span className={posted ? "" : "text-ink-400"}>{posted ? `Posted ${posted}` : "Posted date not listed"}</span>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2.5">

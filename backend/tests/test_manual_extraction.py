@@ -40,3 +40,13 @@ def test_capture_endpoint_without_llm(app_and_db):
     assert r.status_code == 201, r.text
     assert r.json()["title"] == "Clinical Revenue Cycle Sr Associate"
     assert r.json()["company"] == "Kodiak Solutions"
+
+
+def test_pay_period_comes_from_the_words_next_to_the_number():
+    from app.services.discovery.normalization import parse_salary
+
+    assert parse_salary("Pay range: $120,000 - $165,000. Schedule: 40 hours per week.")["period"] == "year"
+    assert parse_salary("$45 - $60 per hour")["period"] == "hour"
+    assert parse_salary("$25/hr")["period"] == "hour"
+    assert parse_salary("$90,000 a year")["period"] == "year"
+    assert parse_salary("$38 - $52")["period"] == "hour"  # small numbers with no unit read as hourly

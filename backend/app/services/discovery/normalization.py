@@ -150,7 +150,17 @@ def parse_salary(text: str | None) -> dict:
 
     low = to_number(match.group(1))
     high = to_number(match.group(2)) if match.group(2) else None
-    result: dict = {"currency": "USD", "period": "year" if "hr" not in text.lower() and "hour" not in text.lower() else "hour"}
+    # Only the words right next to the number say whether it is hourly or yearly;
+    # "40 hours per week" elsewhere in a posting must not turn a yearly range hourly.
+    near = text[match.start(): match.end() + 40].lower()
+    top = high if high is not None else low
+    if re.search(r"(/|per\s|an\s|a\s)\s?(hour|hr)\b|hourly", near):
+        period = "hour"
+    elif re.search(r"(/|per\s|a\s)\s?(year|yr)\b|annual|yearly", near):
+        period = "year"
+    else:
+        period = "hour" if (top is not None and top < 500) else "year"
+    result: dict = {"currency": "USD", "period": period}
     if low is not None:
         result["min"] = low
     if high is not None:

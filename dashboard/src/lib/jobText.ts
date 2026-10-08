@@ -15,8 +15,18 @@ export function formatSalary(salary?: Record<string, unknown> | null): string | 
   const min = typeof salary.min === "number" ? salary.min : null;
   const max = typeof salary.max === "number" ? salary.max : null;
   if (min === null && max === null) return null;
-  const hourly = salary.period === "hour";
+  // Older saved jobs may say "hour" for a yearly range; real hourly pay is never in the thousands.
+  const hourly = salary.period === "hour" && (max ?? min ?? 0) < 1000;
   const money = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
   const range = min !== null && max !== null ? `${money(min)} - ${money(max)}` : money((min ?? max) as number);
   return hourly ? `${range} per hour` : range;
+}
+
+/** The location without placeholder words such as "Not specified". Null when nothing real is left. */
+export function formatLocation(location?: string | null): string | null {
+  const parts = (location ?? "")
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p && !/^(not specified|n\/a|none|unknown)$/i.test(p));
+  return parts.length ? parts.join(", ") : null;
 }

@@ -54,6 +54,11 @@ def search(monkeypatch, app_and_db):
 
     monkeypatch.setattr(web_search, "check_live", unknown)
     monkeypatch.setattr(web_search, "fill_posted_dates", no_dates)
+
+    async def no_ats(items):
+        return items, 0
+
+    monkeypatch.setattr(web_search, "enrich_from_ats", no_ats)
     monkeypatch.setattr(web_search.LLMClient, "chat_completion", fake)
     return app_and_db
 
@@ -434,13 +439,89 @@ def test_date_window_drops_old_postings_but_keeps_undated_ones(monkeypatch):
 
 def test_workday_postings_are_read_from_workdays_own_data():
     import datetime as dt
-    from app.services.discovery.web_search import workday_api_url, workday_posted_date
+    from app.services.discovery.ats import workday_api_url, workday_info
 
     url = "https://huron.wd1.myworkdayjobs.com/en-US/huroncareers/job/Healthcare-Consulting-Manager---Revenue-Cycle_JR-0016103"
     assert workday_api_url(url) == "https://huron.wd1.myworkdayjobs.com/wday/cxs/huron/huroncareers/job/Healthcare-Consulting-Manager---Revenue-Cycle_JR-0016103"
     assert workday_api_url("https://acme.wd5.myworkdayjobs.com/careers/job/Remote/Analyst_R1") == \
         "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/careers/job/Remote/Analyst_R1"
     assert workday_api_url("https://jobs.example.com/job/1") is None
-    assert workday_posted_date({"jobPostingInfo": {"startDate": "2026-08-20"}}) == dt.date(2026, 8, 20)
-    assert workday_posted_date({"jobPostingInfo": {"postedOn": "Posted 30+ Days Ago"}}) == dt.date.today() - dt.timedelta(days=30)
-    assert workday_posted_date({}) is None
+    assert workday_info(200, {"jobPostingInfo": {"startDate": "2026-08-20"}}).posted == dt.date(2026, 8, 20)
+    assert workday_info(200, {"jobPostingInfo": {"postedOn": "Posted 30+ Days Ago"}}).posted == dt.date.today() - dt.timedelta(days=30)
+    assert workday_info(200, {}).posted is None
+
+
+# ---- one search per kind of source, checked by the employers' own systems ----
+
+def test_each_source_gets_its_own_domain_filter(search):
+    from app.services.discovery import web_search
+
+    client, _ = search
+    seen = []
+    original = web_search.LLMClient.chat_completion
+
+    async def spy(self, **kwargs):
+        seen.append(kwargs["extra"]["plugins"][0])
+        return await original(self, **kwargs)
+
+    web_search.LLMClient.chat_completion = spy
+    try:
+        client.post("/api/v1/job-search/run", json={"titles": "revenue cycle consultant"})
+    finally:
+        web_search.LLMClient.chat_completion = original
+    assert len(seen) == 3
+    assert any(p.get("include_domains") == ["*.myworkdayjobs.com"] for p in seen)
+    assert any("jobs.ashbyhq.com" in p.get("include_domains", []) for p in seen)
+    web = [p for p in seen if "exclude_domains" in p][0]
+    assert "linkedin.com" in web["exclude_domains"] and all(p["engine"] == "exa" for p in seen)
+
+
+def test_search_still_returns_results_when_one_source_fails(search, monkeypatch):
+    from app.services.discovery import web_search
+
+    client, _ = search
+    calls = {"n": 0}
+    original = web_search.LLMClient.chat_completion
+
+    async def flaky(self, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("source down")
+        return await original(self, **kwargs)
+
+    monkeypatch.setattr(web_search.LLMClient, "chat_completion", flaky)
+    res = client.post("/api/v1/job-search/run", json={"titles": "analyst"})
+    assert res.status_code == 200 and res.json()["found"] >= 1
+
+
+def test_ats_answers_are_read_correctly():
+    import datetime as dt
+    from app.services.discovery import ats
+
+    assert ats.greenhouse_ref("https://job-boards.greenhouse.io/kodiaksolutions/jobs/4095330009") == ("kodiaksolutions", "4095330009")
+    assert ats.greenhouse_ref("https://example.com/x/jobs/1") is None
+    assert ats.greenhouse_info(404, None).live is False
+    assert ats.greenhouse_info(200, {"first_published": "2026-09-01T10:00:00-04:00"}).posted == dt.date(2026, 9, 1)
+    uid = "c771bcbd-1cc6-4228-a50a-8f18b8da2c0b"
+    assert ats.ashby_ref(f"https://jobs.ashbyhq.com/magical/{uid}") == ("magical", uid)
+    board = {"jobs": [{"id": uid, "isListed": True, "publishedAt": "2026-09-10T00:00:00.000+00:00"}]}
+    assert ats.ashby_info(200, board, uid).posted == dt.date(2026, 9, 10)
+    assert ats.ashby_info(200, board, "other-id-0000-0000-0000").live is False  # not on the board any more
+    assert ats.ashby_info(500, None, uid).live is None  # unknown never removes
+    assert ats.lever_ref(f"https://jobs.lever.co/acme/{uid}") == ("acme", uid)
+    assert ats.lever_info(200, {"createdAt": 1788000000000}).live is True
+    assert ats.workday_info(404, None).live is False
+    assert ats.workday_info(200, {"jobPostingInfo": {"canApply": False}}).live is False
+
+
+def test_closed_postings_reported_by_their_own_system_are_removed(monkeypatch):
+    import asyncio
+    from app.services.discovery import ats, web_search as ws
+
+    async def fake(url, client, boards):
+        return ats.AtsInfo(live=False, checked=True) if "closed" in url else ats.AtsInfo(live=True, checked=True)
+
+    monkeypatch.setattr(ws.ats, "inspect", fake)
+    items = [{"title": "a", "url": "https://x.example.com/closed"}, {"title": "b", "url": "https://x.example.com/open"}]
+    kept, gone = asyncio.run(ws.enrich_from_ats(items))
+    assert [i["title"] for i in kept] == ["b"] and gone == 1 and kept[0]["ats_checked"] is True

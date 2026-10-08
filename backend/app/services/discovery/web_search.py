@@ -22,6 +22,7 @@ import httpx
 from app.config import settings
 from app.schemas.job_search import JobSearchIn
 from app.services.discovery.normalization import parse_posted_date, strip_tracking_params
+from app.services.discovery import ats
 from app.services.llm.client import LLMClient
 from app.services.llm.exceptions import LLMNotConfiguredError
 
@@ -146,6 +147,8 @@ async def drop_closed(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]]
     gate = asyncio.Semaphore(5)
 
     async def one(item: dict[str, Any]) -> bool | None:
+        if item.get("ats_checked"):
+            return None  # the posting's own system already answered
         async with gate:
             return await check_live(item["url"])
 
@@ -326,31 +329,28 @@ def extract_posted_date(html: str) -> dt.date | None:
     return today - dt.timedelta(days=int(ago.group(2)) * unit)
 
 
-def workday_api_url(url: str) -> str | None:
+async def enrich_from_ats(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
     """
-    Workday pages are built with scripts, so the page itself holds no date. Workday serves the same posting as
-    data at /wday/cxs/<company>/<site>/job/<path>, which includes the start date.
+    Asks Workday, Greenhouse, Ashby and Lever themselves whether each posting is open and when it was published.
+    Clearly closed ones are removed; the date fills in when the search did not give one.
     """
-    parts = urlsplit(url)
-    host = (parts.hostname or "").lower()
-    if not host.endswith(".myworkdayjobs.com"):
-        return None
-    segs = [p for p in parts.path.split("/") if p]
-    if segs and re.fullmatch(r"[a-z]{2}-[A-Za-z]{2}", segs[0]):
-        segs = segs[1:]  # drop the language, e.g. en-US
-    if "job" not in segs:
-        return None
-    at = segs.index("job")
-    if at < 1 or at + 1 >= len(segs):
-        return None
-    return f"https://{host}/wday/cxs/{host.split('.')[0]}/{segs[at - 1]}/job/{'/'.join(segs[at + 1:])}"
+    gate = asyncio.Semaphore(6)
+    boards: dict[str, tuple[int, Any]] = {}
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
 
+        async def one(item: dict[str, Any]) -> None:
+            async with gate:
+                info = await ats.inspect(item["url"], client, boards)
+            if not info.checked:
+                return
+            item["ats_checked"] = True
+            item["ats_live"] = info.live
+            if info.posted and not item.get("posted_at"):
+                item["posted_at"] = info.posted
 
-def workday_posted_date(data: Any) -> dt.date | None:
-    info = data.get("jobPostingInfo") if isinstance(data, dict) else None
-    if not isinstance(info, dict):
-        return None
-    return parse_posted_date(info.get("startDate")) or extract_posted_date(f"Posted {info.get('postedOn', '')}")
+        await asyncio.gather(*(one(i) for i in items))
+    kept = [i for i in items if i.get("ats_live") is not False]
+    return kept, len(items) - len(kept)
 
 
 async def fill_posted_dates(items: list[dict[str, Any]], within_days: int) -> tuple[list[dict[str, Any]], int]:
@@ -361,20 +361,14 @@ async def fill_posted_dates(items: list[dict[str, Any]], within_days: int) -> tu
     gate = asyncio.Semaphore(5)
 
     async def one(item: dict[str, Any]) -> None:
-        if item.get("posted_at") or not is_public_host(item["url"]):
+        if item.get("posted_at") or item.get("ats_checked") or not is_public_host(item["url"]):
             return
         async with gate:
             try:
                 async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, max_redirects=5) as client:
-                    api = workday_api_url(item["url"])
-                    if api:
-                        resp = await client.get(api, headers={"User-Agent": _UA, "Accept": "application/json"})
-                        if resp.status_code == 200:
-                            item["posted_at"] = workday_posted_date(resp.json())
-                    if not item.get("posted_at"):
-                        resp = await client.get(item["url"], headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
-                        if resp.status_code == 200:
-                            item["posted_at"] = extract_posted_date(resp.text[:600000])
+                    resp = await client.get(item["url"], headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
+                    if resp.status_code == 200:
+                        item["posted_at"] = extract_posted_date(resp.text[:600000])
             except Exception:
                 return
 
@@ -385,8 +379,26 @@ async def fill_posted_dates(items: list[dict[str, Any]], within_days: int) -> tu
     return kept, len(items) - len(kept)
 
 
-def build_messages(criteria: JobSearchIn) -> list[dict[str, str]]:
-    wanted = [f"Job title or role: {criteria.titles}"]
+# The search is split by where jobs live, so each call looks at one kind of source and returns direct posting links.
+WORKDAY_DOMAINS = ["*.myworkdayjobs.com"]
+ATS_DOMAINS = ["boards.greenhouse.io", "job-boards.greenhouse.io", "jobs.ashbyhq.com", "jobs.lever.co"]
+SCOPES: dict[str, dict[str, Any]] = {
+    "workday": {"include": WORKDAY_DOMAINS, "hint": "Search only Workday career sites."},
+    "ats": {"include": ATS_DOMAINS, "hint": "Search only Greenhouse, Ashby and Lever job pages."},
+    "web": {
+        "exclude": sorted(AGGREGATOR_DOMAINS) + ["myworkdayjobs.com", "greenhouse.io", "ashbyhq.com", "lever.co"],
+        "hint": "Search company career sites.",
+    },
+}
+
+
+def per_call_count(criteria: JobSearchIn) -> int:
+    """How many postings each source asks for: enough overlap to fill the list, without paying for the same job three times."""
+    return max(3, -(-criteria.count * 6 // 10))
+
+
+def build_messages(criteria: JobSearchIn, scope: str = "web") -> list[dict[str, str]]:
+    wanted = [f"Role: {criteria.titles}"]
     if criteria.location:
         wanted.append(f"Location: {criteria.location}")
     if criteria.work_type != "any":
@@ -395,40 +407,27 @@ def build_messages(criteria: JobSearchIn) -> list[dict[str, str]]:
         wanted.append(f"Must relate to: {criteria.keywords}")
     if criteria.target_salary:
         floor = salary_floor(criteria.target_salary)
-        wanted.append(
-            f"Yearly pay where the midpoint of the posted pay range is at least ${floor:,} "
-            "(there is no upper limit; higher is fine; for a single posted figure use that figure; "
-            "postings that state no pay may still be included unless told otherwise below)"
-        )
+        wanted.append(f"Yearly pay midpoint at least ${floor:,} (no upper limit; postings with no stated pay are fine unless told otherwise)")
     if criteria.require_salary:
-        wanted.append("Ignore any posting that does not state its pay or pay range; every result must show pay")
+        wanted.append("Only postings that state their pay")
     if excluded_companies(criteria):
-        wanted.append("Do not include postings from these companies: " + ", ".join(excluded_companies(criteria)))
+        wanted.append("Not from these companies: " + ", ".join(excluded_companies(criteria)))
     if criteria.posted_within_days:
         wanted.append(f"Posted within the last {criteria.posted_within_days} days")
     system = (
-        "You find job postings that are open right now, using web search. "
-        "HARD REQUIREMENT: only recommend a job that is live and accepting applications today. "
-        "Open the posting page and confirm it before including it. Exclude any posting that says it is closed, "
-        "expired, filled, no longer available or no longer accepting applications, that shows no apply option, "
-        "or that redirects to a general careers page or a search page. If you cannot confirm a posting is live, leave it out. "
-        "LINK RULE: the url must be the actual job posting page itself, the page that shows that one job's "
-        "description and where a person applies to it. Never give a pre-screening or sign-up page, a job-alert page, "
-        "a resume-upload or login page, a page of many jobs or search results, an aggregator or middleman page "
-        "(for example job boards, staffing or recruiter listing pages, or pages that only send people on to the real posting), "
-        "or a redirect or tracking link. If a board only links to the employer's posting, follow it and give the employer's "
-        "posting link instead; if you cannot find the real posting link, leave that job out. "
-        "Prefer the employer's own careers page or its applicant-tracking page (Workday, Greenhouse, Lever, Ashby, iCIMS) "
-        "over job-board listing pages. Skip duplicate postings. "
-        "Never invent a posting, company or link: every item must come from a page you found. "
-        "If you find fewer than requested, return fewer; if you find none, return an empty list. "
-        "Reply with ONLY a JSON array, no other text. Each item has exactly these keys: "
-        '"title", "company", "location" (or null), "work_type" ("remote", "hybrid", "onsite" or "unknown"), '
-        '"salary" (text from the posting, or null), "posted" (the date the posting says it was published, as YYYY-MM-DD, or null if it does not say; never guess), '
-        '"url" (direct link to that posting), '
-        '"summary" (one or two plain sentences taken from the posting, no hype).'
+        "You find current job postings with web search and report them as JSON. "
+        "Each url must be the page of one single job (its description and apply button), never a list of jobs, a search page, "
+        "a job-alert, sign-up, resume-upload or login page, a job board or recruiter page, or a redirect link. "
+        "The title must be a close match for the role asked (same kind of work and level), not just share a word with it. "
+        "Use only pages you found; never invent a job, company or link. "
+        "Do not open pages to check if they are still open; that is checked afterwards. Skip duplicates. "
+        "Return fewer items rather than weak ones; if none match, return []. "
+        f"{SCOPES[scope]['hint']} "
+        "Reply with ONLY a JSON array. Item keys: title, company, location (or null), work_type (remote, hybrid, onsite or unknown), "
+        "salary (text from the posting or null), posted (YYYY-MM-DD only if the result shows it, else null; never guess), "
+        "url, summary (one plain sentence from the posting)."
     )
-    user = f"Find up to {criteria.count} current job postings that match:\n" + "\n".join(f"- {w}" for w in wanted)
+    user = f"Find up to {per_call_count(criteria)} postings:\n" + "\n".join(f"- {w}" for w in wanted)
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
@@ -467,23 +466,10 @@ def _clean(value: Any, limit: int) -> str | None:
     return text[:limit] if text else None
 
 
-async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]:
-    """Runs one web search; returns cleaned candidate postings (not yet saved) and how many closed ones were dropped."""
-    model = settings.PRIMARY_FAST_MODEL
-    if not model:
-        raise LLMNotConfiguredError("No LLM provider configured (PRIMARY_FAST_MODEL unset).")
-    result = await LLMClient().chat_completion(
-        model=model,
-        messages=build_messages(criteria),
-        temperature=0.0,
-        max_tokens=4000,
-        extra={"plugins": [{"id": "web", "max_results": max(5, min(criteria.count, 15))}]},
-        timeout=150.0,
-    )
-    grounded_keys = cited_urls(result.raw)
+def _clean_items(raw_items: list[dict[str, Any]], criteria: JobSearchIn, grounded_keys: set[str]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     excluded = excluded_companies(criteria)
-    for raw_item in parse_items(result.content):
+    for raw_item in raw_items:
         title = _clean(raw_item.get("title"), 300)
         company = _clean(raw_item.get("company"), 300)
         link = _clean(raw_item.get("url"), 1000)
@@ -517,7 +503,50 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
                 "grounded": url_key(link) in grounded_keys,
             }
         )
+    return items
+
+
+async def _search_one(criteria: JobSearchIn, scope: str, model: str) -> list[dict[str, Any]]:
+    n = per_call_count(criteria)
+    plugin: dict[str, Any] = {"id": "web", "engine": "exa", "max_results": max(5, min(n + 2, 10))}
+    plugin.update({k: SCOPES[scope][k] for k in ("include", "exclude") if k in SCOPES[scope]})
+    if "include" in plugin:
+        plugin["include_domains"] = plugin.pop("include")
+    if "exclude" in plugin:
+        plugin["exclude_domains"] = plugin.pop("exclude")
+    result = await LLMClient().chat_completion(
+        model=model,
+        messages=build_messages(criteria, scope),
+        temperature=0.0,
+        max_tokens=2500,
+        extra={"plugins": [plugin]},
+        timeout=150.0,
+    )
+    return _clean_items(parse_items(result.content), criteria, cited_urls(result.raw))
+
+
+async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]:
+    """
+    One search per kind of source (Workday, Greenhouse/Ashby/Lever, company sites), merged. Postings are then checked by code,
+    not by the AI: the employer's system says whether each is open and when it was published.
+    Returns the candidate postings (not yet saved) and how many were dropped as closed, too old or without an original.
+    """
+    model = settings.PRIMARY_FAST_MODEL
+    if not model:
+        raise LLMNotConfiguredError("No LLM provider configured (PRIMARY_FAST_MODEL unset).")
+    outcomes = await asyncio.gather(*(_search_one(criteria, scope, model) for scope in SCOPES), return_exceptions=True)
+    batches = [o for o in outcomes if isinstance(o, list)]
+    if not batches:
+        raise next(o for o in outcomes if isinstance(o, BaseException))  # every source failed: show the first reason
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for batch in batches:
+        for item in batch:
+            if item["url_key"] not in seen:
+                seen.add(item["url_key"])
+                items.append(item)
     items, not_found = await resolve_original_sources(items)
+    items, gone = await enrich_from_ats(items)
     items, too_old = await fill_posted_dates(items, criteria.posted_within_days)
     kept, closed = await drop_closed(items)
-    return kept, closed + not_found + too_old
+    return kept, closed + gone + not_found + too_old

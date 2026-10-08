@@ -326,6 +326,33 @@ def extract_posted_date(html: str) -> dt.date | None:
     return today - dt.timedelta(days=int(ago.group(2)) * unit)
 
 
+def workday_api_url(url: str) -> str | None:
+    """
+    Workday pages are built with scripts, so the page itself holds no date. Workday serves the same posting as
+    data at /wday/cxs/<company>/<site>/job/<path>, which includes the start date.
+    """
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if not host.endswith(".myworkdayjobs.com"):
+        return None
+    segs = [p for p in parts.path.split("/") if p]
+    if segs and re.fullmatch(r"[a-z]{2}-[A-Za-z]{2}", segs[0]):
+        segs = segs[1:]  # drop the language, e.g. en-US
+    if "job" not in segs:
+        return None
+    at = segs.index("job")
+    if at < 1 or at + 1 >= len(segs):
+        return None
+    return f"https://{host}/wday/cxs/{host.split('.')[0]}/{segs[at - 1]}/job/{'/'.join(segs[at + 1:])}"
+
+
+def workday_posted_date(data: Any) -> dt.date | None:
+    info = data.get("jobPostingInfo") if isinstance(data, dict) else None
+    if not isinstance(info, dict):
+        return None
+    return parse_posted_date(info.get("startDate")) or extract_posted_date(f"Posted {info.get('postedOn', '')}")
+
+
 async def fill_posted_dates(items: list[dict[str, Any]], within_days: int) -> tuple[list[dict[str, Any]], int]:
     """
     Results the AI gave no date for get one from the posting page itself. When a date window was asked for,
@@ -339,9 +366,15 @@ async def fill_posted_dates(items: list[dict[str, Any]], within_days: int) -> tu
         async with gate:
             try:
                 async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, max_redirects=5) as client:
-                    resp = await client.get(item["url"], headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
-                if resp.status_code == 200:
-                    item["posted_at"] = extract_posted_date(resp.text[:600000])
+                    api = workday_api_url(item["url"])
+                    if api:
+                        resp = await client.get(api, headers={"User-Agent": _UA, "Accept": "application/json"})
+                        if resp.status_code == 200:
+                            item["posted_at"] = workday_posted_date(resp.json())
+                    if not item.get("posted_at"):
+                        resp = await client.get(item["url"], headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
+                        if resp.status_code == 200:
+                            item["posted_at"] = extract_posted_date(resp.text[:600000])
             except Exception:
                 return
 

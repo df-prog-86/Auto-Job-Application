@@ -430,3 +430,17 @@ def test_date_window_drops_old_postings_but_keeps_undated_ones(monkeypatch):
     items = [mk("new", today - dt.timedelta(days=3)), mk("old", today - dt.timedelta(days=40)), mk("undated", None)]
     kept, dropped = asyncio.run(ws.fill_posted_dates(items, 14))
     assert [i["title"] for i in kept] == ["new", "undated"] and dropped == 1
+
+
+def test_workday_postings_are_read_from_workdays_own_data():
+    import datetime as dt
+    from app.services.discovery.web_search import workday_api_url, workday_posted_date
+
+    url = "https://huron.wd1.myworkdayjobs.com/en-US/huroncareers/job/Healthcare-Consulting-Manager---Revenue-Cycle_JR-0016103"
+    assert workday_api_url(url) == "https://huron.wd1.myworkdayjobs.com/wday/cxs/huron/huroncareers/job/Healthcare-Consulting-Manager---Revenue-Cycle_JR-0016103"
+    assert workday_api_url("https://acme.wd5.myworkdayjobs.com/careers/job/Remote/Analyst_R1") == \
+        "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/careers/job/Remote/Analyst_R1"
+    assert workday_api_url("https://jobs.example.com/job/1") is None
+    assert workday_posted_date({"jobPostingInfo": {"startDate": "2026-08-20"}}) == dt.date(2026, 8, 20)
+    assert workday_posted_date({"jobPostingInfo": {"postedOn": "Posted 30+ Days Ago"}}) == dt.date.today() - dt.timedelta(days=30)
+    assert workday_posted_date({}) is None

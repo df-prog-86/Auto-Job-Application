@@ -345,7 +345,7 @@ export function JobSearch() {
                 maxLength={100}
               />
             </div>
-            <Button type="submit" variant="primary" className="px-6 py-3" disabled={!canSearch}>
+            <Button type="submit" variant="primary" className={`px-6 py-3 ${search.isPending ? "ai-working" : ""}`} disabled={!canSearch}>
               {search.isPending ? "Searching..." : "Search the web"}
             </Button>
           </div>
@@ -751,7 +751,7 @@ function ResultCard({
                   </Ring>
                 </div>
               ) : (
-                <Button size="sm" variant="primary" onClick={onScore} disabled={busy}>
+                <Button size="sm" variant="primary" className={scoring ? "ai-working" : ""} onClick={onScore} disabled={busy}>
                   {scoring ? "Scoring..." : "Score"}
                 </Button>
               )}

@@ -49,6 +49,32 @@ function withDraft(values: string[], draft: string): string[] {
   return out;
 }
 
+type SortBy = "newest" | "fit";
+
+/** Time of the posting date, or null when it is missing or unreadable. */
+function postedTime(r: JobSearchResultOut): number | null {
+  if (!r.posted_at) return null;
+  const t = Date.parse(r.posted_at);
+  return Number.isNaN(t) ? null : t;
+}
+
+/** Newest posting first, or best match first. Jobs missing the value always go last. */
+function sortResults(list: JobSearchResultOut[], by: SortBy): JobSearchResultOut[] {
+  const missingLast = (a: number | null, b: number | null) => {
+    if (a === null && b === null) return 0;
+    if (a === null) return 1;
+    if (b === null) return -1;
+    return b - a;
+  };
+  return [...list].sort((a, b) => {
+    if (by === "fit") {
+      const c = missingLast(a.match_score ?? null, b.match_score ?? null);
+      if (c !== 0) return c;
+    }
+    return missingLast(postedTime(a), postedTime(b));
+  });
+}
+
 type Notice = { kind: "found" | "info" | "added"; text: string };
 
 export function JobSearch() {
@@ -70,13 +96,14 @@ export function JobSearch() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [autofillOnly, setAutofillOnly] = useState(false);
+  const [sortBy, setSortBy] = useState<SortBy>("newest");
   const [savedList, setSavedList] = useState<SavedSearch[]>(loadSavedSearches);
   const [scoringAll, setScoringAll] = useState<{ done: number; total: number } | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
 
   const results = useQuery({ queryKey: ["job-search-results"], queryFn: api.listSearchResults });
   const items = (results.data ?? []).filter((r) => r.status === "new");
-  const shown = autofillOnly ? items.filter((r) => autofillSite(r.url)) : items;
+  const shown = sortResults(autofillOnly ? items.filter((r) => autofillSite(r.url)) : items, sortBy);
   const anyAutofill = items.some((r) => autofillSite(r.url));
   const unscored = items.filter((r) => r.match_score == null);
 
@@ -550,7 +577,18 @@ export function JobSearch() {
             <h2 className="text-lg font-extrabold text-ink-900">
               {items.length} {items.length === 1 ? "match" : "matches"} to review
             </h2>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-xs font-bold text-[#5a5570]">
+                Sort
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value === "fit" ? "fit" : "newest")}
+                  className="rounded-full border border-[#8f88bb] bg-white px-3.5 py-2 text-[13px] font-bold text-brand-700 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
+                >
+                  <option value="newest">Newest posted</option>
+                  <option value="fit">Best fit first</option>
+                </select>
+              </label>
               {anyAutofill && (
                 <div className="flex items-center gap-2">
                   <button

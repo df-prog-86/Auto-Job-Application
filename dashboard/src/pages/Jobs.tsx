@@ -50,8 +50,16 @@ export function Jobs() {
   const wanted = params.get("stage");
   const [stage, setStage] = useState<Stage>(() => (STAGES.some((s) => s.value === wanted) ? (wanted as Stage) : "all"));
   const [sortBy, setSortBy] = useState<SortBy>("newest");
+  const [query, setQuery] = useState("");
   const all = jobsQuery.data ?? [];
-  const visible = all
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const searched = terms.length
+    ? all.filter((j) => {
+        const hay = `${j.title} ${j.company}`.toLowerCase();
+        return terms.every((t) => hay.includes(t));
+      })
+    : all;
+  const visible = searched
     .filter((j) => inStage(j, stage))
     .sort((a, b) =>
       sortBy === "fit" ? (b.evaluation?.overall_score ?? -1) - (a.evaluation?.overall_score ?? -1) : 0,
@@ -85,6 +93,22 @@ export function Jobs() {
       )}
 
       {all.length > 1 && (
+        <div className="relative mb-4">
+          <label htmlFor="job-search-box" className="sr-only">
+            Search jobs by role or company
+          </label>
+          <input
+            id="job-search-box"
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by role or company"
+            className={`${inputClass} rounded-full bg-white px-5 py-3 shadow-soft`}
+          />
+        </div>
+      )}
+
+      {all.length > 1 && (
         <div className="mb-4 flex flex-wrap items-center gap-2">
           {STAGES.map((st) => (
             <button
@@ -97,7 +121,7 @@ export function Jobs() {
               }`}
             >
               {st.label}
-              <span className="ml-1.5 opacity-70">{all.filter((j) => inStage(j, st.value)).length}</span>
+              <span className="ml-1.5 opacity-70">{searched.filter((j) => inStage(j, st.value)).length}</span>
             </button>
           ))}
           <label className="ml-auto flex items-center gap-2 text-xs font-semibold text-ink-500">
@@ -115,7 +139,9 @@ export function Jobs() {
       )}
 
       {all.length > 0 && visible.length === 0 && (
-        <p className="text-sm text-ink-400">No jobs in this view. Pick another filter above.</p>
+        <p className="text-sm text-ink-400">
+          {terms.length ? `No jobs match "${query.trim()}" in this view.` : "No jobs in this view. Pick another filter above."}
+        </p>
       )}
 
       {visible.length > 0 && (

@@ -342,7 +342,7 @@ function JobCard({ job }: { job: JobOut }) {
                   </Button>
                 )}
                 <span className="text-xs text-ink-500">
-                  Opens the application in a new tab and fills it in. You review it and press Submit yourself.
+                  Opens in a new tab and fills it in. You review it and press Submit.
                 </span>
               </div>
               {applyState.kind === "opened" && (

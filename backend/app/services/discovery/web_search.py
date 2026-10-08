@@ -466,6 +466,36 @@ def _clean(value: Any, limit: int) -> str | None:
     return text[:limit] if text else None
 
 
+def _same_job_key(item: dict[str, Any]) -> str:
+    squash = lambda text: re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+    return f"{squash(item['company'])}|{squash(item['title'])}"
+
+
+def _source_rank(item: dict[str, Any]) -> int:
+    """Lower is better. The applicant-tracking page is the one that can be read, scored and autofilled."""
+    host = (urlsplit(item["url"]).hostname or "").lower()
+    if host.endswith(("myworkdayjobs.com", "greenhouse.io", "ashbyhq.com", "lever.co")):
+        return 0
+    return 1 if item.get("grounded") else 2
+
+
+def merge_same_jobs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The same role found through two sources (an ATS page and the company site) is one result; the ATS link wins."""
+    best: dict[str, dict[str, Any]] = {}
+    for item in items:
+        key = _same_job_key(item)
+        if key not in best or _source_rank(item) < _source_rank(best[key]):
+            best[key] = item
+    return [i for i in items if best[_same_job_key(i)] is i]
+
+
+def trim_to_count(items: list[dict[str, Any]], count: int) -> list[dict[str, Any]]:
+    """Keeps the best-checked results first (the employer's own system confirmed them), then the rest, up to the count asked for."""
+    ranked = sorted(items, key=lambda i: (0 if i.get("ats_checked") else 1, _source_rank(i)))
+    keep = {id(i) for i in ranked[:count]}
+    return [i for i in items if id(i) in keep]
+
+
 def _clean_items(raw_items: list[dict[str, Any]], criteria: JobSearchIn, grounded_keys: set[str]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     excluded = excluded_companies(criteria)
@@ -545,8 +575,9 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
             if item["url_key"] not in seen:
                 seen.add(item["url_key"])
                 items.append(item)
+    items = merge_same_jobs(items)
     items, not_found = await resolve_original_sources(items)
     items, gone = await enrich_from_ats(items)
     items, too_old = await fill_posted_dates(items, criteria.posted_within_days)
     kept, closed = await drop_closed(items)
-    return kept, closed + gone + not_found + too_old
+    return trim_to_count(kept, criteria.count), closed + gone + not_found + too_old

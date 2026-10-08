@@ -525,3 +525,21 @@ def test_closed_postings_reported_by_their_own_system_are_removed(monkeypatch):
     items = [{"title": "a", "url": "https://x.example.com/closed"}, {"title": "b", "url": "https://x.example.com/open"}]
     kept, gone = asyncio.run(ws.enrich_from_ats(items))
     assert [i["title"] for i in kept] == ["b"] and gone == 1 and kept[0]["ats_checked"] is True
+
+
+def test_same_job_from_two_sources_is_one_result_and_the_ats_link_wins():
+    from app.services.discovery.web_search import merge_same_jobs
+
+    site = {"title": "Revenue Cycle Consultant", "company": "Huron", "url": "https://huron.com/careers/1", "grounded": True}
+    ats = {"title": "Revenue Cycle  Consultant", "company": "HURON", "url": "https://huron.wd1.myworkdayjobs.com/en-US/c/job/R1", "grounded": False}
+    other = {"title": "Billing Analyst", "company": "Huron", "url": "https://huron.com/careers/2", "grounded": False}
+    assert merge_same_jobs([site, ats, other]) == [ats, other]
+
+
+def test_results_are_trimmed_to_the_count_with_verified_ones_first():
+    from app.services.discovery.web_search import trim_to_count
+
+    mk = lambda n, checked: {"title": n, "url": f"https://x.example.com/{n}", "ats_checked": checked}
+    items = [mk("a", False), mk("b", True), mk("c", False), mk("d", True)]
+    assert [i["title"] for i in trim_to_count(items, 2)] == ["b", "d"]
+    assert [i["title"] for i in trim_to_count(items, 10)] == ["a", "b", "c", "d"]  # order kept, nothing lost

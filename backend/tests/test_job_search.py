@@ -249,7 +249,7 @@ def test_match_score_is_asked_for_after_the_requirements_are_read_and_travels_wi
 
     async def extract(db, **kwargs):
         return RawJobPosting(external_job_id=None, title="Revenue Cycle Analyst", company="Acme Health", location=None,
-                             description_html="<p>Denial work and payer trends. 3+ years.</p>", application_url=kwargs["url"])
+                             description_html="<p>Denial work and payer trends. 3+ years. " + ("Own claim edits and appeal letters for the billing team. " * 8) + "</p>", application_url=kwargs["url"])
 
     monkeypatch.setattr(manual_extraction, "fetch_page", page)
     monkeypatch.setattr(manual_extraction, "extract_job_posting", extract)
@@ -267,7 +267,7 @@ def test_match_score_is_asked_for_after_the_requirements_are_read_and_travels_wi
     assert job["evaluation"]["overall_score"] == 0.81  # no second scoring needed on the Jobs page
 
 
-def test_match_score_needs_a_profile_and_says_when_only_the_summary_was_used(search, monkeypatch):
+def test_match_score_needs_a_profile_and_is_refused_when_only_the_summary_is_available(search, monkeypatch):
     from app.services.discovery import manual_extraction
 
     client, _ = search
@@ -282,11 +282,29 @@ def test_match_score_needs_a_profile_and_says_when_only_the_summary_was_used(sea
 
     class _Router(_FakeMatchRouter):
         async def get_structured(self, **kwargs):
-            from app.services.llm.schemas import ResumeJobMatchResult
-
-            return ResumeJobMatchResult(match_percentage=40, summary="Partial.", gaps=[])
+            raise AssertionError("must not score from a one-line summary")
 
     monkeypatch.setattr(manual_extraction, "fetch_page", blocked)
     monkeypatch.setattr("app.services.qualification.pipeline.ModelRouter", _Router)
-    scored = client.post(f"/api/v1/job-search/results/{first['id']}/score").json()
-    assert scored["match_score"] == 0.4 and scored["match_from_page"] is False
+    refused = client.post(f"/api/v1/job-search/results/{first['id']}/score")
+    assert refused.status_code == 422 and "couldn't be read" in refused.json()["detail"]
+    assert client.get("/api/v1/job-search/results").json()["results"][0]["match_score"] is None
+
+
+def test_match_score_says_when_the_posting_is_closed(search, monkeypatch):
+    import httpx
+
+    from app.services.discovery import manual_extraction
+
+    client, _ = search
+    _profile(client)
+    first = client.post("/api/v1/job-search/run", json={"titles": "analyst"}).json()["results"][0]
+
+    async def gone(url):
+        request = httpx.Request("GET", url)
+        error = httpx.HTTPStatusError("gone", request=request, response=httpx.Response(404, request=request))
+        raise manual_extraction.ManualExtractionError("gone") from error
+
+    monkeypatch.setattr(manual_extraction, "fetch_page", gone)
+    refused = client.post(f"/api/v1/job-search/results/{first['id']}/score")
+    assert refused.status_code == 410 and "closed" in refused.json()["detail"]

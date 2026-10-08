@@ -206,11 +206,23 @@ export function JobSearch() {
     if (todo.length === 0 || scoringAll) return;
     setBulkError(null);
     setScoringAll({ done: 0, total: todo.length });
+    let skipped = 0;
     try {
       for (let i = 0; i < todo.length; i++) {
-        await api.scoreSearchResult(todo[i]);
+        try {
+          await api.scoreSearchResult(todo[i]);
+        } catch (e) {
+          // Setup problems (no resume, AI not connected) would repeat for every job, so stop there.
+          if (e instanceof ApiError && (e.status === 409 || e.status === 503)) throw e;
+          skipped += 1;
+        }
         setScoringAll({ done: i + 1, total: todo.length });
         await qc.invalidateQueries({ queryKey: ["job-search-results"] });
+      }
+      if (skipped > 0) {
+        setBulkError(
+          `${skipped} ${skipped === 1 ? "posting" : "postings"} couldn't be scored because the page is closed or couldn't be read. Open them to check.`,
+        );
       }
     } catch (e) {
       setBulkError(errorText(e));
@@ -552,9 +564,9 @@ export function JobSearch() {
           </span>
         </p>
       )}
-      {(add.isError || remove.isError || score.isError || bulkError) && (
+      {(add.isError || remove.isError || bulkError) && (
         <p className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700" role="alert">
-          {bulkError ?? errorText(add.error ?? remove.error ?? score.error)}
+          {bulkError ?? errorText(add.error ?? remove.error)}
         </p>
       )}
 
@@ -654,6 +666,7 @@ export function JobSearch() {
                   r={r}
                   busy={busyId === r.id || scoringAll !== null}
                   scoring={score.isPending && score.variables === r.id}
+                  problem={score.isError && score.variables === r.id ? errorText(score.error) : undefined}
                   onScore={() => score.mutate(r.id)}
                   onAdd={() => add.mutate(r.id)}
                   onRemove={() => remove.mutate(r.id)}
@@ -671,6 +684,7 @@ function ResultCard({
   r,
   busy,
   scoring,
+  problem,
   onScore,
   onAdd,
   onRemove,
@@ -678,6 +692,8 @@ function ResultCard({
   r: JobSearchResultOut;
   busy: boolean;
   scoring: boolean;
+  /** Why the last attempt to score this one failed, such as a closed posting. */
+  problem?: string;
   onScore: () => void;
   onAdd: () => void;
   onRemove: () => void;
@@ -685,7 +701,8 @@ function ResultCard({
   const [open, setOpen] = useState(false);
   const posted = formatPosted(r.posted_at);
   const site = autofillSite(r.url);
-  const score = r.match_score ?? null;
+  // A score that came only from the one-line summary is not shown; it would look surer than it is.
+  const score = r.match_from_page === false ? null : (r.match_score ?? null);
   const edge = score === null ? "#e3dff3" : scoreColor(score);
   return (
     <li>
@@ -749,6 +766,11 @@ function ResultCard({
               {r.summary}
             </p>
           )}
+          {problem && !scoring && (
+            <p className="mt-3 rounded-xl bg-[#fff4dc] px-3.5 py-2.5 text-[13px] text-[#8a5a00]" role="alert">
+              {problem}
+            </p>
+          )}
           {scoring && (
             <p className="mt-3 animate-pulse text-xs text-ink-500">
               Reading the posting and comparing it with your resume. This can take up to a minute.
@@ -757,16 +779,7 @@ function ResultCard({
 
           {open && score !== null && (
             <div className="mt-4">
-              <MatchPanel
-                score={score}
-                summary={r.match_summary}
-                gaps={r.match_gaps ?? []}
-                note={
-                  r.match_from_page === false
-                    ? "The posting page couldn't be read, so this score used only the short summary above. Treat it as a rough guide."
-                    : undefined
-                }
-              />
+              <MatchPanel score={score} summary={r.match_summary} gaps={r.match_gaps ?? []} />
             </div>
           )}
 

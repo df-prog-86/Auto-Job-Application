@@ -108,29 +108,76 @@ async def _read_posting(db: Session, row: JobSearchResult) -> RawJobPosting | No
         return None
 
 
+# A real posting runs to paragraphs. Anything much shorter is a stub or an error page, not enough to judge a fit.
+_MIN_SCORE_CHARS = 300
+
+
+async def _read_posting_for_score(db: Session, row: JobSearchResult) -> tuple[str, str | None]:
+    """
+    Reads the posting page for scoring. Returns (requirements text, problem). Problem is None when the
+    text is a real posting, "closed" when the page is gone or says the job is closed, "unreadable" when
+    the site blocked the read or gave back too little to judge.
+    """
+    try:
+        page = await manual_extraction.fetch_page(row.url)
+    except manual_extraction.ManualExtractionError as exc:
+        cause = exc.__cause__
+        if isinstance(cause, httpx.HTTPStatusError) and cause.response.status_code in (404, 410):
+            return "", "closed"
+        return "", "unreadable"
+    except httpx.HTTPError:
+        return "", "unreadable"
+    if web_search.looks_closed(row.url, row.url, 200, page.body_text):
+        return "", "closed"
+    try:
+        posting = await manual_extraction.extract_job_posting(
+            db,
+            url=row.url,
+            json_ld_blocks=page.json_ld_blocks,
+            body_text=page.body_text,
+            page_title=page.title,
+        )
+    except (manual_extraction.ManualExtractionError, LLMError, httpx.HTTPError):
+        return "", "unreadable"
+    text = html_to_text(posting.description_html)[:12000] if posting.description_html else ""
+    if web_search.looks_closed(row.url, row.url, 200, text):
+        return "", "closed"
+    if len(text.strip()) < _MIN_SCORE_CHARS:
+        return "", "unreadable"
+    return text, None
+
+
 @router.post("/results/{result_id}/score", response_model=JobSearchResultOut)
 async def score_result(result_id: int, db: Session = Depends(get_db)) -> JobSearchResultOut:
     """
     Match score for one result, only when the person asks. The posting page is read first so the score
-    is based on the real requirements; if the site blocks that, the short search summary is used and
-    the result says so. Costs one or two AI calls and adds nothing to the jobs list.
+    is based on the real requirements. If the page is closed, blocked or too thin to judge, nothing is
+    scored: a fit judged from a one-line summary would look more certain than it is. Costs one or two AI calls
+    and adds nothing to the jobs list.
     """
     row = _get_new(db, result_id)
     if get_current_profile(db) is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Upload your resume on the Profile page first.")
-    if not row.description:
-        posting = await _read_posting(db, row)
-        if posting is not None and posting.description_html:
-            row.description = html_to_text(posting.description_html)[:12000]
-            row.match_from_page = True
-        else:
-            row.description = row.summary
-            row.match_from_page = False
-    if not row.description:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="No requirements could be read for this posting, so it can't be scored. Open the posting to check it yourself.",
-        )
+    if not row.description or row.match_from_page is not True:
+        text, problem = await _read_posting_for_score(db, row)
+        if problem is not None:
+            if row.match_from_page is False:
+                # An older score that came from the short summary only: take it back rather than leave it standing.
+                row.match_score = None
+                row.match_summary = None
+                row.match_gaps = None
+                db.commit()
+            if problem == "closed":
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail="This posting looks closed or removed, so it can't be scored. Open the posting to check, then remove it if it's gone.",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="The posting page couldn't be read, so there isn't enough detail to score it fairly. Open the posting to check it yourself.",
+            )
+        row.description = text
+        row.match_from_page = True
     try:
         result = await score_against(db, title=row.title, company=row.company, description=row.description)
     except QualificationError as exc:
@@ -180,7 +227,7 @@ async def add_result(result_id: int, db: Session = Depends(get_db)) -> AddResult
     if job.posted_at is None and row.posted_at:
         job.posted_at = row.posted_at
     # A score asked for on this page goes with the job, so it is not asked for twice.
-    if row.match_score is not None and not job.evaluations:
+    if row.match_score is not None and row.match_from_page is not False and not job.evaluations:
         db.add(
             JobEvaluation(
                 job_id=job.id,

@@ -75,12 +75,12 @@ export function Jobs() {
         description="Save jobs you find, see how well they fit, and tailor your resume for the ones you want."
       />
 
-      <Card className="mb-6 overflow-hidden">
+      <Card className="mb-6 overflow-hidden border border-[#e9e6f4] !shadow-[0_-6px_18px_rgba(60,50,120,0.08),0_1px_2px_rgba(31,27,46,0.08),0_12px_32px_rgba(60,50,120,0.12)]">
         <AddJobByUrl />
 
         {all.length > 1 && (
           <>
-            <nav aria-label="Job stages" className="flex gap-5 overflow-x-auto border-t border-ink-900/5 px-5">
+            <nav aria-label="Job stages" className="flex gap-5 overflow-x-auto border-t border-[#ebe8f6] px-5">
               {STAGES.map((st) => {
                 const on = stage === st.value;
                 return (
@@ -90,13 +90,13 @@ export function Jobs() {
                     onClick={() => setStage(st.value)}
                     aria-pressed={on}
                     className={`-mb-px whitespace-nowrap border-b-[3px] pb-3 pt-3.5 text-[13px] font-bold transition ${
-                      on ? "border-brand-500 text-brand-600" : "border-transparent text-ink-400 hover:text-brand-700"
+                      on ? "border-brand-500 text-brand-600" : "border-transparent text-[#6a6585] hover:text-brand-700"
                     }`}
                   >
                     {st.label}
                     <span
                       className={`ml-2 rounded-full px-2 py-0.5 text-[11px] ${
-                        on ? "bg-brand-100 text-brand-600" : "bg-ink-900/5 text-ink-500"
+                        on ? "bg-brand-100 text-brand-600" : "bg-[#e9e5f7] text-[#5a5570]"
                       }`}
                     >
                       {searched.filter((j) => inStage(j, st.value)).length}
@@ -106,7 +106,7 @@ export function Jobs() {
               })}
             </nav>
 
-            <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5 border-t border-ink-900/5 bg-[#faf9fe] px-4 py-3 sm:pl-5">
+            <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5 border-t border-[#ebe8f6] bg-[#f9f8fd] px-4 py-3 sm:pl-5">
               <div className="relative min-w-[200px] flex-1">
                 <label htmlFor="job-search-box" className="sr-only">
                   Search jobs by role or company
@@ -117,7 +117,7 @@ export function Jobs() {
                   stroke="currentColor"
                   strokeWidth="2.2"
                   strokeLinecap="round"
-                  className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400"
+                  className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5a5570]"
                   aria-hidden="true"
                 >
                   <circle cx="11" cy="11" r="6.5" />
@@ -129,15 +129,15 @@ export function Jobs() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search role or company"
-                  className="w-full rounded-full border border-[#ddd8f3] bg-white py-2.5 pl-10 pr-4 text-[13px] text-ink-900 placeholder:text-ink-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
+                  className="w-full rounded-full border border-[#8f88bb] bg-white py-2.5 pl-10 pr-4 text-[13px] text-ink-900 placeholder:text-[#6a6585] focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
                 />
               </div>
-              <label className="ml-auto flex items-center gap-2 text-xs font-bold text-ink-400">
+              <label className="ml-auto flex items-center gap-2 text-xs font-bold text-[#5a5570]">
                 Sort
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value === "fit" ? "fit" : "newest")}
-                  className="rounded-full border border-[#ddd8f3] bg-white px-3.5 py-2.5 text-[13px] font-bold text-brand-700"
+                  className="rounded-full border border-[#8f88bb] bg-white px-3.5 py-2.5 text-[13px] font-bold text-brand-700"
                 >
                   <option value="newest">Newest first</option>
                   <option value="fit">Best fit first</option>
@@ -817,7 +817,7 @@ function AddJobByUrl() {
   });
 
   return (
-    <div className="bg-gradient-to-b from-[#f8f6ff] to-white px-5 py-4">
+    <div className="bg-gradient-to-b from-[#f8f6ff] to-[#fefeff] px-5 py-4">
       <form
         className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3"
         onSubmit={(e) => {
@@ -844,7 +844,7 @@ function AddJobByUrl() {
           placeholder="Paste a job link to add it"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          className="min-h-[44px] flex-1 border-0 bg-transparent text-[15px] text-ink-900 placeholder:text-ink-400 focus:outline-none"
+          className="min-h-[44px] flex-1 border-0 bg-transparent text-[15px] text-ink-900 placeholder:text-[#6a6585] focus:outline-none"
         />
         <Button type="submit" variant="primary" className="px-6 py-3" disabled={addMutation.isPending || !url.trim()}>
           {addMutation.isPending ? "Adding…" : "Add job"}

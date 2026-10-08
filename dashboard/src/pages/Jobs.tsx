@@ -6,7 +6,7 @@ import { api, ApiError, documentDownloadUrl } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
 import { MenuItem, MoreMenu } from "@/components/MoreMenu";
 import { Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
-import { scoreColor, scoreLabel } from "@/components/match";
+import { FitPill, MatchPanel, scoreColor } from "@/components/match";
 import { completeApplication } from "@/lib/extensionBridge";
 import { formatLocation, formatPosted, formatSalary } from "@/lib/jobText";
 import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api";
@@ -75,7 +75,7 @@ export function Jobs() {
         description="Save jobs you find, see how well they fit, and tailor your resume for the ones you want."
       />
 
-      <Card className="mb-6 overflow-hidden border border-[#e9e6f4] !shadow-[0_-6px_18px_rgba(60,50,120,0.08),0_1px_2px_rgba(31,27,46,0.08),0_12px_32px_rgba(60,50,120,0.12)]">
+      <Card className="mb-5 overflow-hidden border border-[#e9e6f4] !shadow-[0_-6px_18px_rgba(60,50,120,0.08),0_1px_2px_rgba(31,27,46,0.08),0_12px_32px_rgba(60,50,120,0.12)]">
         <AddJobByUrl />
 
         {all.length > 1 && (
@@ -173,7 +173,7 @@ export function Jobs() {
       )}
 
       {visible.length > 0 && (
-        <ul className="space-y-4">
+        <ul className="space-y-3.5">
           {visible.map((job) => (
             <JobCard key={job.id} job={job} />
           ))}
@@ -349,11 +349,9 @@ function JobCard({ job }: { job: JobOut }) {
           <div className="flex shrink-0 items-center gap-2">
             {evaluation ? (
               <div className="flex items-center gap-3">
-                <div className="hidden text-right sm:block">
-                  <div className="text-sm font-bold" style={{ color: scoreColor(evaluation.overall_score) }}>
-                    {scoreLabel(evaluation.overall_score)}
-                  </div>
-                  <div className="text-xs text-ink-400">match with your resume</div>
+                <div className="hidden flex-col items-end gap-1 sm:flex">
+                  <FitPill score={evaluation.overall_score} />
+                  <span className="text-[11px] text-ink-500">match with your resume</span>
                 </div>
                 <Ring value={evaluation.overall_score} size={58} stroke={6} color={scoreColor(evaluation.overall_score)}>
                   <span className="text-sm font-bold text-ink-900">{Math.round(evaluation.overall_score * 100)}</span>
@@ -469,22 +467,8 @@ function JobCard({ job }: { job: JobOut }) {
           <div className="mt-4 border-t border-ink-900/5 pt-4">
             <div className={`grid gap-6 ${evaluation && showResumePanel ? "md:grid-cols-[1.3fr_1fr]" : ""}`}>
               {evaluation && (
-                <div className="min-w-0">
-                  <h3 className="text-xs font-extrabold text-ink-900">Why it fits</h3>
-                  <p className="mt-1.5 text-sm leading-relaxed text-ink-700">{evaluation.summary}</p>
-                  {gaps.length > 0 && (
-                    <>
-                      <h3 className="mt-4 text-xs font-extrabold text-ink-900">Gaps</h3>
-                      <ul className="mt-1.5 space-y-1.5">
-                        {gaps.map((gap) => (
-                          <li key={gap} className="flex gap-2 text-xs leading-relaxed text-ink-500">
-                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
-                            {gap}
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
+                <div className="min-w-0 self-start">
+                  <MatchPanel score={evaluation.overall_score} summary={evaluation.summary} gaps={gaps} stacked />
                 </div>
               )}
 

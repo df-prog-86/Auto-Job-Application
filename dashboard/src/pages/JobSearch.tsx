@@ -6,7 +6,7 @@ import { api, ApiError } from "@/api/client";
 import { ChipInput } from "@/components/ChipInput";
 import { MenuItem, MoreMenu } from "@/components/MoreMenu";
 import { PageHeader } from "@/components/PageHeader";
-import { GapDetails, scoreColor, scoreLabel } from "@/components/match";
+import { FitPill, MatchPanel, scoreColor } from "@/components/match";
 import { Button, Card, Ring } from "@/components/ui";
 import { autofillSite } from "@/lib/autofill";
 import { formatPosted } from "@/lib/jobText";
@@ -255,7 +255,7 @@ export function JobSearch() {
   const canSave = withDraft(titles, titleDraft).length > 0 && !activeSaved;
 
   return (
-    <div>
+    <div className="space-y-5">
       <PageHeader
         title="Job Search"
         description="Tell us what you want and we search the web for matching openings. Nothing is added to Jobs until you click Add to jobs."
@@ -511,19 +511,19 @@ export function JobSearch() {
       </Card>
 
       {search.isPending && (
-        <p className="mt-4 animate-pulse text-sm text-ink-500" role="status">
+        <p className="animate-pulse text-sm text-ink-500" role="status">
           Searching the web. This can take up to a minute.
         </p>
       )}
       {search.isError && (
-        <p className="mt-4 rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700" role="alert">
+        <p className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700" role="alert">
           {errorText(search.error)}
         </p>
       )}
 
       {notice && (
         <p
-          className={`mt-4 flex items-center gap-2.5 rounded-2xl px-4 py-3 text-[13px] font-bold ${
+          className={`flex items-center gap-2.5 rounded-2xl px-4 py-3 text-[13px] font-bold ${
             notice.kind === "found" ? "bg-[#e8f6ee] text-[#17603f]" : "bg-brand-50 text-brand-700"
           }`}
           role="status"
@@ -553,15 +553,15 @@ export function JobSearch() {
         </p>
       )}
       {(add.isError || remove.isError || score.isError || bulkError) && (
-        <p className="mt-4 rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700" role="alert">
+        <p className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700" role="alert">
           {bulkError ?? errorText(add.error ?? remove.error ?? score.error)}
         </p>
       )}
 
       {results.isLoading ? (
-        <p className="mt-6 text-sm text-ink-500">Loading...</p>
+        <p className="text-sm text-ink-500">Loading...</p>
       ) : items.length === 0 ? (
-        <Card className="mt-6 p-10 text-center">
+        <Card className="p-10 text-center">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-500">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-7 w-7" aria-hidden="true">
               <circle cx="11" cy="11" r="6.5" />
@@ -572,8 +572,8 @@ export function JobSearch() {
           <p className="mt-1 text-sm text-ink-500">Add a job title above and click Search the web.</p>
         </Card>
       ) : (
-        <>
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+        <section className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-extrabold text-ink-900">
               {items.length} {items.length === 1 ? "match" : "matches"} to review
             </h2>
@@ -624,7 +624,7 @@ export function JobSearch() {
           </div>
 
           {confirmClear && (
-            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800">
+            <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800">
               Remove all {items.length} matches?
               <span className="flex gap-2">
                 <Button size="sm" variant="danger" onClick={() => clear.mutate()} disabled={clear.isPending}>
@@ -637,17 +637,17 @@ export function JobSearch() {
             </div>
           )}
           {scoringAll && (
-            <p className="mt-3 animate-pulse text-xs text-ink-500" role="status">
+            <p className="animate-pulse text-xs text-ink-500" role="status">
               Scoring {Math.min(scoringAll.done + 1, scoringAll.total)} of {scoringAll.total}. This can take a few minutes.
             </p>
           )}
 
           {shown.length === 0 ? (
-            <p className="mt-4 text-sm text-ink-500">
+            <p className="text-sm text-ink-500">
               None of these can be autofilled. Turn off "Autofill ready only" to see all {items.length}.
             </p>
           ) : (
-            <ul className="mt-4 space-y-3.5">
+            <ul className="space-y-3.5">
               {shown.map((r) => (
                 <ResultCard
                   key={r.id}
@@ -661,7 +661,7 @@ export function JobSearch() {
               ))}
             </ul>
           )}
-        </>
+        </section>
       )}
     </div>
   );
@@ -682,121 +682,139 @@ function ResultCard({
   onAdd: () => void;
   onRemove: () => void;
 }) {
+  const [open, setOpen] = useState(false);
   const posted = formatPosted(r.posted_at);
   const site = autofillSite(r.url);
-  const scored = r.match_score != null;
+  const score = r.match_score ?? null;
+  const edge = score === null ? "#e3dff3" : scoreColor(score);
   return (
     <li>
-      <Card className="p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h3 className="text-lg font-bold leading-snug text-ink-900">{r.title}</h3>
-            {r.company && <div className="mt-0.5 text-sm font-semibold text-ink-500">{r.company}</div>}
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-500">
-              {r.location && (
-                <span className="inline-flex items-center gap-1.5">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    className="h-3.5 w-3.5"
-                    aria-hidden="true"
-                  >
-                    <path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z" />
-                    <circle cx="12" cy="9.5" r="2.5" />
-                  </svg>
-                  {r.location}
-                </span>
+      <Card className="flex overflow-hidden">
+        <div className="w-[5px] shrink-0" style={{ backgroundColor: edge }} aria-hidden="true" />
+        <div className="min-w-0 flex-1 p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h3 className="text-lg font-bold leading-snug text-ink-900">{r.title}</h3>
+              {r.company && <div className="mt-0.5 text-sm font-semibold text-ink-500">{r.company}</div>}
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-500">
+                {r.location && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      className="h-3.5 w-3.5"
+                      aria-hidden="true"
+                    >
+                      <path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z" />
+                      <circle cx="12" cy="9.5" r="2.5" />
+                    </svg>
+                    {r.location}
+                  </span>
+                )}
+                {r.work_type && <span className="capitalize">{r.work_type}</span>}
+                {r.salary_text && <span>{r.salary_text}</span>}
+                {posted && <span>Posted {posted}</span>}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2.5">
+              {!r.grounded && (
+                <span className="rounded-full bg-[#fff4dc] px-3 py-1 text-xs font-bold text-[#8a5a00]">Link not verified</span>
               )}
-              {r.work_type && <span className="capitalize">{r.work_type}</span>}
-              {r.salary_text && <span>{r.salary_text}</span>}
-              {posted && <span>Posted {posted}</span>}
+              {score !== null ? (
+                <div className="flex items-center gap-3">
+                  <div className="hidden flex-col items-end gap-1 sm:flex">
+                    <FitPill score={score} />
+                    <span className="text-[11px] text-ink-500">match with your resume</span>
+                  </div>
+                  <Ring value={score} size={58} stroke={6} color={scoreColor(score)}>
+                    <span className="text-sm font-bold text-ink-900">{Math.round(score * 100)}</span>
+                  </Ring>
+                </div>
+              ) : (
+                <Button size="sm" variant="primary" onClick={onScore} disabled={busy}>
+                  {scoring ? "Scoring..." : "Score"}
+                </Button>
+              )}
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2.5">
-            {!r.grounded && (
-              <span className="rounded-full bg-[#fff4dc] px-3 py-1 text-xs font-bold text-[#8a5a00]">Link not verified</span>
-            )}
-            {scored ? (
-              <div className="flex items-center gap-3">
-                <div className="hidden text-right sm:block">
-                  <div className="text-sm font-bold" style={{ color: scoreColor(r.match_score as number) }}>
-                    {scoreLabel(r.match_score as number)}
-                  </div>
-                  <div className="text-xs text-ink-400">match with your resume</div>
-                </div>
-                <Ring value={r.match_score as number} size={58} stroke={6} color={scoreColor(r.match_score as number)}>
-                  <span className="text-sm font-bold text-ink-900">{Math.round((r.match_score as number) * 100)}</span>
-                </Ring>
-              </div>
-            ) : (
-              <Button size="sm" variant="primary" onClick={onScore} disabled={busy}>
-                {scoring ? "Scoring..." : "Score"}
-              </Button>
-            )}
-          </div>
-        </div>
 
-        {r.summary && (
-          <p
-            className="mt-3 text-sm leading-relaxed text-ink-700"
-            style={{ display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}
-          >
-            {r.summary}
-          </p>
-        )}
-
-        {scored && (
-          <div className="mt-3 rounded-2xl bg-[#f6f3ff] px-4 py-3 text-[13px] leading-relaxed text-ink-700">
-            {r.match_summary}
-            {r.match_gaps && r.match_gaps.length > 0 && <GapDetails gaps={r.match_gaps} />}
-            {r.match_from_page === false && (
-              <p className="mt-2 text-xs text-amber-700">
-                The posting page couldn't be read, so this score used only the short summary above. Treat it as a rough guide.
-              </p>
-            )}
-          </div>
-        )}
-        {scoring && (
-          <p className="mt-3 animate-pulse text-xs text-ink-400">
-            Reading the posting and comparing it with your resume. This can take up to a minute.
-          </p>
-        )}
-
-        <div className="mt-3.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <Button variant="primary" onClick={onAdd} disabled={busy}>
-              {busy && !scoring ? "Working..." : "Add to jobs"}
-            </Button>
-            <a
-              href={r.url}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="text-[13px] font-bold text-brand-600 hover:text-brand-700 hover:underline"
+          {r.summary && (
+            <p
+              className="mt-3 text-sm leading-relaxed text-ink-700"
+              style={{ display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}
             >
-              View posting
-            </a>
-            {site && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#e8f6ee] px-3 py-1 text-xs font-bold text-[#17603f]">
-                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
-                  <path d="M13 2L4 14h6l-1 8 9-12h-6z" />
-                </svg>
-                Autofill ready on {site}
-              </span>
-            )}
+              {r.summary}
+            </p>
+          )}
+          {scoring && (
+            <p className="mt-3 animate-pulse text-xs text-ink-500">
+              Reading the posting and comparing it with your resume. This can take up to a minute.
+            </p>
+          )}
+
+          {open && score !== null && (
+            <div className="mt-4">
+              <MatchPanel
+                score={score}
+                summary={r.match_summary}
+                gaps={r.match_gaps ?? []}
+                note={
+                  r.match_from_page === false
+                    ? "The posting page couldn't be read, so this score used only the short summary above. Treat it as a rough guide."
+                    : undefined
+                }
+              />
+            </div>
+          )}
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <Button variant="primary" onClick={onAdd} disabled={busy}>
+                {busy && !scoring ? "Working..." : "Add to jobs"}
+              </Button>
+              <a
+                href={r.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-[13px] font-bold text-brand-600 hover:text-brand-700 hover:underline"
+              >
+                View posting
+              </a>
+              {site && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#e8f6ee] px-3 py-1 text-xs font-bold text-[#17603f]">
+                  <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                    <path d="M13 2L4 14h6l-1 8 9-12h-6z" />
+                  </svg>
+                  Autofill ready on {site}
+                </span>
+              )}
+            </div>
+            <div className="ml-auto flex items-center gap-3">
+              {score !== null && (
+                <button
+                  type="button"
+                  onClick={() => setOpen((v) => !v)}
+                  aria-expanded={open}
+                  className="text-[13px] font-bold text-brand-600 hover:text-brand-700 hover:underline"
+                >
+                  {open ? "Hide details" : "Show more details"}
+                </button>
+              )}
+              <MoreMenu>
+                {score !== null && (
+                  <MenuItem onClick={onScore} disabled={busy}>
+                    Score again
+                  </MenuItem>
+                )}
+                <MenuItem danger onClick={onRemove} disabled={busy}>
+                  Remove
+                </MenuItem>
+              </MoreMenu>
+            </div>
           </div>
-          <MoreMenu>
-            {scored && (
-              <MenuItem onClick={onScore} disabled={busy}>
-                Score again
-              </MenuItem>
-            )}
-            <MenuItem danger onClick={onRemove} disabled={busy}>
-              Remove
-            </MenuItem>
-          </MoreMenu>
         </div>
       </Card>
     </li>

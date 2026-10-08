@@ -6,7 +6,7 @@ import { useSearchParams } from "react-router-dom";
 import { api, ApiError, documentDownloadUrl } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
 import { Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
-import { GapDetails, scoreColor, scoreLabel } from "@/components/match";
+import { scoreColor, scoreLabel } from "@/components/match";
 import { completeApplication } from "@/lib/extensionBridge";
 import { formatLocation, formatPosted, formatSalary } from "@/lib/jobText";
 import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api";
@@ -16,32 +16,35 @@ import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api"
  * browser extension). Nothing runs automatically: scoring, proceeding and
  * tailoring each happen only when you click.
  */
-type Stage = "all" | "to-score" | "going" | "ready" | "progress" | "applied";
+type Stage = "all" | "going" | "ready" | "progress" | "applied";
 type SortBy = "newest" | "fit";
 
 const STAGES: { value: Stage; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "to-score", label: "Not yet going after" },
   { value: "going", label: "Going after" },
   { value: "ready", label: "Ready to apply" },
   { value: "progress", label: "Application in progress" },
-  { value: "applied", label: "Application completed" },
+  { value: "applied", label: "Completed" },
 ];
 
 function hasResumeDoc(job: JobOut): boolean {
   return job.documents.some((d) => d.document_type === "resume");
 }
 
+/** Each job sits in exactly one stage (the furthest it has reached), so the tab counts add up. */
 function inStage(job: JobOut, stage: Stage): boolean {
+  if (stage === "all") return true;
   const going = job.application_status === "proceeding";
   const applied = !!job.applied_at;
   const started = !!job.application_started_at;
+  const resume = hasResumeDoc(job);
   if (stage === "applied") return applied;
-  if (stage === "progress") return started && !applied;
-  if (stage === "to-score") return !going && !applied;
-  if (stage === "going") return going && !applied;
-  if (stage === "ready") return going && hasResumeDoc(job) && !started && !applied;
-  return true;
+  if (applied) return false;
+  if (stage === "progress") return started;
+  if (started) return false;
+  if (stage === "ready") return going && resume;
+  if (stage === "going") return going && !resume;
+  return false;
 }
 
 export function Jobs() {
@@ -72,7 +75,78 @@ export function Jobs() {
         description="Save jobs you find, see how well they fit, and tailor your resume for the ones you want."
       />
 
-      <AddJobByUrl />
+      <Card className="mb-6 overflow-hidden">
+        <AddJobByUrl />
+
+        {all.length > 1 && (
+          <>
+            <nav aria-label="Job stages" className="flex gap-5 overflow-x-auto border-t border-ink-900/5 px-5">
+              {STAGES.map((st) => {
+                const on = stage === st.value;
+                return (
+                  <button
+                    key={st.value}
+                    type="button"
+                    onClick={() => setStage(st.value)}
+                    aria-pressed={on}
+                    className={`-mb-px whitespace-nowrap border-b-[3px] pb-3 pt-3.5 text-[13px] font-bold transition ${
+                      on ? "border-brand-500 text-brand-600" : "border-transparent text-ink-400 hover:text-brand-700"
+                    }`}
+                  >
+                    {st.label}
+                    <span
+                      className={`ml-2 rounded-full px-2 py-0.5 text-[11px] ${
+                        on ? "bg-brand-100 text-brand-600" : "bg-ink-900/5 text-ink-500"
+                      }`}
+                    >
+                      {searched.filter((j) => inStage(j, st.value)).length}
+                    </span>
+                  </button>
+                );
+              })}
+            </nav>
+
+            <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5 border-t border-ink-900/5 bg-[#faf9fe] px-4 py-3 sm:pl-5">
+              <div className="relative min-w-[200px] flex-1">
+                <label htmlFor="job-search-box" className="sr-only">
+                  Search jobs by role or company
+                </label>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400"
+                  aria-hidden="true"
+                >
+                  <circle cx="11" cy="11" r="6.5" />
+                  <path d="M16 16l4 4" />
+                </svg>
+                <input
+                  id="job-search-box"
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search role or company"
+                  className="w-full rounded-full border border-[#ddd8f3] bg-white py-2.5 pl-10 pr-4 text-[13px] text-ink-900 placeholder:text-ink-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
+                />
+              </div>
+              <label className="ml-auto flex items-center gap-2 text-xs font-bold text-ink-400">
+                Sort
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value === "fit" ? "fit" : "newest")}
+                  className="rounded-full border border-[#ddd8f3] bg-white px-3.5 py-2.5 text-[13px] font-bold text-brand-700"
+                >
+                  <option value="newest">Newest first</option>
+                  <option value="fit">Best fit first</option>
+                </select>
+              </label>
+            </div>
+          </>
+        )}
+      </Card>
 
       {jobsQuery.isLoading && <p className="text-sm text-ink-400">Loading…</p>}
       {jobsQuery.isError && (
@@ -90,49 +164,6 @@ export function Jobs() {
           <h2 className="text-base font-bold text-ink-900">No jobs yet</h2>
           <p className="mt-1 text-sm text-ink-500">Paste a link above to add your first one.</p>
         </Card>
-      )}
-
-      {all.length > 1 && (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          {STAGES.map((st) => (
-            <button
-              key={st.value}
-              type="button"
-              onClick={() => setStage(st.value)}
-              aria-pressed={stage === st.value}
-              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                stage === st.value ? "bg-brand-500 text-white shadow-glow" : "bg-white/80 text-ink-500 hover:text-brand-700"
-              }`}
-            >
-              {st.label}
-              <span className="ml-1.5 opacity-70">{searched.filter((j) => inStage(j, st.value)).length}</span>
-            </button>
-          ))}
-          <div className="ml-auto flex items-center gap-2">
-          <label htmlFor="job-search-box" className="sr-only">
-            Search jobs by role or company
-          </label>
-          <input
-            id="job-search-box"
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search role or company"
-            className="w-48 rounded-full border border-[#ddd8f3] bg-white px-4 py-1.5 text-xs text-ink-700 shadow-soft outline-none focus:border-brand-400"
-          />
-          <label className="flex items-center gap-2 text-xs font-semibold text-ink-500">
-            Sort
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value === "fit" ? "fit" : "newest")}
-              className="rounded-full border border-[#ddd8f3] bg-white px-3 py-1.5 text-xs font-semibold text-ink-700"
-            >
-              <option value="newest">Newest first</option>
-              <option value="fit">Best fit first</option>
-            </select>
-          </label>
-          </div>
-        </div>
       )}
 
       {all.length > 0 && visible.length === 0 && (
@@ -339,72 +370,42 @@ function JobCard({ job }: { job: JobOut }) {
       type="button"
       onClick={() => setExpanded((v) => !v)}
       aria-expanded={expanded}
-      className="text-xs font-semibold text-brand-600 hover:text-brand-700"
+      className="text-[13px] font-bold text-brand-600 hover:text-brand-700 hover:underline"
     >
       {expanded ? "Hide details" : "Show details"}
     </button>
   );
 
   const menu = (
-      <MoreMenu>
-        <MenuItem href={job.canonical_application_url}>View posting</MenuItem>
-        {(evaluation || proceeding) && (
-          <MenuItem onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
-            {evaluation ? "Re-score match" : "Score match"}
-          </MenuItem>
-        )}
-        {proceeding && (
-          <MenuItem onClick={() => undoMutation.mutate()} disabled={undoMutation.isPending}>
-            Undo proceeding
-          </MenuItem>
-        )}
-        {job.applied_at ? (
-          <MenuItem onClick={() => notAppliedMutation.mutate()} disabled={notAppliedMutation.isPending}>
-            Not applied after all
-          </MenuItem>
-        ) : (
-          <MenuItem onClick={() => setMarkingApplied(true)}>Mark as applied</MenuItem>
-        )}
-        <MenuItem danger onClick={() => setConfirmingDelete(true)}>
-          Delete job
+    <MoreMenu>
+      <MenuItem href={job.canonical_application_url}>Open job posting</MenuItem>
+      {(evaluation || proceeding) && (
+        <MenuItem onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
+          {evaluation ? "Re-score match" : "Score match"}
         </MenuItem>
-      </MoreMenu>
+      )}
+      {proceeding && (
+        <MenuItem onClick={() => undoMutation.mutate()} disabled={undoMutation.isPending}>
+          Undo proceeding
+        </MenuItem>
+      )}
+      {job.applied_at && (
+        <MenuItem onClick={() => notAppliedMutation.mutate()} disabled={notAppliedMutation.isPending}>
+          Not applied after all
+        </MenuItem>
+      )}
+      <MenuItem danger onClick={() => setConfirmingDelete(true)}>
+        Delete job
+      </MenuItem>
+    </MoreMenu>
   );
 
-  const readyCollapsed = proceeding && hasResume && !expanded && !job.applied_at;
   const showDetails = !!evaluation || (proceeding && hasResume);
-
-  const applyBlock = (
-    <div>
-              <div className="flex flex-wrap items-center gap-3">
-                <Button variant="primary" onClick={startApplication} disabled={applyState.kind === "starting"}>
-                  {applyState.kind === "starting" ? "Opening…" : "Complete application"}
-                </Button>
-                {!job.applied_at && !markingApplied && (
-                  <Button variant="secondary" onClick={() => setMarkingApplied(true)}>
-                    Mark as applied
-                  </Button>
-                )}
-                <span className="text-xs text-ink-500">
-                  Opens in a new tab and fills it in. You review it and press Submit.
-                </span>
-              </div>
-              {applyState.kind === "opened" && (
-                <p className="mt-2 text-xs text-ink-600">
-                  Opened in a new tab and filling now. You will get a notification when it is done. Anything it couldn't
-                  answer is highlighted there and listed under Needs Attention. Review it, then submit it yourself.
-                </p>
-              )}
-              {applyState.kind === "problem" && (
-                <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  {applyState.text}{" "}
-                  <a className="font-semibold underline" href={job.canonical_application_url} target="_blank" rel="noreferrer">
-                    Open the posting
-                  </a>
-                </p>
-              )}
-    </div>
-  );
+  const busyResume = tailorMutation.isPending || originalMutation.isPending;
+  const linkClass = "text-[13px] font-bold text-brand-600 hover:text-brand-700 hover:underline disabled:opacity-50";
+  const gaps = evaluation?.gaps ?? [];
+  const showResumePanel = proceeding && hasResume;
+  const wordDoc = resumeDocs.find((d) => d.format === "docx");
 
   return (
     <li>
@@ -442,13 +443,6 @@ function JobCard({ job }: { job: JobOut }) {
           </div>
         </div>
 
-        {evaluation && expanded && (
-          <div className="mt-4">
-            <p className="text-sm leading-relaxed text-ink-700">{evaluation.summary}</p>
-            {evaluation.gaps.length > 0 && <GapDetails gaps={evaluation.gaps} />}
-          </div>
-        )}
-
         <div className="mt-3 border-t border-ink-900/5 pt-3">
           <Progress job={job} />
         </div>
@@ -483,124 +477,180 @@ function JobCard({ job }: { job: JobOut }) {
           </div>
         )}
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {readyCollapsed && applyBlock}
-          {!job.applied_at && !markingApplied && !(proceeding && hasResume) && (
-            <Button variant="secondary" onClick={() => setMarkingApplied(true)}>
-              Mark as applied
-            </Button>
-          )}
-          {!proceeding && (
-            <Button
-              variant={evaluation ? "primary" : "secondary"}
-              onClick={() => proceedMutation.mutate()}
-              disabled={proceedMutation.isPending}
-            >
-              {proceedMutation.isPending ? "Starting…" : "Proceed with Application"}
-            </Button>
-          )}
-          {proceeding && !hasResume && (
-            <div className="w-full rounded-2xl bg-brand-50/60 p-4">
-              <div className="text-sm font-bold text-ink-900">Which resume should this application use?</div>
-              <div className="mt-0.5 text-xs text-ink-500">
-                Either way, the application is filled from the same resume you pick here, including each role's bullets.
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Button
-                  variant="primary"
-                  onClick={() => tailorMutation.mutate()}
-                  disabled={tailorMutation.isPending || originalMutation.isPending}
-                >
+        <div className="mt-3.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {!job.applied_at && !proceeding && (
+              <Button
+                variant={evaluation ? "primary" : "secondary"}
+                onClick={() => proceedMutation.mutate()}
+                disabled={proceedMutation.isPending}
+              >
+                {proceedMutation.isPending ? "Starting…" : "Go after it"}
+              </Button>
+            )}
+            {!job.applied_at && proceeding && !hasResume && (
+              <>
+                <Button variant="primary" onClick={() => tailorMutation.mutate()} disabled={busyResume}>
                   {tailorMutation.isPending ? "Creating…" : "Tailor my resume first"}
                 </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => originalMutation.mutate()}
-                  disabled={tailorMutation.isPending || originalMutation.isPending}
-                >
+                <button type="button" className={linkClass} onClick={() => originalMutation.mutate()} disabled={busyResume}>
                   {originalMutation.isPending ? "Saving…" : "Use my original resume"}
-                </Button>
-              </div>
-            </div>
-          )}
-          {requalifyMutation.isPending && evaluation && (
-            <span className="animate-pulse text-xs text-ink-400">Comparing your resume with this job…</span>
-          )}
-          {requalifyMutation.isPending && !evaluation && !proceeding && (
-            <span className="animate-pulse text-xs text-ink-400">Comparing your resume with this job…</span>
-          )}
+                </button>
+              </>
+            )}
+            {!job.applied_at && proceeding && hasResume && (
+              <Button variant="primary" onClick={startApplication} disabled={applyState.kind === "starting"}>
+                {applyState.kind === "starting" ? "Opening…" : "Complete application"}
+              </Button>
+            )}
+            {!job.applied_at && !markingApplied && (
+              <button type="button" className={linkClass} onClick={() => setMarkingApplied(true)}>
+                I already applied
+              </button>
+            )}
+          </div>
           <div className="ml-auto flex items-center gap-3">
             {showDetails && detailsButton}
             {menu}
           </div>
         </div>
 
+        {proceeding && !hasResume && !job.applied_at && (
+          <p className="mt-2 text-xs text-ink-500">
+            Either way, the application is filled from the resume you pick here, including each role's bullets.
+          </p>
+        )}
+        {applyState.kind === "opened" && (
+          <p className="mt-2 text-xs text-ink-600">
+            Opened in a new tab and filling now. You will get a notification when it is done. Anything it couldn't
+            answer is highlighted there and listed under Needs Attention. Review it, then submit it yourself.
+          </p>
+        )}
+        {applyState.kind === "problem" && (
+          <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {applyState.text}{" "}
+            <a className="font-semibold underline" href={job.canonical_application_url} target="_blank" rel="noreferrer">
+              Open the posting
+            </a>
+          </p>
+        )}
+        {requalifyMutation.isPending && evaluation && (
+          <p className="mt-2 animate-pulse text-xs text-ink-400">Comparing your resume with this job…</p>
+        )}
         {tailorMutation.isPending && (
-          <p className="mt-3 animate-pulse text-xs text-ink-500">Tailoring your resume. This can take a minute.</p>
+          <p className="mt-2 animate-pulse text-xs text-ink-500">Tailoring your resume. This can take a minute.</p>
         )}
 
+        {expanded && (evaluation || showResumePanel) && (
+          <div className="mt-4 border-t border-ink-900/5 pt-4">
+            <div className={`grid gap-6 ${evaluation && showResumePanel ? "md:grid-cols-[1.3fr_1fr]" : ""}`}>
+              {evaluation && (
+                <div className="min-w-0">
+                  <h3 className="text-xs font-extrabold text-ink-900">Why it fits</h3>
+                  <p className="mt-1.5 text-sm leading-relaxed text-ink-700">{evaluation.summary}</p>
+                  {gaps.length > 0 && (
+                    <>
+                      <h3 className="mt-4 text-xs font-extrabold text-ink-900">Gaps</h3>
+                      <ul className="mt-1.5 space-y-1.5">
+                        {gaps.map((gap) => (
+                          <li key={gap} className="flex gap-2 text-xs leading-relaxed text-ink-500">
+                            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+                            {gap}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              )}
 
-        {proceeding && hasResume && expanded && (
-          <div className="mt-4 rounded-2xl bg-brand-50/60 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-bold text-ink-900">
-                  {usingOriginal ? "Using your original resume" : "Your tailored resume is ready"}
+              {showResumePanel && (
+                <div className="self-start overflow-hidden rounded-[18px] border border-[#e7e1fa] bg-[#f6f3ff]">
+                  <div className="flex items-center gap-3 px-4 pb-3 pt-3.5">
+                    <div
+                      className="flex h-12 w-10 shrink-0 flex-col justify-center gap-1 rounded-lg bg-white px-2 shadow-soft"
+                      aria-hidden="true"
+                    >
+                      <i className="h-[3px] w-3/5 rounded bg-brand-500" />
+                      <i className="h-[3px] rounded bg-[#d9d2f4]" />
+                      <i className="h-[3px] rounded bg-[#d9d2f4]" />
+                      <i className="h-[3px] w-4/5 rounded bg-[#d9d2f4]" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-extrabold text-ink-900">
+                        {usingOriginal ? "Your original resume" : "Your tailored resume"}
+                      </div>
+                      <div className="mt-0.5 text-xs text-ink-500">Read it over before you send it.</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 px-4 pb-3.5">
+                    {resumeDocs.map((d) => {
+                      const primary = wordDoc ? d.id === wordDoc.id : d.id === resumeDocs[0].id;
+                      return (
+                        <a
+                          key={d.id}
+                          href={documentDownloadUrl(d.id)}
+                          className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-full px-4 py-2.5 text-[13px] font-bold transition ${
+                            primary
+                              ? "bg-gradient-to-b from-brand-400 to-brand-500 text-white shadow-glow hover:from-brand-500 hover:to-brand-600"
+                              : "border border-[#ddd8f3] bg-white text-brand-700 hover:bg-brand-50"
+                          }`}
+                        >
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.4"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="h-3.5 w-3.5"
+                            aria-hidden="true"
+                          >
+                            <path d="M12 4v11M7 11l5 5 5-5M5 20h14" />
+                          </svg>
+                          {d.format === "docx" ? "Word" : d.format.toUpperCase()}
+                        </a>
+                      );
+                    })}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-[#e7e1fa] bg-white px-4 py-2.5">
+                    {!usingOriginal &&
+                      changelogDocs.map((d) => (
+                        <a key={d.id} href={documentDownloadUrl(d.id)} className="text-xs font-bold text-brand-600 hover:underline">
+                          What changed
+                        </a>
+                      ))}
+                    <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                      <button
+                        type="button"
+                        className="text-xs font-bold text-ink-500 hover:text-brand-700 disabled:opacity-50"
+                        onClick={() => tailorMutation.mutate()}
+                        disabled={busyResume}
+                      >
+                        {tailorMutation.isPending ? "Creating…" : usingOriginal ? "Tailor it instead" : "Recreate"}
+                      </button>
+                      {!usingOriginal && (
+                        <button
+                          type="button"
+                          className="text-xs font-bold text-ink-500 hover:text-brand-700 disabled:opacity-50"
+                          onClick={() => originalMutation.mutate()}
+                          disabled={busyResume}
+                        >
+                          {originalMutation.isPending ? "Saving…" : "Use original instead"}
+                        </button>
+                      )}
+                    </span>
+                  </div>
                 </div>
-                <div className="mt-0.5 text-xs text-ink-500">
-                  {usingOriginal
-                    ? "Your saved resume, unchanged. Read it over before you send it."
-                    : "Made from your master resume with the same layout. Read it over before you send it."}
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {resumeDocs.map((d) => (
-                  <a
-                    key={d.id}
-                    href={documentDownloadUrl(d.id)}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-b from-brand-400 to-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-glow transition hover:from-brand-500 hover:to-brand-600"
-                  >
-                    Download {d.format === "docx" ? "Word file" : d.format.toUpperCase()}
-                  </a>
-                ))}
-                {!usingOriginal && changelogDocs.map((d) => (
-                  <a
-                    key={d.id}
-                    href={documentDownloadUrl(d.id)}
-                    className="rounded-full border border-[#ddd8f3] bg-white px-4 py-2 text-sm font-semibold text-ink-700 transition hover:border-brand-400 hover:text-brand-700"
-                  >
-                    What changed
-                  </a>
-                ))}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => tailorMutation.mutate()}
-                  disabled={tailorMutation.isPending || originalMutation.isPending}
-                >
-                  {tailorMutation.isPending ? "Creating…" : usingOriginal ? "Tailor it instead" : "Recreate"}
-                </Button>
-                {!usingOriginal && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => originalMutation.mutate()}
-                    disabled={tailorMutation.isPending || originalMutation.isPending}
-                  >
-                    {originalMutation.isPending ? "Saving…" : "Use original instead"}
-                  </Button>
-                )}
-              </div>
+              )}
             </div>
 
-            <div className="mt-4 border-t border-brand-200/40 pt-4">{applyBlock}</div>
-
-            {tailorMutation.data?.used_original_wording && (
+            {showResumePanel && tailorMutation.data?.used_original_wording && (
               <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 The AI's rewording didn't pass the accuracy checks, so this resume uses your original wording.
               </p>
             )}
-            {tailorMutation.data && tailorMutation.data.changelog.length > 0 && (
+            {showResumePanel && tailorMutation.data && tailorMutation.data.changelog.length > 0 && (
               <details className="mt-3 text-xs text-ink-500">
                 <summary className="cursor-pointer select-none font-semibold text-ink-700 hover:text-brand-700">
                   Changes and gaps ({tailorMutation.data.changelog.length})
@@ -614,7 +664,6 @@ function JobCard({ job }: { job: JobOut }) {
             )}
           </div>
         )}
-
 
         {confirmingDelete && (
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -652,28 +701,40 @@ function AddJobByUrl() {
   });
 
   return (
-    <Card className="mb-6 p-5">
+    <div className="bg-gradient-to-b from-[#f8f6ff] to-white px-5 py-4">
       <form
-        className="flex flex-col gap-2 sm:flex-row"
+        className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3"
         onSubmit={(e) => {
           e.preventDefault();
           if (url.trim()) addMutation.mutate(url.trim());
         }}
       >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          className="hidden h-5 w-5 shrink-0 text-brand-500 sm:block"
+          aria-hidden="true"
+        >
+          <path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1" />
+          <path d="M14 10a4 4 0 00-5.7 0l-3 3A4 4 0 0011 18.7l1-1" />
+        </svg>
         <input
           type="url"
           required
           aria-label="Job posting link"
-          placeholder="Paste a job link"
+          placeholder="Paste a job link to add it"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          className={`${inputClass} flex-1 py-2.5`}
+          className="min-h-[44px] flex-1 border-0 bg-transparent text-[15px] text-ink-900 placeholder:text-ink-400 focus:outline-none"
         />
-        <Button type="submit" variant="primary" disabled={addMutation.isPending || !url.trim()}>
+        <Button type="submit" variant="primary" className="px-6 py-3" disabled={addMutation.isPending || !url.trim()}>
           {addMutation.isPending ? "Adding…" : "Add job"}
         </Button>
       </form>
-      <p className="mt-2.5 text-xs text-ink-400">
+      <p className="mt-1 text-xs text-ink-400">
         If a site blocks the link, open the posting and use Save this job in the browser extension instead.
       </p>
 
@@ -685,6 +746,6 @@ function AddJobByUrl() {
             : `Added: ${lastAdded.title} at ${lastAdded.company}`}
         </p>
       )}
-    </Card>
+    </div>
   );
 }

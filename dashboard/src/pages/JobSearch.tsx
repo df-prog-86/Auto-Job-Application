@@ -706,8 +706,8 @@ function ResultCard({
   const edge = score === null ? "#e3dff3" : scoreColor(score);
   return (
     <li>
-      <Card className="flex overflow-hidden">
-        <div className="w-[5px] shrink-0" style={{ backgroundColor: edge }} aria-hidden="true" />
+      <Card className="flex">
+        <div className="w-[5px] shrink-0 rounded-l-2xl" style={{ backgroundColor: edge }} aria-hidden="true" />
         <div className="min-w-0 flex-1 p-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">

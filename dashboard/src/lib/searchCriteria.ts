@@ -39,3 +39,45 @@ export function toApiCriteria(c: Partial<SavedCriteria>): JobSearchCriteria {
     count: c.count ?? 10,
   };
 }
+
+/** Searches the person chose to keep, shown as chips on Job Search. Stored in this browser only. */
+export const SAVED_LIST_KEY = "job-search-saved-list";
+const MAX_SAVED = 8;
+
+export interface SavedSearch {
+  name: string;
+  criteria: SavedCriteria;
+}
+
+export function loadSavedSearches(): SavedSearch[] {
+  try {
+    const raw = window.localStorage.getItem(SAVED_LIST_KEY);
+    const list = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(list)) return [];
+    return list.filter(
+      (s): s is SavedSearch => !!s && typeof s.name === "string" && typeof s.criteria === "object" && s.criteria !== null,
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function storeSavedSearches(list: SavedSearch[]): void {
+  try {
+    window.localStorage.setItem(SAVED_LIST_KEY, JSON.stringify(list.slice(0, MAX_SAVED)));
+  } catch {
+    // keeping searches is a convenience only
+  }
+}
+
+/** A short readable name like "Project manager, Boston". */
+export function savedSearchName(c: SavedCriteria): string {
+  const first = c.titles.split(",")[0]?.trim() || "Search";
+  const place = c.location.trim();
+  const name = place ? `${first}, ${place.split(",")[0].trim()}` : first;
+  return name.length > 40 ? `${name.slice(0, 37)}...` : name;
+}
+
+export function sameCriteria(a: SavedCriteria, b: SavedCriteria): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}

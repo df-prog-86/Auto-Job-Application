@@ -330,6 +330,35 @@ function JobCard({ job }: { job: JobOut }) {
     </button>
   );
 
+  const menu = (
+      <MoreMenu>
+        <MenuItem href={job.canonical_application_url}>View posting</MenuItem>
+        {(evaluation || proceeding) && (
+          <MenuItem onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
+            {evaluation ? "Re-score match" : "Score match"}
+          </MenuItem>
+        )}
+        {proceeding && (
+          <MenuItem onClick={() => undoMutation.mutate()} disabled={undoMutation.isPending}>
+            Undo proceeding
+          </MenuItem>
+        )}
+        {job.applied_at ? (
+          <MenuItem onClick={() => notAppliedMutation.mutate()} disabled={notAppliedMutation.isPending}>
+            Not applied after all
+          </MenuItem>
+        ) : (
+          <MenuItem onClick={() => setMarkingApplied(true)}>Mark as applied</MenuItem>
+        )}
+        <MenuItem danger onClick={() => setConfirmingDelete(true)}>
+          Delete job
+        </MenuItem>
+      </MoreMenu>
+  );
+
+  const readyCollapsed = proceeding && hasResume && !expanded && !job.applied_at;
+  const showDetails = !!evaluation || (proceeding && hasResume);
+
   const applyBlock = (
     <div>
               <div className="flex flex-wrap items-center gap-3">
@@ -393,29 +422,6 @@ function JobCard({ job }: { job: JobOut }) {
             ) : (
               <Badge>Not scored</Badge>
             )}
-            <MoreMenu>
-              <MenuItem href={job.canonical_application_url}>View posting</MenuItem>
-              {(evaluation || proceeding) && (
-                <MenuItem onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
-                  {evaluation ? "Re-score match" : "Score match"}
-                </MenuItem>
-              )}
-              {proceeding && (
-                <MenuItem onClick={() => undoMutation.mutate()} disabled={undoMutation.isPending}>
-                  Undo proceeding
-                </MenuItem>
-              )}
-              {job.applied_at ? (
-                <MenuItem onClick={() => notAppliedMutation.mutate()} disabled={notAppliedMutation.isPending}>
-                  Not applied after all
-                </MenuItem>
-              ) : (
-                <MenuItem onClick={() => setMarkingApplied(true)}>Mark as applied</MenuItem>
-              )}
-              <MenuItem danger onClick={() => setConfirmingDelete(true)}>
-                Delete job
-              </MenuItem>
-            </MoreMenu>
           </div>
         </div>
 
@@ -461,6 +467,7 @@ function JobCard({ job }: { job: JobOut }) {
         )}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
+          {readyCollapsed && applyBlock}
           {!evaluation && !proceeding && (
             <Button variant="primary" onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
               {scoreButtonLabel}
@@ -510,18 +517,16 @@ function JobCard({ job }: { job: JobOut }) {
           {requalifyMutation.isPending && !evaluation && !proceeding && (
             <span className="animate-pulse text-xs text-ink-400">Comparing your resume with this job…</span>
           )}
+          <div className="ml-auto flex items-center gap-3">
+            {showDetails && detailsButton}
+            {menu}
+          </div>
         </div>
 
         {tailorMutation.isPending && (
           <p className="mt-3 animate-pulse text-xs text-ink-500">Tailoring your resume. This can take a minute.</p>
         )}
 
-        {proceeding && hasResume && !expanded && !job.applied_at && (
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            {applyBlock}
-            {detailsButton}
-          </div>
-        )}
 
         {proceeding && hasResume && expanded && (
           <div className="mt-4 rounded-2xl bg-brand-50/60 p-4">
@@ -598,10 +603,6 @@ function JobCard({ job }: { job: JobOut }) {
           </div>
         )}
 
-        {(evaluation || (proceeding && hasResume)) &&
-          !(proceeding && hasResume && !expanded && !job.applied_at) && (
-            <div className="mt-3">{detailsButton}</div>
-          )}
 
         {confirmingDelete && (
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800">

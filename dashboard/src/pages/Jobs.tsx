@@ -302,6 +302,7 @@ function JobCard({ job }: { job: JobOut }) {
   const usingOriginal = resumeDocs.some((d) => d.template_version === "original-1");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
   const [applyState, setApplyState] = useState<{ kind: "idle" | "starting" | "opened" | "problem"; text?: string }>({
     kind: "idle",
   });
@@ -614,12 +615,15 @@ function JobCard({ job }: { job: JobOut }) {
                     })}
                   </div>
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-[#e7e1fa] bg-white px-4 py-2.5">
-                    {!usingOriginal &&
-                      changelogDocs.map((d) => (
-                        <a key={d.id} href={documentDownloadUrl(d.id)} className="text-xs font-bold text-brand-600 hover:underline">
-                          What changed
-                        </a>
-                      ))}
+                    {!usingOriginal && changelogDocs.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowChanges(true)}
+                        className="text-xs font-bold text-brand-600 hover:underline"
+                      >
+                        What changed
+                      </button>
+                    )}
                     <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1.5">
                       <button
                         type="button"
@@ -665,6 +669,14 @@ function JobCard({ job }: { job: JobOut }) {
           </div>
         )}
 
+        {showChanges && changelogDocs[0] && (
+          <ChangesDialog
+            title={`${job.title} at ${job.company}`}
+            url={documentDownloadUrl(changelogDocs[0].id)}
+            onClose={() => setShowChanges(false)}
+          />
+        )}
+
         {confirmingDelete && (
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800">
             Delete this job and its files?
@@ -682,6 +694,110 @@ function JobCard({ job }: { job: JobOut }) {
         {error && <p className="mt-3 text-sm text-red-600">{error.message}</p>}
       </Card>
     </li>
+  );
+}
+
+/** Pop-up with the tailoring notes. Reads the saved changelog text file; nothing is downloaded. */
+function ChangesDialog({ title, url, onClose }: { title: string; url: string; onClose: () => void }) {
+  const [notes, setNotes] = useState<string[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const doneRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(url)
+      .then((r) => {
+        if (!r.ok) throw new Error("bad response");
+        return r.text();
+      })
+      .then((text) => {
+        if (cancelled) return;
+        const lines = text
+          .split("\n")
+          .map((l) => l.trim())
+          .filter((l) => l.startsWith("- "))
+          .map((l) => l.slice(2).trim())
+          .filter(Boolean);
+        setNotes(lines);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", esc);
+    return () => document.removeEventListener("keydown", esc);
+  }, [onClose]);
+
+  useEffect(() => {
+    doneRef.current?.focus();
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/45 p-6"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="What changed"
+        className="max-h-full w-full max-w-lg overflow-auto rounded-[22px] bg-white p-6 shadow-lift"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="text-lg font-extrabold text-ink-900">What changed</h2>
+            <p className="mt-0.5 text-[13px] text-ink-500">{title}</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#ddd8f3] text-brand-700 transition hover:bg-brand-50"
+          >
+            <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+              <path d="M5 5l10 10M15 5L5 15" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="mt-4">
+          {notes === null && !failed && <p className="animate-pulse text-sm text-ink-400">Loading…</p>}
+          {failed && <p className="text-sm text-red-600">Couldn't load the notes. Try again in a moment.</p>}
+          {notes && notes.length === 0 && <p className="text-sm text-ink-500">No notes were saved for this resume.</p>}
+          {notes && notes.length > 0 && (
+            <ul className="space-y-2.5">
+              {notes.map((n, i) => (
+                <li key={i} className="flex gap-2.5 text-sm leading-relaxed text-ink-700">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
+                  {n}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="mt-5 flex justify-end border-t border-ink-900/5 pt-3.5">
+          <button
+            ref={doneRef}
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center justify-center rounded-full bg-gradient-to-b from-brand-400 to-brand-500 px-6 py-2.5 text-sm font-bold text-white shadow-glow transition hover:from-brand-500 hover:to-brand-600"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -580,4 +580,8 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
     items, gone = await enrich_from_ats(items)
     items, too_old = await fill_posted_dates(items, criteria.posted_within_days)
     kept, closed = await drop_closed(items)
-    return trim_to_count(kept, criteria.count), closed + gone + not_found + too_old
+    final = trim_to_count(kept, criteria.count)
+    for item in final:  # working notes, not saved columns
+        item.pop("ats_checked", None)
+        item.pop("ats_live", None)
+    return final, closed + gone + not_found + too_old

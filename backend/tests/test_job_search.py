@@ -543,3 +543,18 @@ def test_results_are_trimmed_to_the_count_with_verified_ones_first():
     items = [mk("a", False), mk("b", True), mk("c", False), mk("d", True)]
     assert [i["title"] for i in trim_to_count(items, 2)] == ["b", "d"]
     assert [i["title"] for i in trim_to_count(items, 10)] == ["a", "b", "c", "d"]  # order kept, nothing lost
+
+
+def test_search_results_carry_only_saved_fields_even_when_the_ats_check_ran(search, monkeypatch):
+    from app.services.discovery import web_search
+
+    client, _ = search
+
+    async def marks(items):
+        for i in items:
+            i["ats_checked"], i["ats_live"] = True, True
+        return items, 0
+
+    monkeypatch.setattr(web_search, "enrich_from_ats", marks)
+    res = client.post("/api/v1/job-search/run", json={"titles": "analyst"})
+    assert res.status_code == 200 and res.json()["found"] >= 1

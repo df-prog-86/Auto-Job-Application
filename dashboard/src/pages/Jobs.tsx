@@ -108,7 +108,19 @@ export function Jobs() {
               <span className="ml-1.5 opacity-70">{searched.filter((j) => inStage(j, st.value)).length}</span>
             </button>
           ))}
-          <label className="ml-auto flex items-center gap-2 text-xs font-semibold text-ink-500">
+          <div className="ml-auto flex items-center gap-2">
+          <label htmlFor="job-search-box" className="sr-only">
+            Search jobs by role or company
+          </label>
+          <input
+            id="job-search-box"
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search role or company"
+            className="w-48 rounded-full border border-[#ddd8f3] bg-white px-4 py-1.5 text-xs text-ink-700 shadow-soft outline-none focus:border-brand-400"
+          />
+          <label className="flex items-center gap-2 text-xs font-semibold text-ink-500">
             Sort
             <select
               value={sortBy}
@@ -119,22 +131,7 @@ export function Jobs() {
               <option value="fit">Best fit first</option>
             </select>
           </label>
-        </div>
-      )}
-
-      {all.length > 1 && (
-        <div className="relative mb-4">
-          <label htmlFor="job-search-box" className="sr-only">
-            Search jobs by role or company
-          </label>
-          <input
-            id="job-search-box"
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by role or company"
-            className={`${inputClass} rounded-full bg-white px-5 py-3 shadow-soft`}
-          />
+          </div>
         </div>
       )}
 

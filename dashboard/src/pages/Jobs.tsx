@@ -93,22 +93,6 @@ export function Jobs() {
       )}
 
       {all.length > 1 && (
-        <div className="relative mb-4">
-          <label htmlFor="job-search-box" className="sr-only">
-            Search jobs by role or company
-          </label>
-          <input
-            id="job-search-box"
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by role or company"
-            className={`${inputClass} rounded-full bg-white px-5 py-3 shadow-soft`}
-          />
-        </div>
-      )}
-
-      {all.length > 1 && (
         <div className="mb-4 flex flex-wrap items-center gap-2">
           {STAGES.map((st) => (
             <button
@@ -135,6 +119,22 @@ export function Jobs() {
               <option value="fit">Best fit first</option>
             </select>
           </label>
+        </div>
+      )}
+
+      {all.length > 1 && (
+        <div className="relative mb-4">
+          <label htmlFor="job-search-box" className="sr-only">
+            Search jobs by role or company
+          </label>
+          <input
+            id="job-search-box"
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by role or company"
+            className={`${inputClass} rounded-full bg-white px-5 py-3 shadow-soft`}
+          />
         </div>
       )}
 

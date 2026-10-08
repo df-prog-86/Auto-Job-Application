@@ -251,6 +251,7 @@ export interface JobOut {
   application_status: ApplicationStatus;
   applied_at?: string | null;
   applied_via?: "manual" | "extension" | null;
+  application_started_at?: string | null;
   interviewing_at?: string | null;
   followup_done_at?: string | null;
   evaluation?: JobEvaluationOut | null;

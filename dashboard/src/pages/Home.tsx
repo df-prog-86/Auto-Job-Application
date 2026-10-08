@@ -38,8 +38,8 @@ const STAGES: { key: StageKey; label: string }[] = [
   { key: "scored", label: "Scored" },
   { key: "going", label: "Going after" },
   { key: "ready", label: "Ready to apply" },
-  { key: "applied", label: "Applied" },
-  { key: "interviewing", label: "Interviewing" },
+  { key: "progress", label: "Application in progress" },
+  { key: "applied", label: "Application completed" },
 ];
 
 const ageText = (days: number) => (days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`);
@@ -502,7 +502,7 @@ function StagePanel({
   const [note, setNote] = useState<string | null>(null);
 
   const proceed = useMutation<JobOut, ApiError, number>({ mutationFn: (id) => api.proceedWithApplication(id), onSuccess: refresh });
-  const interviewing = useMutation<JobOut, ApiError, number>({ mutationFn: (id) => api.markInterviewing(id), onSuccess: refresh });
+  const markApplied = useMutation<JobOut, ApiError, number>({ mutationFn: (id) => api.markApplied(id), onSuccess: refresh });
 
   const openAndFill = async (job: JobOut) => {
     setNote(null);
@@ -513,13 +513,13 @@ function StagePanel({
   };
 
   const shown = jobs.slice(0, 5);
-  const sees = stage === "ready" || stage === "applied" || stage === "interviewing" ? `/jobs?stage=${stage}` : stage === "going" ? "/jobs?stage=going" : "/jobs";
+  const sees = stage === "scored" ? "/jobs" : `/jobs?stage=${stage}`;
 
   const detail = (j: JobOut): string => {
     const parts = [j.company];
     if (j.evaluation) parts.push(`Score ${Math.round(j.evaluation.overall_score * 100)}`);
     if (stage === "applied") parts.push(`Applied ${ageText(daysSince(j.applied_at, now))}`);
-    else if (stage === "interviewing") parts.push(`Interviewing since ${ageText(daysSince(j.interviewing_at, now))}`);
+    else if (stage === "progress") parts.push(`Started ${ageText(daysSince(j.application_started_at, now))}`);
     else parts.push(`Added ${ageText(daysSince(j.first_seen, now))}`);
     return parts.join(". ");
   };
@@ -562,12 +562,12 @@ function StagePanel({
                 Open and fill
               </Button>
             )}
-            {stage === "applied" && (
-              <Button size="sm" onClick={() => interviewing.mutate(j.id)} disabled={interviewing.isPending}>
-                Got an interview
+            {stage === "progress" && (
+              <Button size="sm" onClick={() => markApplied.mutate(j.id)} disabled={markApplied.isPending}>
+                Mark as applied
               </Button>
             )}
-            {stage === "interviewing" && (
+            {stage === "applied" && (
               <a href={j.canonical_application_url} target="_blank" rel="noreferrer">
                 <Button size="sm" tabIndex={-1}>
                   View posting
@@ -577,8 +577,8 @@ function StagePanel({
           </li>
         ))}
       </ul>
-      {(note || proceed.isError || interviewing.isError) && (
-        <p className="pb-3 text-xs text-ink-700">{note ?? proceed.error?.message ?? interviewing.error?.message}</p>
+      {(note || proceed.isError || markApplied.isError) && (
+        <p className="pb-3 text-xs text-ink-700">{note ?? proceed.error?.message ?? markApplied.error?.message}</p>
       )}
     </div>
   );
@@ -726,7 +726,7 @@ function FollowUpCard({ items }: { items: FollowUp[] }) {
     <Card className="p-6">
       <h2 className="text-base font-extrabold text-ink-900">Follow up</h2>
       <p className="mt-1 text-xs text-ink-500">
-        Applications with no reply after {FOLLOW_UP_AFTER_DAYS} days, and interviews that need a thank you.
+        Applications with no reply after {FOLLOW_UP_AFTER_DAYS} days.
       </p>
       {shown.length === 0 && <p className="mt-4 text-sm text-ink-500">Nobody to follow up with right now.</p>}
       <ul className="mt-2">
@@ -736,17 +736,11 @@ function FollowUpCard({ items }: { items: FollowUp[] }) {
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-bold text-ink-900">{f.job.company}</div>
                 <div className="mt-0.5 text-xs text-ink-500">
-                  {f.kind === "after_interview"
-                    ? `Interviewing since ${ageText(f.days)}`
-                    : `Applied ${f.days} days ago, no reply`}
+                  {`Applied ${f.days} days ago, no reply`}
                 </div>
               </div>
               <Button size="sm" onClick={() => start(f)} disabled={make.isPending && draftFor === f.job.id}>
-                {make.isPending && draftFor === f.job.id
-                  ? "Writing…"
-                  : f.kind === "after_interview"
-                    ? "Draft thank you"
-                    : "Draft message"}
+                {make.isPending && draftFor === f.job.id ? "Writing…" : "Draft message"}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => done.mutate(f.job.id)} disabled={done.isPending}>
                 Done

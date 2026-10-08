@@ -48,6 +48,8 @@ class Job(Base, TimestampMixin):
     # "proceeding" gate that the fill flow relies on.
     applied_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     applied_via: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # First time the extension filled this job's application; the "Application started" step.
+    application_started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     interviewing_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # When the candidate dismissed the Home "Follow up" reminder; an older value
     # than applied_at / interviewing_at means the reminder is due again.

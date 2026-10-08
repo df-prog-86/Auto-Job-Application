@@ -365,3 +365,16 @@ def test_extension_reports_a_submission_once_and_the_first_date_stands(app_and_d
     assert first["applied_via"] == "extension" and first["applied_at"]
     assert client.post("/api/v1/apply/submitted", json={"job_id": job_id}, headers=headers).status_code == 204
     assert client.get(f"/api/v1/jobs/{job_id}").json()["applied_at"] == first["applied_at"]
+
+
+def test_a_fill_report_marks_the_application_as_started_once(app_and_db):
+    client, SessionLocal = app_and_db
+    job_id = _job(SessionLocal)
+    headers = _token(client)
+    assert client.get(f"/api/v1/jobs/{job_id}").json()["application_started_at"] is None
+    body = {"job_id": job_id, "page_url": "https://job-boards.greenhouse.io/acme/jobs/123", "filled_count": 3, "flagged": []}
+    assert client.post("/api/v1/apply/report", json=body, headers=headers).status_code == 204
+    first = client.get(f"/api/v1/jobs/{job_id}").json()["application_started_at"]
+    assert first
+    client.post("/api/v1/apply/report", json=body, headers=headers)
+    assert client.get(f"/api/v1/jobs/{job_id}").json()["application_started_at"] == first

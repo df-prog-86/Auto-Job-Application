@@ -16,7 +16,7 @@ import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api"
  * browser extension). Nothing runs automatically: scoring, proceeding and
  * tailoring each happen only when you click.
  */
-type Stage = "all" | "to-score" | "going" | "ready" | "applied" | "interviewing";
+type Stage = "all" | "to-score" | "going" | "ready" | "progress" | "applied";
 type SortBy = "newest" | "fit";
 
 const STAGES: { value: Stage; label: string }[] = [
@@ -24,8 +24,8 @@ const STAGES: { value: Stage; label: string }[] = [
   { value: "to-score", label: "Not yet going after" },
   { value: "going", label: "Going after" },
   { value: "ready", label: "Ready to apply" },
-  { value: "applied", label: "Applied" },
-  { value: "interviewing", label: "Interviewing" },
+  { value: "progress", label: "Application in progress" },
+  { value: "applied", label: "Application completed" },
 ];
 
 function hasResumeDoc(job: JobOut): boolean {
@@ -35,11 +35,12 @@ function hasResumeDoc(job: JobOut): boolean {
 function inStage(job: JobOut, stage: Stage): boolean {
   const going = job.application_status === "proceeding";
   const applied = !!job.applied_at;
-  if (stage === "interviewing") return !!job.interviewing_at;
-  if (stage === "applied") return applied && !job.interviewing_at;
+  const started = !!job.application_started_at;
+  if (stage === "applied") return applied;
+  if (stage === "progress") return started && !applied;
   if (stage === "to-score") return !going && !applied;
   if (stage === "going") return going && !applied;
-  if (stage === "ready") return going && hasResumeDoc(job) && !applied;
+  if (stage === "ready") return going && hasResumeDoc(job) && !started && !applied;
   return true;
 }
 
@@ -134,8 +135,8 @@ function Progress({ job }: { job: JobOut }) {
     { label: "Scored", done: !!job.evaluation },
     { label: "Going after", done: job.application_status === "proceeding" },
     { label: "Resume ready", done: job.documents.some((d) => d.document_type === "resume") },
+    { label: "Application started", done: !!job.application_started_at || !!job.applied_at },
     { label: "Applied", done: !!job.applied_at },
-    { label: "Interviewing", done: !!job.interviewing_at },
   ];
   return (
     <ol className="flex items-center" aria-label="Progress">
@@ -290,10 +291,6 @@ function JobCard({ job }: { job: JobOut }) {
       return refresh();
     },
   });
-  const interviewingMutation = useMutation<JobOut, ApiError, void>({
-    mutationFn: () => (job.interviewing_at ? api.markNotInterviewing(job.id) : api.markInterviewing(job.id)),
-    onSuccess: refresh,
-  });
   const notAppliedMutation = useMutation<JobOut, ApiError, void>({
     mutationFn: () => api.markNotApplied(job.id),
     onSuccess: refresh,
@@ -312,7 +309,7 @@ function JobCard({ job }: { job: JobOut }) {
   });
 
   const error =
-    proceedMutation.error ?? requalifyMutation.error ?? tailorMutation.error ?? originalMutation.error ?? undoMutation.error ?? appliedMutation.error ?? interviewingMutation.error ?? notAppliedMutation.error ?? deleteMutation.error;
+    proceedMutation.error ?? requalifyMutation.error ?? tailorMutation.error ?? originalMutation.error ?? undoMutation.error ?? appliedMutation.error ?? notAppliedMutation.error ?? deleteMutation.error;
 
   const scoreButtonLabel = requalifyMutation.isPending
     ? evaluation
@@ -322,12 +319,28 @@ function JobCard({ job }: { job: JobOut }) {
       ? "Re-score match"
       : "Score match";
 
+  const detailsButton = (
+    <button
+      type="button"
+      onClick={() => setExpanded((v) => !v)}
+      aria-expanded={expanded}
+      className="text-xs font-semibold text-brand-600 hover:text-brand-700"
+    >
+      {expanded ? "Hide details" : "Show details"}
+    </button>
+  );
+
   const applyBlock = (
     <div>
               <div className="flex flex-wrap items-center gap-3">
                 <Button variant="primary" onClick={startApplication} disabled={applyState.kind === "starting"}>
                   {applyState.kind === "starting" ? "Opening…" : "Complete application"}
                 </Button>
+                {!job.applied_at && !markingApplied && (
+                  <Button variant="secondary" onClick={() => setMarkingApplied(true)}>
+                    Mark as applied
+                  </Button>
+                )}
                 <span className="text-xs text-ink-500">
                   Opens the application in a new tab and fills it in. You review it and press Submit yourself.
                 </span>
@@ -351,7 +364,7 @@ function JobCard({ job }: { job: JobOut }) {
 
   return (
     <li>
-      <Card className="p-6">
+      <Card className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 className="text-lg font-bold leading-snug text-ink-900">{job.title}</h2>
@@ -392,9 +405,6 @@ function JobCard({ job }: { job: JobOut }) {
                   Undo proceeding
                 </MenuItem>
               )}
-              <MenuItem onClick={() => interviewingMutation.mutate()} disabled={interviewingMutation.isPending}>
-                {job.interviewing_at ? "Not interviewing" : "Mark as interviewing"}
-              </MenuItem>
               {job.applied_at ? (
                 <MenuItem onClick={() => notAppliedMutation.mutate()} disabled={notAppliedMutation.isPending}>
                   Not applied after all
@@ -416,7 +426,7 @@ function JobCard({ job }: { job: JobOut }) {
           </div>
         )}
 
-        <div className="mt-5 border-t border-ink-900/5 pt-4">
+        <div className="mt-3 border-t border-ink-900/5 pt-3">
           <Progress job={job} />
         </div>
 
@@ -450,13 +460,13 @@ function JobCard({ job }: { job: JobOut }) {
           </div>
         )}
 
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           {!evaluation && !proceeding && (
             <Button variant="primary" onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
               {scoreButtonLabel}
             </Button>
           )}
-          {!job.applied_at && !markingApplied && (
+          {!job.applied_at && !markingApplied && !(proceeding && hasResume) && (
             <Button variant="secondary" onClick={() => setMarkingApplied(true)}>
               Mark as applied
             </Button>
@@ -506,8 +516,11 @@ function JobCard({ job }: { job: JobOut }) {
           <p className="mt-3 animate-pulse text-xs text-ink-500">Tailoring your resume. This can take a minute.</p>
         )}
 
-        {proceeding && hasResume && !expanded && (
-          <div className="mt-4 rounded-2xl bg-brand-50/60 p-4">{applyBlock}</div>
+        {proceeding && hasResume && !expanded && !job.applied_at && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            {applyBlock}
+            {detailsButton}
+          </div>
         )}
 
         {proceeding && hasResume && expanded && (
@@ -585,16 +598,10 @@ function JobCard({ job }: { job: JobOut }) {
           </div>
         )}
 
-        {(evaluation || (proceeding && hasResume)) && (
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            aria-expanded={expanded}
-            className="mt-3 text-xs font-semibold text-brand-600 hover:text-brand-700"
-          >
-            {expanded ? "Hide details" : "Show details"}
-          </button>
-        )}
+        {(evaluation || (proceeding && hasResume)) &&
+          !(proceeding && hasResume && !expanded && !job.applied_at) && (
+            <div className="mt-3">{detailsButton}</div>
+          )}
 
         {confirmingDelete && (
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800">

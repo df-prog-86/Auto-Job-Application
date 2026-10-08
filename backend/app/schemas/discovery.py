@@ -123,6 +123,7 @@ class JobOut(BaseModel):
     application_status: str
     applied_at: dt.datetime | None = None
     applied_via: str | None = None
+    application_started_at: dt.datetime | None = None
     interviewing_at: dt.datetime | None = None
     followup_done_at: dt.datetime | None = None
     evaluation: JobEvaluationOut | None = None

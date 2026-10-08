@@ -299,6 +299,9 @@ def report_fill(payload: ApplyReportIn, db: Session = Depends(get_db)) -> None:
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
 
+    if job.application_started_at is None:
+        job.application_started_at = dt.datetime.now(dt.timezone.utc)
+
     existing = {
         q.question_key: q
         for q in db.query(PendingQuestion).filter(PendingQuestion.job_id == job.id).all()

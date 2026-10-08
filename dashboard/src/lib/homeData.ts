@@ -2,7 +2,7 @@ import type { JobOut } from "@/types/api";
 
 /** What the Home page works out from the saved jobs. Plain functions so they are easy to check. */
 
-export type StageKey = "scored" | "going" | "ready" | "applied" | "interviewing";
+export type StageKey = "scored" | "going" | "ready" | "progress" | "applied";
 
 export const FOLLOW_UP_AFTER_DAYS = 7;
 const DAY = 86_400_000;
@@ -16,8 +16,8 @@ export function daysSince(iso: string | null | undefined, now: Date): number {
 
 /** The furthest step a job has reached. A job sits in exactly one stage. */
 export function stageOf(j: JobOut): StageKey | null {
-  if (j.interviewing_at) return "interviewing";
   if (j.applied_at) return "applied";
+  if (j.application_started_at) return "progress";
   if (j.application_status === "proceeding") return hasResume(j) ? "ready" : "going";
   if (j.evaluation) return "scored";
   return null;
@@ -26,7 +26,7 @@ export function stageOf(j: JobOut): StageKey | null {
 const score = (j: JobOut) => j.evaluation?.overall_score ?? -1;
 
 export function byStage(jobs: JobOut[]): Record<StageKey, JobOut[]> {
-  const out: Record<StageKey, JobOut[]> = { scored: [], going: [], ready: [], applied: [], interviewing: [] };
+  const out: Record<StageKey, JobOut[]> = { scored: [], going: [], ready: [], progress: [], applied: [] };
   for (const j of jobs) {
     const s = stageOf(j);
     if (s) out[s].push(j);
@@ -35,7 +35,7 @@ export function byStage(jobs: JobOut[]): Record<StageKey, JobOut[]> {
   out.going.sort((a, b) => score(b) - score(a));
   out.ready.sort((a, b) => score(b) - score(a));
   out.applied.sort((a, b) => +new Date(a.applied_at ?? 0) - +new Date(b.applied_at ?? 0));
-  out.interviewing.sort((a, b) => +new Date(a.interviewing_at ?? 0) - +new Date(b.interviewing_at ?? 0));
+  out.progress.sort((a, b) => +new Date(a.application_started_at ?? 0) - +new Date(b.application_started_at ?? 0));
   return out;
 }
 
@@ -43,7 +43,7 @@ export function byStage(jobs: JobOut[]): Record<StageKey, JobOut[]> {
 export function stalledStage(stages: Record<StageKey, JobOut[]>, now: Date): StageKey | null {
   let best: StageKey | null = null;
   let bestAge = 2;
-  for (const key of ["scored", "going", "ready"] as const) {
+  for (const key of ["scored", "going", "ready", "progress"] as const) {
     for (const j of stages[key]) {
       const age = daysSince(j.first_seen, now);
       if (age > bestAge) {
@@ -81,16 +81,15 @@ export interface FollowUp {
   days: number;
 }
 
-/** Applications with no reply after a week, and recent interviews that still need a thank you. */
+/** Applications with no reply after a week. */
 export function followUps(jobs: JobOut[], now: Date): FollowUp[] {
   const out: FollowUp[] = [];
   for (const job of jobs) {
-    const since = job.interviewing_at ?? job.applied_at;
+    const since = job.applied_at;
     if (!since) continue;
     if (job.followup_done_at && new Date(job.followup_done_at) >= new Date(since)) continue;
     const days = daysSince(since, now);
-    if (job.interviewing_at) out.push({ job, kind: "after_interview", days });
-    else if (days >= FOLLOW_UP_AFTER_DAYS) out.push({ job, kind: "after_applying", days });
+    if (days >= FOLLOW_UP_AFTER_DAYS) out.push({ job, kind: "after_applying", days });
   }
   return out.sort((a, b) => b.days - a.days);
 }

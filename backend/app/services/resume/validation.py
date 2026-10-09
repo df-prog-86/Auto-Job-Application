@@ -155,3 +155,57 @@ def _check_rewrite(
 
 def plan_to_dict(plan: TailorPlan) -> dict[int, list[tuple[int, str]]]:
     return {p.block_id: [(b.bullet_id, b.text) for b in p.bullets] for p in plan.blocks}
+
+
+def sanitize_plan(
+    plan: TailorPlan, blocks: list[Block], master_text: str, firm: bool = False, parts: list[TextPart] | None = None
+) -> tuple[TailorPlan, list[str]]:
+    """
+    Keeps what passed the checks and puts back the original for the rest, instead of throwing the whole
+    tailoring away over one bad rewrite. Returns the cleaned plan and a plain note for each thing skipped.
+    Structural problems (a bullet dropped, moved to another role, an unknown id) are not repaired here.
+    """
+    vocabulary = _words(master_text)
+    notes: list[str] = []
+    blocks_by_id = {b.id: b for b in blocks}
+    for planned in plan.blocks:
+        block = blocks_by_id.get(planned.block_id)
+        if block is None:
+            continue
+        original = {b.id: b for b in block.bullets}
+        for bullet in planned.bullets:
+            if bullet.bullet_id not in original:
+                continue
+            found = _check_rewrite(bullet.bullet_id, original[bullet.bullet_id].text, bullet.text, vocabulary, firm)
+            if found:
+                notes.append(f"Kept the original wording of one bullet ({found[0].split(' ', 2)[2]}).")
+                bullet.text = original[bullet.bullet_id].text
+    by_id = {p.id: p for p in (parts or [])}
+    keep_summaries = []
+    for planned in plan.summaries:
+        part = by_id.get(planned.part_id)
+        found = (
+            _check_rewrite(
+                planned.part_id, part.text, planned.text, vocabulary, firm,
+                label="summary", max_growth=MAX_LENGTH_GROWTH_FIRM if firm else MAX_LENGTH_GROWTH_LIGHT,
+            )
+            if part is not None and part.kind == "summary"
+            else ["unknown"]
+        )
+        if found:
+            notes.append(f"Kept your original summary ({found[0].split(' ', 2)[-1]}).")
+        else:
+            keep_summaries.append(planned)
+    plan.summaries = keep_summaries
+    keep_skills = []
+    for planned in plan.skills:
+        part = by_id.get(planned.part_id)
+        ok = part is not None and part.kind == "skills" and sorted(i.strip().lower() for i in planned.items) == sorted(
+            i.lower() for i in part.items
+        )
+        if ok:
+            keep_skills.append(planned)
+        else:
+            notes.append("Kept the original order of one skills line (the AI changed its items).")
+    plan.skills = keep_skills
+    return plan, notes

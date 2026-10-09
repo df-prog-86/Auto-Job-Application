@@ -7,6 +7,7 @@ are kept (nothing unvalidated is ever applied).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
@@ -16,7 +17,9 @@ from app.services.llm.exceptions import LLMError
 from app.services.llm.router import ModelRouter
 from app.services.llm.schemas import TailorPlan
 from app.services.resume.docx_editor import Block, TextPart
-from app.services.resume.validation import validate_plan
+from app.services.resume.validation import sanitize_plan, validate_plan
+
+logger = logging.getLogger("resume_tailor")
 
 
 @dataclass
@@ -121,6 +124,7 @@ async def generate_plan(
         },
     ]
     all_problems: list[str] = []
+    last_plan: TailorPlan | None = None
     for _ in range(2):
         try:
             plan = await router.get_structured(
@@ -132,9 +136,11 @@ async def generate_plan(
         except LLMError as exc:
             all_problems.append(f"model call failed: {exc}")
             break
+        last_plan = plan
         problems = validate_plan(plan, blocks, master_text, firm, parts)
         if not problems:
             return PlanResult(plan, [], list(plan.changelog))
+        logger.warning("resume tailor (%s) failed checks: %s", strength, "; ".join(problems)[:1500])
         all_problems.extend(problems)
         messages = messages + [
             {
@@ -142,6 +148,19 @@ async def generate_plan(
                 "content": "That output failed validation: " + "; ".join(problems) + ". Return corrected JSON.",
             }
         ]
+
+    if last_plan is not None:
+        # Keep the parts that passed and put back the original for the rest, rather than losing everything.
+        cleaned, notes = sanitize_plan(last_plan, blocks, master_text, firm, parts)
+        if not validate_plan(cleaned, blocks, master_text, firm, parts):
+            skipped = sorted(set(notes))
+            return PlanResult(
+                cleaned,
+                [],
+                list(cleaned.changelog)
+                + ["Some edits didn't pass the accuracy checks and were left as you wrote them:"]
+                + skipped,
+            )
 
     return PlanResult(
         None,

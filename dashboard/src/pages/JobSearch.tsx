@@ -286,24 +286,26 @@ export function JobSearch() {
   return (
     <div className="space-y-5">
       {toast && (
-        <div
-          className="added-toast fixed bottom-6 right-6 z-50 flex items-center gap-4 rounded-2xl bg-[rgba(28,27,58,0.82)] py-3 pl-5 pr-3 text-sm text-white shadow-lg backdrop-blur"
-          role="status"
-          onMouseEnter={() => (toastHovered.current = true)}
-          onMouseLeave={() => (toastHovered.current = false)}
-        >
-          <span>Added to Jobs</span>
-          <button
-            type="button"
-            className="rounded-full bg-white px-4 py-2 text-[13px] font-bold text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-white/60"
-            onClick={() => {
-              const id = toast.jobId;
-              setToast(null);
-              navigate(`/jobs?highlight=${id}`);
-            }}
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-6">
+          <div
+            className="added-toast pointer-events-auto flex items-center gap-5 rounded-2xl bg-[rgba(28,27,58,0.82)] py-4 pl-6 pr-4 text-[15px] text-white shadow-lg backdrop-blur"
+            role="status"
+            onMouseEnter={() => (toastHovered.current = true)}
+            onMouseLeave={() => (toastHovered.current = false)}
           >
-            Go to job listing
-          </button>
+            <span>Added to Jobs</span>
+            <button
+              type="button"
+              className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-white/60"
+              onClick={() => {
+                const id = toast.jobId;
+                setToast(null);
+                navigate(`/jobs?highlight=${id}`);
+              }}
+            >
+              Go to job listing
+            </button>
+          </div>
         </div>
       )}
       <PageHeader

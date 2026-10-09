@@ -54,3 +54,23 @@ def test_light_summary_cannot_invent_numbers_or_grow():
     assert validate_plan(plan, blocks, de.full_text(d), False, parts)
     longer = TailorPlan(summaries=[PlannedSummary(part_id=0, text=SUMMARY + " " + SUMMARY[:60])])
     assert validate_plan(longer, blocks, de.full_text(d), False, parts)
+
+
+def test_sanitize_keeps_good_edits_and_restores_bad_ones():
+    from app.services.llm.schemas import PlannedBlock, PlannedBullet
+    from app.services.resume.validation import sanitize_plan
+
+    d = _doc()
+    blocks, parts = de.find_blocks(d), de.find_text_parts(d)
+    bullet = blocks[0].bullets[0]
+    plan = TailorPlan(
+        blocks=[PlannedBlock(block_id=0, bullets=[PlannedBullet(bullet_id=bullet.id, text="Cut denials by 90% using Lean Six Sigma")])],
+        summaries=[PlannedSummary(part_id=0, text=SUMMARY.replace("leading", "driving"))],
+        skills=[PlannedSkills(part_id=1, items=["Tableau", "SQL", "Python", "Excel"])],
+    )
+    assert validate_plan(plan, blocks, de.full_text(d), True, parts)
+    cleaned, notes = sanitize_plan(plan, blocks, de.full_text(d), True, parts)
+    assert validate_plan(cleaned, blocks, de.full_text(d), True, parts) == []
+    assert cleaned.blocks[0].bullets[0].text == bullet.text
+    assert len(cleaned.summaries) == 1 and cleaned.skills == []
+    assert notes

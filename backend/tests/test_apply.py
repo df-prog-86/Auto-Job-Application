@@ -378,3 +378,17 @@ def test_a_fill_report_marks_the_application_as_started_once(app_and_db):
     assert first
     client.post("/api/v1/apply/report", json=body, headers=headers)
     assert client.get(f"/api/v1/jobs/{job_id}").json()["application_started_at"] == first
+
+
+def test_starting_an_application_is_recorded_straight_away_and_once(app_and_db):
+    client, SessionLocal = app_and_db
+    job_id = _job(SessionLocal)
+    headers = _token(client)
+    assert client.post("/api/v1/apply/started", json={"job_id": job_id}).status_code == 401
+    assert client.post("/api/v1/apply/started", json={"job_id": 9999}, headers=headers).status_code == 404
+    assert client.get(f"/api/v1/jobs/{job_id}").json()["application_started_at"] is None
+    assert client.post("/api/v1/apply/started", json={"job_id": job_id}, headers=headers).status_code == 204
+    first = client.get(f"/api/v1/jobs/{job_id}").json()["application_started_at"]
+    assert first
+    assert client.post("/api/v1/apply/started", json={"job_id": job_id}, headers=headers).status_code == 204
+    assert client.get(f"/api/v1/jobs/{job_id}").json()["application_started_at"] == first

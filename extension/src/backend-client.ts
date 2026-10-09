@@ -93,6 +93,14 @@ export const backend = {
       true,
     ),
 
+  /** The person began this application; marks "Application started" right away. */
+  applyStarted: (jobId: number) =>
+    request<void>(
+      "/api/v1/apply/started",
+      { method: "POST", body: JSON.stringify({ job_id: jobId }) },
+      true,
+    ),
+
   /** The employer's "application received" page was seen for this job. */
   applySubmitted: (jobId: number) =>
     request<void>(

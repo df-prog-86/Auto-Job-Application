@@ -292,6 +292,18 @@ def report_submitted(payload: ApplySubmittedIn, db: Session = Depends(get_db)) -
         db.commit()
 
 
+@router.post("/started", status_code=status.HTTP_204_NO_CONTENT)
+def report_started(payload: ApplySubmittedIn, db: Session = Depends(get_db)) -> None:
+    """The person began this application (the extension opened or filled it). Marks "Application started" once, right away,
+    so it shows even when the run stops early, for example at a sign-in page."""
+    job = db.get(Job, payload.job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    if job.application_started_at is None:
+        job.application_started_at = dt.datetime.now(dt.timezone.utc)
+        db.commit()
+
+
 @router.post("/report", status_code=status.HTTP_204_NO_CONTENT)
 def report_fill(payload: ApplyReportIn, db: Session = Depends(get_db)) -> None:
     """Records the questions left blank. Re-running Fill never creates duplicates."""

@@ -58,6 +58,7 @@ async function fillApplicationPage(tabId: number, jobId?: number): Promise<FillP
     };
   }
 
+  await backend.applyStarted(ctx.job.id).catch(() => undefined); // shows as started even if the run stops early
   const resume = { base64: await downloadDocumentBase64(ctx.resume.document_id), filename: ctx.resume.filename };
   const applyCtx: ApplyContext = {
     candidate: ctx.candidate,
@@ -300,6 +301,7 @@ async function finishWorkdayRun(
 }
 
 async function completeWorkdayApplication(jobId: number, url: string): Promise<void> {
+  await backend.applyStarted(jobId).catch(() => undefined); // a Workday run can stop at sign-in; it still counts as started
   const tab = await chrome.tabs.create({ url, active: true });
   if (tab.id === undefined) return;
   const run: WorkdayRun = { tabId: tab.id, jobId, startedAt: Date.now() };

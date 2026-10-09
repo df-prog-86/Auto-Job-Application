@@ -58,7 +58,7 @@ def remove_job_documents(db: Session, job: Job) -> None:
     db.flush()
 
 
-async def tailor_resume(db: Session, job: Job, candidate_name: str) -> TailorOutcome:
+async def tailor_resume(db: Session, job: Job, candidate_name: str, strength: str = "light") -> TailorOutcome:
     master = master_path()
     if master is None:
         raise MasterMissingError(
@@ -67,7 +67,7 @@ async def tailor_resume(db: Session, job: Job, candidate_name: str) -> TailorOut
 
     doc = Document(str(master))  # read-only use of the master; saved elsewhere below
     blocks = docx_editor.find_blocks(doc)
-    result = await generate_plan(db, job, blocks, docx_editor.full_text(doc))
+    result = await generate_plan(db, job, blocks, docx_editor.full_text(doc), strength)
     if result.plan is not None:
         docx_editor.apply_plan(blocks, plan_to_dict(result.plan))
     docx_editor.clean_dashes(doc)

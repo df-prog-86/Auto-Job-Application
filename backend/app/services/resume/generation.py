@@ -46,6 +46,28 @@ SYSTEM_PROMPT = (
 )
 
 
+FIRM_PROMPT = (
+    "You tailor a resume for one job. The resume is the candidate's single master resume, "
+    "given to you as blocks of bullets (each block is one role's bullet list). Return ONLY JSON "
+    "matching the schema.\n"
+    "Edit philosophy (firm tailor): shape the resume so it speaks to this job. For every block, "
+    "return ALL of its bullets exactly once, reordered by fit to the job description, best fit first. "
+    "You may rewrite how a bullet is phrased: lead with the part most relevant to the job, restructure "
+    "the sentence, and use the job description's own vocabulary where the bullet or the master resume "
+    "truthfully supports it. Keep each bullet about the same length as the original (never more than "
+    "about a quarter longer) so the page layout does not change. Do not merge or split bullets. A bullet "
+    "that already fits the job may stay as it is.\n"
+    "Hard bans: every fact must come from the master: the same employers, titles, tools, numbers, "
+    "scope and tenure. Never invent or imply tools, certifications, titles, employers, metrics, or "
+    "specialties the master does not state. Never add numbers. Never inflate years or responsibility. "
+    "If the job asks for something the master does not support, leave it out and instead add a note to "
+    "the changelog. Do not add a substitute line for a missing requirement. Never use em dashes or en dashes.\n"
+    "changelog: short plain notes for the candidate covering what you reordered, what you rephrased "
+    "and every gap (missing tools or certifications, years under the job's bar, anything required "
+    "that the master does not support)."
+)
+
+
 def _blocks_text(blocks: list[Block]) -> str:
     lines: list[str] = []
     for block in blocks:
@@ -54,13 +76,16 @@ def _blocks_text(blocks: list[Block]) -> str:
     return "\n".join(lines)
 
 
-async def generate_plan(db: Session, job: Job, blocks: list[Block], master_text: str) -> PlanResult:
+async def generate_plan(
+    db: Session, job: Job, blocks: list[Block], master_text: str, strength: str = "light"
+) -> PlanResult:
+    firm = strength == "firm"
     if not blocks:
         return PlanResult(None, [], ["No bulleted experience was found in the master resume, so nothing was reordered."])
 
     router = ModelRouter(db)
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": FIRM_PROMPT if firm else SYSTEM_PROMPT},
         {
             "role": "user",
             "content": (
@@ -74,14 +99,14 @@ async def generate_plan(db: Session, job: Job, blocks: list[Block], master_text:
         try:
             plan = await router.get_structured(
                 purpose="resume_tailoring",
-                prompt_version="v2",
+                prompt_version="v3-firm" if firm else "v2",
                 messages=messages,
                 response_model=TailorPlan,
             )
         except LLMError as exc:
             all_problems.append(f"model call failed: {exc}")
             break
-        problems = validate_plan(plan, blocks, master_text)
+        problems = validate_plan(plan, blocks, master_text, firm)
         if not problems:
             return PlanResult(plan, [], list(plan.changelog))
         all_problems.extend(problems)

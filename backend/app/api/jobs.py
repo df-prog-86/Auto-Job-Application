@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
@@ -153,7 +154,9 @@ async def requalify_job(job_id: int, db: Session = Depends(get_db)) -> JobOut:
 
 
 @router.post("/{job_id}/tailor", response_model=TailorResumeOut)
-async def tailor_resume_for_job(job_id: int, db: Session = Depends(get_db)) -> TailorResumeOut:
+async def tailor_resume_for_job(
+    job_id: int, strength: Literal["light", "firm"] = "light", db: Session = Depends(get_db)
+) -> TailorResumeOut:
     """
     Milestone 5: edits a copy of the candidate's master Word resume into a
     tailored resume (Word). Only allowed once the candidate has clicked
@@ -171,7 +174,7 @@ async def tailor_resume_for_job(job_id: int, db: Session = Depends(get_db)) -> T
         )
     profile = get_current_profile(db)
     try:
-        outcome = await tailor_resume(db, job, profile.name if profile else "Candidate")
+        outcome = await tailor_resume(db, job, profile.name if profile else "Candidate", strength)
     except MasterMissingError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except Exception as exc:

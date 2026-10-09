@@ -185,8 +185,8 @@ export const api = {
   forgetAnswer: (key: string) => request<void>(`/profile/answers/${encodeURIComponent(key)}`, { method: "DELETE" }),
   useOriginalResume: (id: number) =>
     request<GeneratedDocumentOut[]>(`/jobs/${id}/original-resume`, { method: "POST" }),
-  tailorResume: (id: number) =>
-    request<TailorResumeOut>(`/jobs/${id}/tailor`, { method: "POST" }),
+  tailorResume: (id: number, strength: "light" | "firm" = "light") =>
+    request<TailorResumeOut>(`/jobs/${id}/tailor?strength=${strength}`, { method: "POST" }),
   listNeedsAttention: () => request<PendingQuestionOut[]>("/needs-attention"),
   answerQuestion: (id: number, answer: string) =>
     request<PendingQuestionOut>(`/needs-attention/${id}/answer`, {

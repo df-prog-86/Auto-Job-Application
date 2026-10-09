@@ -113,3 +113,20 @@ def test_resume_roles_reads_the_bullets_under_each_role(tmp_path):
         ["Cleaned data in Excel"],
     ]
     assert resume_roles(tmp_path / "missing.docx") == []
+
+
+def test_firm_tailor_allows_more_rephrasing_but_never_new_facts_or_longer_bullets():
+    doc = _master()
+    blocks = docx_editor.find_blocks(doc)
+    full = docx_editor.full_text(doc)
+    # Keeps about half of the words: too much for a light tailor, fine for a firm one.
+    rephrased = {0: "Cut report turnaround 40% through SQL automation"}
+    plan = _plan(blocks, [0, 1, 2], rephrased)
+    assert validate_plan(plan, blocks, full)  # light says no
+    assert validate_plan(plan, blocks, full, firm=True) == []
+    # Facts stay fixed in firm mode too.
+    assert validate_plan(_plan(blocks, [0, 1, 2], {0: "Reduced report time by 60% using SQL"}), blocks, full, firm=True)
+    assert validate_plan(_plan(blocks, [0, 1, 2], {2: "Built Tableau dashboards in Kubernetes"}), blocks, full, firm=True)
+    # A much longer bullet could push the page layout around.
+    long_one = {1: "Led a team of 5 analysts and guided each of them through reporting reviews, planning cycles and weekly check-ins across the group"}
+    assert validate_plan(_plan(blocks, [0, 1, 2], long_one), blocks, full, firm=True)

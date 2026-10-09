@@ -20,7 +20,9 @@ import re
 from app.services.llm.schemas import TailorPlan
 from app.services.resume.docx_editor import Block
 
-MIN_WORDS_KEPT = 0.6
+MIN_WORDS_KEPT = 0.6  # light tailor
+MIN_WORDS_KEPT_FIRM = 0.4  # firm tailor may rephrase more
+MAX_LENGTH_GROWTH_FIRM = 1.25  # a firm rewrite stays about as long, so the page layout does not shift
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?%?")
 _WORD = re.compile(r"[a-z0-9]+")
 _TERM = re.compile(r"[A-Za-z0-9][A-Za-z0-9+#./-]*")
@@ -34,7 +36,7 @@ def _words(text: str) -> set[str]:
     return set(_WORD.findall(text.lower()))
 
 
-def validate_plan(plan: TailorPlan, blocks: list[Block], master_text: str) -> list[str]:
+def validate_plan(plan: TailorPlan, blocks: list[Block], master_text: str, firm: bool = False) -> list[str]:
     problems: list[str] = []
     blocks_by_id = {b.id: b for b in blocks}
     vocabulary = _words(master_text)
@@ -59,11 +61,11 @@ def validate_plan(plan: TailorPlan, blocks: list[Block], master_text: str) -> li
             continue
 
         for bullet in planned.bullets:
-            problems.extend(_check_rewrite(bullet.bullet_id, original[bullet.bullet_id].text, bullet.text, vocabulary))
+            problems.extend(_check_rewrite(bullet.bullet_id, original[bullet.bullet_id].text, bullet.text, vocabulary, firm))
     return problems
 
 
-def _check_rewrite(bullet_id: int, original: str, new: str, vocabulary: set[str]) -> list[str]:
+def _check_rewrite(bullet_id: int, original: str, new: str, vocabulary: set[str], firm: bool = False) -> list[str]:
     if new == original:
         return []
     problems: list[str] = []
@@ -76,8 +78,11 @@ def _check_rewrite(bullet_id: int, original: str, new: str, vocabulary: set[str]
     original_words = _words(original)
     if original_words:
         kept = len(original_words & _words(new)) / len(original_words)
-        if kept < MIN_WORDS_KEPT:
+        if kept < (MIN_WORDS_KEPT_FIRM if firm else MIN_WORDS_KEPT):
             problems.append(f"{label} rewords the original too heavily (keeps {kept:.0%} of its words)")
+
+    if firm and len(new) > len(original) * MAX_LENGTH_GROWTH_FIRM + 10:
+        problems.append(f"{label} is much longer than the original, which could change the page layout")
 
     for index, term in enumerate(_TERM.findall(new)):
         lowered = term.lower()

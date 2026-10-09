@@ -334,6 +334,12 @@ async def resolve_original_sources(items: list[dict[str, Any]]) -> tuple[list[di
 
     attempt = todo[:MAX_RESOLVE]
     resolved = await asyncio.gather(*(one(i) for i in attempt))
+    for item, found in zip(attempt, resolved):
+        log.warning(
+            "job search: not on an employer site: %s | %s -> %s", item.get("company"), item["url"], found["url"] if found else "no employer posting found"
+        )
+    for item in todo[MAX_RESOLVE:]:
+        log.warning("job search: not on an employer site (not looked up, over the limit): %s | %s", item.get("company"), item["url"])
     replacement = {id(i): r for i, r in zip(attempt, resolved)}
     out: list[dict[str, Any]] = []
     seen: set[str] = set()

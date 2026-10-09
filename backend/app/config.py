@@ -49,8 +49,9 @@ class Settings(BaseSettings):
     # Job Search. The web lookup is billed per search by its engine (about $0.007 each on Exa, $0.001 on Parallel "fast"),
     # separately from the model. A separate model can be set for search; empty uses PRIMARY_FAST_MODEL.
     JOB_SEARCH_MODEL: str | None = None
-    JOB_SEARCH_ENGINE: str = "parallel"  # "exa", "parallel", "perplexity" or "firecrawl"
-    JOB_SEARCH_ENGINE_MODE: str | None = "fast"  # parallel: turbo/fast ($1 per 1,000), basic/advanced ($5); exa: auto/fast ($7)
+    # Exa is the engine tried and known to honor the site filters. Parallel "fast" was tried and returned nothing (500 errors, empty results).
+    JOB_SEARCH_ENGINE: str = "exa"  # "exa", "parallel", "perplexity" or "firecrawl"
+    JOB_SEARCH_ENGINE_MODE: str | None = None  # exa: auto/fast/instant ($7 per 1,000), deep ($12); parallel: turbo/fast ($1), basic ($5)
 
     # --- Discovery scheduling (spec §18) -----------------------------------
     DISCOVERY_INTERVAL_HOURS: int = 12

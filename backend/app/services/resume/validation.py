@@ -33,6 +33,23 @@ DESCRIPTIVE_WORDS = frozenset(
     "creative committed thoughtful customer focused data patient client people team goal outcome impact "
     "senior leading lead leader professional".split()
 )
+# Generic professional competencies. A keyword made only of these (plus words already in the resume) may be
+# woven in or added to a skills line when the job posting asks for it. Tools, systems, certifications and
+# degrees are not here, so they can only appear if the resume already names them.
+COMPETENCY_WORDS = frozenset(
+    "project program portfolio change transformation process improvement management leadership planning strategy "
+    "strategic analysis analytics reporting stakeholder engagement communication coordination collaboration "
+    "development team operations operational compliance regulatory training coaching mentoring onboarding "
+    "implementation optimization performance quality assurance risk governance budgeting forecasting vendor "
+    "contract negotiation cross functional crossfunctional agile scrum waterfall requirements documentation "
+    "workflow automation problem solving decision making critical thinking relationship building client customer "
+    "patient healthcare revenue cycle clinical business consulting facilitation presentation research reporting "
+    "policy procedure standardization scheduling resource allocation prioritization time organization "
+    "organizational adaptability innovation culture talent recruiting hiring staffing delivery lifecycle "
+    "integration migration adoption support service strategy execution oversight supervision evaluation "
+    "measurement metrics kpi data driven continuous lean sixsigma".split()
+) - {"lean", "sixsigma"}
+MAX_ADDED_SKILLS = 5
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?%?")
 _WORD = re.compile(r"[a-z0-9]+")
 _TERM = re.compile(r"[A-Za-z0-9][A-Za-z0-9+#./-]*")
@@ -47,7 +64,8 @@ def _words(text: str) -> set[str]:
 
 
 def validate_plan(
-    plan: TailorPlan, blocks: list[Block], master_text: str, firm: bool = False, parts: list[TextPart] | None = None
+    plan: TailorPlan, blocks: list[Block], master_text: str, firm: bool = False, parts: list[TextPart] | None = None,
+    job_text: str = "",
 ) -> list[str]:
     problems: list[str] = []
     blocks_by_id = {b.id: b for b in blocks}
@@ -74,12 +92,45 @@ def validate_plan(
 
         for bullet in planned.bullets:
             problems.extend(_check_rewrite(bullet.bullet_id, original[bullet.bullet_id].text, bullet.text, vocabulary, firm))
-    problems.extend(_validate_text_parts(plan, parts or [], vocabulary, firm))
+    problems.extend(_validate_text_parts(plan, parts or [], vocabulary, firm, job_text))
     return problems
 
 
-def _validate_text_parts(plan: TailorPlan, parts: list[TextPart], vocabulary: set[str], firm: bool) -> list[str]:
+def _norm_phrase(text: str) -> str:
+    return " ".join(_WORD.findall(text.lower()))
+
+
+def _extra_skill_ok(item: str, job_text: str, vocabulary: set[str]) -> bool:
+    """A skill that is not on the line already: generic, short, asked for by the job, and nothing like a tool or credential."""
+    words = _WORD.findall(item.lower())
+    if not 1 <= len(words) <= 4 or any(c.isdigit() for c in item):
+        return False
+    if f" {_norm_phrase(item)} " not in f" {_norm_phrase(job_text)} ":
+        return False
+    return all(w in COMPETENCY_WORDS or w in DESCRIPTIVE_WORDS or w in vocabulary for w in words)
+
+
+def _skills_issue(part: TextPart, items: list[str], job_text: str, vocabulary: set[str]) -> tuple[str | None, int]:
+    """(problem or None, number of items added) for one planned skills line."""
+    original = {i.lower() for i in part.items}
+    lowered = [i.strip().lower() for i in items]
+    if len(set(lowered)) != len(lowered):
+        return "lists a skill twice", 0
+    dropped = [i for i in part.items if i.lower() not in lowered]
+    if dropped:
+        return f"dropped existing skills {dropped}", 0
+    extras = [i for i in items if i.strip().lower() not in original]
+    bad = [e for e in extras if not _extra_skill_ok(e, job_text, vocabulary)]
+    if bad:
+        return f"added skills that are not generic competencies the job asks for: {bad}", 0
+    return None, len(extras)
+
+
+def _validate_text_parts(
+    plan: TailorPlan, parts: list[TextPart], vocabulary: set[str], firm: bool, job_text: str = ""
+) -> list[str]:
     problems: list[str] = []
+    added_total = 0
     by_id = {p.id: p for p in parts}
     seen: set[int] = set()
     for planned in plan.summaries:
@@ -104,11 +155,12 @@ def _validate_text_parts(plan: TailorPlan, parts: list[TextPart], vocabulary: se
         if planned.part_id in seen:
             problems.append(f"skills line {planned.part_id} appears more than once")
         seen.add(planned.part_id)
-        if sorted(i.strip().lower() for i in planned.items) != sorted(i.lower() for i in part.items):
-            problems.append(
-                f"skills line {planned.part_id} must contain each of its items exactly once, spelled as given "
-                f"(expected {part.items})"
-            )
+        issue, added = _skills_issue(part, planned.items, job_text, vocabulary)
+        added_total += added
+        if issue:
+            problems.append(f"skills line {planned.part_id} {issue}")
+    if added_total > MAX_ADDED_SKILLS:
+        problems.append(f"too many skills added in total ({added_total}); the limit is {MAX_ADDED_SKILLS}")
     return problems
 
 
@@ -121,7 +173,7 @@ def skills_to_dict(plan: TailorPlan, parts: list[TextPart]) -> dict[int, list[st
         if part is None:
             continue
         spelled = {i.lower(): i for i in part.items}
-        out[planned.part_id] = [spelled[i.strip().lower()] for i in planned.items]
+        out[planned.part_id] = [spelled.get(i.strip().lower(), i.strip()) for i in planned.items]
     return out
 
 
@@ -169,6 +221,9 @@ def _check_rewrite(
         # Plain descriptive words (skilled, proficient, results-driven...) are never a made-up system.
         if all(p in DESCRIPTIVE_WORDS for p in pieces):
             continue
+        # Generic competency keywords (change management, stakeholder engagement) the job posting may use.
+        if all(p in DESCRIPTIVE_WORDS or p in COMPETENCY_WORDS or p in vocabulary or p in original_words for p in pieces):
+            continue
         if term[0].isupper() or any(c.isdigit() for c in term):
             problems.append(f"{label} introduces a term not found in the master resume: {term!r}")
     return problems
@@ -179,7 +234,8 @@ def plan_to_dict(plan: TailorPlan) -> dict[int, list[tuple[int, str]]]:
 
 
 def sanitize_plan(
-    plan: TailorPlan, blocks: list[Block], master_text: str, firm: bool = False, parts: list[TextPart] | None = None
+    plan: TailorPlan, blocks: list[Block], master_text: str, firm: bool = False, parts: list[TextPart] | None = None,
+    job_text: str = "",
 ) -> tuple[TailorPlan, list[str]]:
     """
     Keeps what passed the checks and puts back the original for the rest, instead of throwing the whole
@@ -219,17 +275,45 @@ def sanitize_plan(
             keep_summaries.append(planned)
     plan.summaries = keep_summaries
     keep_skills = []
+    budget = MAX_ADDED_SKILLS
     for planned in plan.skills:
         part = by_id.get(planned.part_id)
-        ok = part is not None and part.kind == "skills" and sorted(i.strip().lower() for i in planned.items) == sorted(
-            i.lower() for i in part.items
-        )
-        if ok:
+        if part is None or part.kind != "skills":
+            notes.append("Ignored a skills line the AI listed that is not in your resume.")
+            continue
+        original = {i.lower() for i in part.items}
+        kept: list[str] = []
+        seen: set[str] = set()
+        for item in planned.items:
+            key = item.strip().lower()
+            if key in seen:
+                continue
+            if key in original:
+                kept.append(item)
+                seen.add(key)
+            elif budget > 0 and _extra_skill_ok(item, job_text, vocabulary):
+                kept.append(item)
+                seen.add(key)
+                budget -= 1
+            else:
+                notes.append(f"Did not add the skill '{item.strip()}' (not a generic skill the job asks for, or over the limit).")
+        if original <= seen:
+            planned.items = kept
             keep_skills.append(planned)
         else:
-            if part is None or part.kind != "skills":
-                notes.append("Ignored a skills line the AI listed that is not in your resume.")
-            else:
-                notes.append("Kept the original order of one skills line (the AI changed its items).")
+            notes.append("Kept the original order of one skills line (the AI dropped some of its items).")
     plan.skills = keep_skills
     return plan, notes
+
+
+def added_skills(plan: TailorPlan, parts: list[TextPart]) -> list[str]:
+    """Skills the plan puts on a line that were not there before, for the changelog."""
+    by_id = {p.id: p for p in parts}
+    out: list[str] = []
+    for planned in plan.skills:
+        part = by_id.get(planned.part_id)
+        if part is None:
+            continue
+        have = {i.lower() for i in part.items}
+        out.extend(i.strip() for i in planned.items if i.strip().lower() not in have)
+    return out

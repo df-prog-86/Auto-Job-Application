@@ -339,7 +339,8 @@ def apply_text_plan(parts: list[TextPart], summary: dict[int, str], skills: dict
         elif part.kind == "skills" and part.id in skills and skills[part.id] != part.items:
             order = skills[part.id]
             out = order[0]
-            for sep, item in zip(part.seps, order[1:]):
+            for index, item in enumerate(order[1:]):
+                sep = part.seps[index] if index < len(part.seps) else (part.seps[-1] if part.seps else ", ")
                 out += sep + item
             _rewrite_tail(part.element, part.split, out)
             changed += 1

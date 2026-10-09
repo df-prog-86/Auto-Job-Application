@@ -87,7 +87,8 @@ class PlannedSummary(BaseModel):
 class PlannedSkills(BaseModel):
     part_id: int
     items: list[str] = Field(
-        description="Every item of this skills line exactly once, spelled exactly as given, best fit to the job first."
+        description="Every existing item of this skills line exactly once, spelled exactly as given, best fit to the job first. "
+        "May also include a few generic competencies the job posting names (for example project management) that the resume supports."
     )
 
 

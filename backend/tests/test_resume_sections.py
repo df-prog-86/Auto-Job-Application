@@ -93,3 +93,25 @@ def test_descriptive_words_are_never_flagged_but_invented_systems_are():
     assert _check_rewrite(1, base, ok, vocab, True, label="summary", max_growth=3) == []
     assert _check_rewrite(1, base, "Led billing projects for hospitals using Workday.", vocab, True)
     assert _check_rewrite(1, base, "Led billing projects for hospitals using SAP.", vocab, True)
+
+
+def test_generic_ats_skills_can_be_added_but_tools_cannot():
+    from app.services.resume.validation import MAX_ADDED_SKILLS, added_skills, sanitize_plan
+
+    d = _doc()
+    blocks, parts = de.find_blocks(d), de.find_text_parts(d)
+    job = "We need strong project management, change management and Workday experience. Team development matters."
+    items = ["Epic (Resolute, Cadence)", "SQL", "Excel", "Tableau"]
+    good = TailorPlan(skills=[PlannedSkills(part_id=101, items=items + ["Project Management", "Change Management"])])
+    assert validate_plan(good, blocks, de.full_text(d), True, parts, job) == []
+    assert added_skills(good, parts) == ["Project Management", "Change Management"]
+    assert validate_plan(good, blocks, de.full_text(d), True, parts, "") != []  # not in the posting
+    tool = TailorPlan(skills=[PlannedSkills(part_id=101, items=items + ["Workday"])])
+    assert validate_plan(tool, blocks, de.full_text(d), True, parts, job)
+    mixed = TailorPlan(skills=[PlannedSkills(part_id=101, items=items + ["Workday", "Team Development"])])
+    cleaned, notes = sanitize_plan(mixed, blocks, de.full_text(d), True, parts, job)
+    assert cleaned.skills[0].items[-1] == "Team Development" and "Workday" not in cleaned.skills[0].items
+    assert validate_plan(cleaned, blocks, de.full_text(d), True, parts, job) == []
+    assert MAX_ADDED_SKILLS == 5
+    assert de.apply_text_plan(parts, {}, skills_to_dict(good, parts)) == 1
+    assert d.paragraphs[6].text.endswith("Tableau, Project Management, Change Management")

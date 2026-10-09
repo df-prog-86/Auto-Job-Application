@@ -17,7 +17,7 @@ from app.services.llm.exceptions import LLMError
 from app.services.llm.router import ModelRouter
 from app.services.llm.schemas import TailorPlan
 from app.services.resume.docx_editor import Block, TextPart
-from app.services.resume.validation import sanitize_plan, validate_plan
+from app.services.resume.validation import added_skills, sanitize_plan, validate_plan
 
 logger = logging.getLogger("resume_tailor")
 
@@ -45,7 +45,14 @@ SYSTEM_PROMPT = (
     "keep the paragraph as it is except for a few small, truthful word swaps toward the job's own terms. "
     "Keep its length about the same. Skills lines (listed as [K<id>]): return each in 'skills' with every "
     "item exactly once, spelled exactly as given, reordered so the items the job asks for come first. "
-    "Never add, drop, rename or merge a skill; a skill the job wants that the master lacks goes in the changelog only.\n"
+    "Never drop, rename or merge an existing skill. ATS keywords: you may add up to 5 skills in total "
+    "across the skills lines, only generic professional competencies (for example project management, "
+    "change management, team development, stakeholder engagement) that the job posting names word for "
+    "word and that the master resume's experience clearly supports; add each to the skills line where "
+    "it fits best. Never add a tool, software, system, certification, degree, employer or number that "
+    "the master does not already name. You may also weave the job posting's own keywords into bullets "
+    "and the summary when they honestly describe what that bullet or paragraph already shows. "
+    "Anything else the job wants that the master lacks goes in the changelog only.\n"
     "Hard bans: never invent or imply tools, certifications, titles, employers, metrics, tenure, "
     "or specialties the master does not state. Never inflate years. If the job asks for something "
     "the master does not support, leave it out and instead add a note to the changelog. Do not add "
@@ -71,8 +78,15 @@ FIRM_PROMPT = (
     "job: lead with what matters most to it and use the job's vocabulary where the paragraph truthfully supports "
     "it, using only facts already in the paragraph or the bullets. Keep it about the same length. Skills lines "
     "(listed as [K<id>]): return each in 'skills' with every item exactly once, spelled exactly as given, "
-    "reordered so the items the job asks for come first. Never add, drop, rename or merge a skill; a skill the "
-    "job wants that the master lacks goes in the changelog only.\n"
+    "reordered so the items the job asks for come first. "
+    "Never drop, rename or merge an existing skill. ATS keywords: you may add up to 5 skills in total "
+    "across the skills lines, only generic professional competencies (for example project management, "
+    "change management, team development, stakeholder engagement) that the job posting names word for "
+    "word and that the master resume's experience clearly supports; add each to the skills line where "
+    "it fits best. Never add a tool, software, system, certification, degree, employer or number that "
+    "the master does not already name. You may also weave the job posting's own keywords into bullets "
+    "and the summary when they honestly describe what that bullet or paragraph already shows. "
+    "Anything else the job wants that the master lacks goes in the changelog only.\n"
     "In the summary you may use ordinary descriptive words (skilled, experienced, proficient and the like) "
     "where the master supports the claim, but never name a tool, system, technology or credential that is "
     "not in the master.\n"
@@ -85,6 +99,13 @@ FIRM_PROMPT = (
     "and every gap (missing tools or certifications, years under the job's bar, anything required "
     "that the master does not support)."
 )
+
+
+def _added_note(plan: TailorPlan, parts: list[TextPart]) -> list[str]:
+    extra = added_skills(plan, parts)
+    if not extra:
+        return []
+    return ["Added to your skills from the job posting (check each one fits you): " + ", ".join(extra) + "."]
 
 
 def _parts_text(parts: list[TextPart]) -> str:
@@ -140,9 +161,9 @@ async def generate_plan(
             all_problems.append(f"model call failed: {exc}")
             break
         last_plan = plan
-        problems = validate_plan(plan, blocks, master_text, firm, parts)
+        problems = validate_plan(plan, blocks, master_text, firm, parts, job.description or "")
         if not problems:
-            return PlanResult(plan, [], list(plan.changelog))
+            return PlanResult(plan, [], list(plan.changelog) + _added_note(plan, parts))
         logger.warning("resume tailor (%s) failed checks: %s", strength, "; ".join(problems)[:1500])
         all_problems.extend(problems)
         messages = messages + [
@@ -154,13 +175,14 @@ async def generate_plan(
 
     if last_plan is not None:
         # Keep the parts that passed and put back the original for the rest, rather than losing everything.
-        cleaned, notes = sanitize_plan(last_plan, blocks, master_text, firm, parts)
-        if not validate_plan(cleaned, blocks, master_text, firm, parts):
+        cleaned, notes = sanitize_plan(last_plan, blocks, master_text, firm, parts, job.description or "")
+        if not validate_plan(cleaned, blocks, master_text, firm, parts, job.description or ""):
             skipped = sorted(set(notes))
             return PlanResult(
                 cleaned,
                 [],
                 list(cleaned.changelog)
+                + _added_note(cleaned, parts)
                 + ["Some edits didn't pass the accuracy checks and were left as you wrote them:"]
                 + skipped,
             )

@@ -59,6 +59,11 @@ def search(monkeypatch, app_and_db):
         return items, 0
 
     monkeypatch.setattr(web_search, "enrich_from_ats", no_ats)
+
+    async def no_upgrade(items):
+        return items
+
+    monkeypatch.setattr(web_search, "upgrade_to_ats_links", no_upgrade)
     monkeypatch.setattr(web_search.LLMClient, "chat_completion", fake)
     return app_and_db
 
@@ -608,3 +613,39 @@ def test_only_show_jobs_with_pay_keeps_postings_whose_own_data_states_pay():
     assert [i["title"] for i in kept] == ["a", "c"] and dropped == 1
     kept, _ = apply_pay_rules(items, JobSearchIn(titles="analyst", target_salary=100000))
     assert [i["title"] for i in kept] == ["a", "b"]  # unknown pay stays; clearly low pay goes
+
+
+def test_a_careers_site_that_runs_on_workday_is_swapped_for_its_workday_posting():
+    from app.services.discovery.web_search import find_ats_link
+
+    page = (
+        '<a href="/about">About</a> <a href="https://bilh.wd1.myworkdayjobs.com/External/job/Beth-Israel/'
+        'Process-Improvement-Project-Manager_JR103548/apply?utm_source=careersite&amp;utm_campaign=JR103548">Apply now</a>'
+    )
+    assert find_ats_link(page, "https://jobs.bilh.org/jobs/x/") == (
+        "https://bilh.wd1.myworkdayjobs.com/External/job/Beth-Israel/Process-Improvement-Project-Manager_JR103548"
+    )
+    assert find_ats_link('<a href="https://job-boards.greenhouse.io/acme/jobs/123?gh_src=x">Apply</a>', "https://acme.com/c") == \
+        "https://job-boards.greenhouse.io/acme/jobs/123"
+    assert find_ats_link('<a href="/apply">Apply</a> <a href="https://www.linkedin.com/x">LinkedIn</a>', "https://acme.com/c") is None
+
+
+def test_upgrade_swaps_the_link_and_merges_duplicates(monkeypatch):
+    import asyncio
+    from app.services.discovery import web_search as ws
+
+    class Resp:
+        status_code = 200
+        url = "https://jobs.bilh.org/jobs/x/"
+        text = '<a href="https://bilh.wd1.myworkdayjobs.com/External/job/A/Role_JR1/apply">Apply</a>'
+
+    async def fake_get(self, *a, **k):
+        return Resp()
+
+    monkeypatch.setattr(ws.httpx.AsyncClient, "get", fake_get)
+    items = [
+        {"title": "a", "url": "https://jobs.bilh.org/jobs/x/", "url_key": "jobs.bilh.org/jobs/x"},
+        {"title": "a", "url": "https://bilh.wd1.myworkdayjobs.com/External/job/A/Role_JR1", "url_key": "bilh.wd1.myworkdayjobs.com/external/job/a/role_jr1"},
+    ]
+    out = asyncio.run(ws.upgrade_to_ats_links(items))
+    assert len(out) == 1 and out[0]["url"].startswith("https://bilh.wd1.myworkdayjobs.com/")

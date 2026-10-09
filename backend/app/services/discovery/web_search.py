@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import html as htmllib
 import ipaddress
 import json
 import logging
 import math
 import re
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -189,6 +190,7 @@ def is_aggregator(url: str) -> bool:
 
 
 # Hosts of real applicant-tracking and careers systems; a link here is the employer's own posting.
+ATS_SUFFIXES_KNOWN = ("myworkdayjobs.com", "greenhouse.io", "ashbyhq.com", "lever.co")
 _ATS_SUFFIXES = (
     "myworkdayjobs.com", "greenhouse.io", "ashbyhq.com", "lever.co", "icims.com", "smartrecruiters.com", "taleo.net",
     "oraclecloud.com", "successfactors.com", "successfactors.eu", "jobvite.com", "bamboohr.com", "paylocity.com",
@@ -389,6 +391,62 @@ def extract_posted_date(html: str) -> dt.date | None:
         return today - dt.timedelta(days=1)
     unit = {"day": 1, "week": 7, "month": 30}[ago.group(3).lower()]
     return today - dt.timedelta(days=int(ago.group(2)) * unit)
+
+
+_HREF = re.compile(r"""href=["']([^"']+)["']""", re.I)
+
+
+def find_ats_link(markup: str, base_url: str) -> str | None:
+    """
+    Many employers run Workday, Greenhouse, Ashby or Lever behind their own careers website. The page's Apply link
+    shows which: this returns that posting's link on the hiring system, or None when the page has none.
+    """
+    for found in _HREF.finditer(markup[:600000]):
+        link = urljoin(base_url, htmllib.unescape(found.group(1)).strip())
+        parts = urlsplit(link)
+        host = (parts.hostname or "").lower()
+        if parts.scheme != "https":
+            continue
+        if host.endswith(".myworkdayjobs.com") and "/job/" in parts.path:
+            path = re.sub(r"/apply(/.*)?$", "", parts.path.rstrip("/"))
+            return urlunsplit(("https", host, path, "", ""))
+        if ats.greenhouse_ref(link) or ats.ashby_ref(link) or ats.lever_ref(link):
+            return urlunsplit(("https", host, parts.path.rstrip("/"), "", ""))
+    return None
+
+
+async def upgrade_to_ats_links(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    A result on an employer's own careers site is swapped for its posting on the hiring system behind it, when the page
+    shows one. That posting can be checked, dated and autofilled. Pages that show no such link are left as they are.
+    """
+    gate = asyncio.Semaphore(5)
+
+    async def one(item: dict[str, Any]) -> None:
+        host = (urlsplit(item["url"]).hostname or "").lower()
+        if not is_public_host(item["url"]) or any(host == d or host.endswith(f".{d}") for d in ATS_SUFFIXES_KNOWN):
+            return
+        async with gate:
+            try:
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, max_redirects=5) as client:
+                    resp = await client.get(item["url"], headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
+                if resp.status_code != 200 or not is_public_host(str(resp.url)):
+                    return
+                link = find_ats_link(resp.text, str(resp.url))
+            except Exception:
+                return
+        if link:
+            item["site_url"] = item["url"]
+            item["url"], item["url_key"] = link, url_key(link)
+
+    await asyncio.gather(*(one(i) for i in items))
+    seen: set[str] = set()
+    out = []
+    for item in items:
+        if item["url_key"] not in seen:
+            seen.add(item["url_key"])
+            out.append(item)
+    return out
 
 
 async def enrich_from_ats(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
@@ -693,6 +751,7 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
     merged = len(items)
     items = merge_same_jobs(items)
     items, not_found = await resolve_original_sources(items)
+    items = await upgrade_to_ats_links(items)
     items, gone = await enrich_from_ats(items)
     items, too_old = await fill_posted_dates(items, criteria.posted_within_days, need_pay=criteria.require_salary)
     items, no_pay = apply_pay_rules(items, criteria)
@@ -706,4 +765,5 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
     for item in final:  # working notes, not saved columns
         item.pop("ats_checked", None)
         item.pop("ats_live", None)
+        item.pop("site_url", None)
     return final, closed + gone + not_found + too_old

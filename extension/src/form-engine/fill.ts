@@ -116,6 +116,26 @@ async function openDropdown(btn: HTMLElement): Promise<void> {
 async function closeDropdown(btn: HTMLElement): Promise<void> {
   btn.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   await sleep(80);
+  // Workday sometimes ignores Escape sent to the button; a second Escape on the list, then a plain click, closes it.
+  if (btn.getAttribute("aria-expanded") === "true") {
+    const list = btn.ownerDocument.querySelector("[role='listbox']");
+    list?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await sleep(80);
+  }
+  if (btn.getAttribute("aria-expanded") === "true") {
+    const form = btn.closest("form");
+    const block = (e: Event) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    form?.addEventListener("submit", block, true);
+    try {
+      btn.click();
+      await sleep(80);
+    } finally {
+      form?.removeEventListener("submit", block, true);
+    }
+  }
 }
 
 /** Reads a dropdown button's choices without choosing anything. */

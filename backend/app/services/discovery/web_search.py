@@ -175,6 +175,8 @@ AGGREGATOR_DOMAINS = frozenset(
         "builtincolorado.com", "digitalhire.com", "diversityjobs.com", "careerjet.com", "jora.com", "jobsora.com",
         "whatjobs.com", "recruit.net", "ihirehealthcare.com", "healthecareers.com", "jobtarget.com",
         "diversityworking.com", "mediabistro.com", "ladders.com", "nexxt.com", "jobserve.com", "salary.com",
+        "ihiretechnology.com", "jobs-radar.com", "emploive.com", "feeny.ai", "talentify.io", "jobleads.com", "bebee.com",
+        "jobilize.com", "jobtome.com", "hiring.cafe", "jobrapido.com", "jobsbucket.com", "jobgether.com", "careerjet.com",
     }
 )
 MAX_RESOLVE = 5  # job-board results looked up per search, to keep the cost and wait predictable

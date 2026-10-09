@@ -74,3 +74,11 @@ def test_sanitize_keeps_good_edits_and_restores_bad_ones():
     assert cleaned.blocks[0].bullets[0].text == bullet.text
     assert len(cleaned.summaries) == 1 and cleaned.skills == []
     assert notes
+
+
+def test_compound_terms_made_of_resume_words_are_allowed():
+    from app.services.resume.validation import _check_rewrite
+
+    vocab = {"built", "an", "ai", "chatbot", "powered", "by", "gpt", "for", "claims"}
+    assert _check_rewrite(1, "Built an AI chatbot powered by GPT.", "Built an AI-powered chatbot for claims.", vocab, True) == []
+    assert _check_rewrite(1, "Built an AI chatbot powered by GPT.", "Built a Salesforce-powered chatbot.", vocab, True)

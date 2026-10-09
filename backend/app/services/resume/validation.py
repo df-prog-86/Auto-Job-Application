@@ -149,6 +149,10 @@ def _check_rewrite(
         lowered = term.lower()
         if index == 0 or lowered in original_words or lowered in vocabulary:
             continue
+        # A hyphenated or slashed compound ("AI-powered", "end-to-end") is fine when each piece is already in the resume.
+        pieces = _WORD.findall(lowered)
+        if len(pieces) > 1 and all(p in vocabulary or p in original_words for p in pieces):
+            continue
         # An ordinary word capitalised only because it starts a sentence is not a new tool or credential.
         starts_sentence = new[: match.start()].rstrip().endswith((".", "!", "?", ":"))
         if starts_sentence and not any(c.isdigit() for c in term) and not term.isupper() and "-" not in term[1:2]:

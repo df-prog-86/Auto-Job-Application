@@ -60,6 +60,15 @@ class FetchedPage:
     apply_link: str | None = None  # the posting on Workday/Greenhouse/Ashby/Lever that this careers page applies through
 
 
+def posting_url_for(url: str) -> str:
+    """A Lever application form (".../apply") has almost no job text, so the posting page itself is read instead."""
+    ref = ats.lever_ref(url)
+    if ref is None:
+        return url
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}/{ref[0]}/{ref[1]}"
+
+
 async def fetch_page(url: str) -> FetchedPage:
     """
     Server-side fetch for Option 1 (paste-a-URL). Some sites -- notably
@@ -69,6 +78,7 @@ async def fetch_page(url: str) -> FetchedPage:
     the extension capture path (Option 2) instead, which reads the page from
     their own browser and isn't affected by it.
     """
+    url = posting_url_for(url)
     async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT, follow_redirects=True) as client:
         try:
             resp = await client.get(url, headers={"User-Agent": _USER_AGENT})
@@ -239,6 +249,28 @@ def extract_from_greenhouse_page(
     )
 
 
+def extract_from_lever_page(url: str, page_title: str | None, body_text: str) -> RawJobPosting | None:
+    """
+    Lever's browser tab title is "<Company> - <Role>", which names both without an LLM. Used only for a Lever
+    posting that has no JobPosting markup.
+    """
+    ref = ats.lever_ref(url)
+    if ref is None or not page_title or " - " not in page_title:
+        return None
+    company, title = (x.strip() for x in page_title.split(" - ", 1))
+    if not company or not title:
+        return None
+    parts = urlsplit(url)
+    return RawJobPosting(
+        external_job_id=ref[1],
+        title=title,
+        company=company,
+        location=None,
+        description_html=body_text or None,
+        application_url=f"{parts.scheme}://{parts.netloc}/{ref[0]}/{ref[1]}",
+    )
+
+
 async def extract_job_posting(
     db: Session,
     *,
@@ -256,6 +288,10 @@ async def extract_job_posting(
     greenhouse = extract_from_greenhouse_page(url, page_title, body_text)
     if greenhouse is not None:
         return greenhouse
+
+    lever = extract_from_lever_page(url, page_title, body_text)
+    if lever is not None:
+        return lever
 
     if not body_text.strip():
         raise ManualExtractionError(

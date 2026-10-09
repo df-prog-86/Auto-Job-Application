@@ -664,3 +664,14 @@ def test_the_apply_link_wins_and_a_page_already_on_a_hiring_system_is_left_alone
     assert ats.pick_ats_link(links, "https://acme.com/careers/6") == "https://job-boards.greenhouse.io/acme/jobs/6"
     assert ats.pick_ats_link(links, "https://job-boards.greenhouse.io/acme/jobs/6") is None
     assert ats.pick_ats_link(["https://www.linkedin.com/x"], "https://acme.com/c") is None
+
+
+def test_lever_application_link_reads_the_posting_page_and_title():
+    from app.services.discovery.manual_extraction import extract_from_lever_page, posting_url_for
+
+    post = "https://jobs.lever.co/Acme/71580e53-408b-4084-9ba6-693c69564b39"
+    assert posting_url_for(post + "/apply?lever-source=x") == post
+    assert posting_url_for("https://example.com/jobs/1/apply") == "https://example.com/jobs/1/apply"
+    got = extract_from_lever_page(post, "Acme Health - Revenue Cycle Manager", "About the role ...")
+    assert (got.company, got.title, got.application_url) == ("Acme Health", "Revenue Cycle Manager", post)
+    assert extract_from_lever_page("https://example.com/x", "Acme - Role", "") is None

@@ -144,9 +144,14 @@ def _check_rewrite(
     if max_growth is not None and len(new) > len(original) * max_growth + 10:
         problems.append(f"{label} is much longer than the original, which could change the page layout")
 
-    for index, term in enumerate(_TERM.findall(new)):
+    for index, match in enumerate(_TERM.finditer(new)):
+        term = match.group(0)
         lowered = term.lower()
         if index == 0 or lowered in original_words or lowered in vocabulary:
+            continue
+        # An ordinary word capitalised only because it starts a sentence is not a new tool or credential.
+        starts_sentence = new[: match.start()].rstrip().endswith((".", "!", "?", ":"))
+        if starts_sentence and not any(c.isdigit() for c in term) and not term.isupper() and "-" not in term[1:2]:
             continue
         if term[0].isupper() or any(c.isdigit() for c in term):
             problems.append(f"{label} introduces a term not found in the master resume: {term!r}")
@@ -206,6 +211,9 @@ def sanitize_plan(
         if ok:
             keep_skills.append(planned)
         else:
-            notes.append("Kept the original order of one skills line (the AI changed its items).")
+            if part is None or part.kind != "skills":
+                notes.append("Ignored a skills line the AI listed that is not in your resume.")
+            else:
+                notes.append("Kept the original order of one skills line (the AI changed its items).")
     plan.skills = keep_skills
     return plan, notes

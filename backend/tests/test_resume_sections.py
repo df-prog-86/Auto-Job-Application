@@ -28,8 +28,8 @@ def test_summary_and_skills_are_found_and_edited_in_place():
     blocks, parts = de.find_blocks(d), de.find_text_parts(d)
     assert [p.kind for p in parts] == ["summary", "skills"]
     plan = TailorPlan(
-        summaries=[PlannedSummary(part_id=0, text=SUMMARY.replace("leading", "driving"))],
-        skills=[PlannedSkills(part_id=1, items=["tableau", "SQL", "Epic (Resolute, Cadence)", "Excel"])],
+        summaries=[PlannedSummary(part_id=100, text=SUMMARY.replace("leading", "driving"))],
+        skills=[PlannedSkills(part_id=101, items=["tableau", "SQL", "Epic (Resolute, Cadence)", "Excel"])],
     )
     assert validate_plan(plan, blocks, de.full_text(d), False, parts) == []
     assert de.apply_text_plan(parts, summaries_to_dict(plan), skills_to_dict(plan, parts)) == 2
@@ -43,16 +43,16 @@ def test_summary_and_skills_are_found_and_edited_in_place():
 def test_skills_cannot_be_added_or_dropped():
     d = _doc()
     blocks, parts = de.find_blocks(d), de.find_text_parts(d)
-    bad = TailorPlan(skills=[PlannedSkills(part_id=1, items=["Tableau", "SQL", "Python", "Excel"])])
+    bad = TailorPlan(skills=[PlannedSkills(part_id=101, items=["Tableau", "SQL", "Python", "Excel"])])
     assert validate_plan(bad, blocks, de.full_text(d), False, parts)
 
 
 def test_light_summary_cannot_invent_numbers_or_grow():
     d = _doc()
     blocks, parts = de.find_blocks(d), de.find_text_parts(d)
-    plan = TailorPlan(summaries=[PlannedSummary(part_id=0, text=SUMMARY.replace("ten", "15"))])
+    plan = TailorPlan(summaries=[PlannedSummary(part_id=100, text=SUMMARY.replace("ten", "15"))])
     assert validate_plan(plan, blocks, de.full_text(d), False, parts)
-    longer = TailorPlan(summaries=[PlannedSummary(part_id=0, text=SUMMARY + " " + SUMMARY[:60])])
+    longer = TailorPlan(summaries=[PlannedSummary(part_id=100, text=SUMMARY + " " + SUMMARY[:60])])
     assert validate_plan(longer, blocks, de.full_text(d), False, parts)
 
 
@@ -65,8 +65,8 @@ def test_sanitize_keeps_good_edits_and_restores_bad_ones():
     bullet = blocks[0].bullets[0]
     plan = TailorPlan(
         blocks=[PlannedBlock(block_id=0, bullets=[PlannedBullet(bullet_id=bullet.id, text="Cut denials by 90% using Lean Six Sigma")])],
-        summaries=[PlannedSummary(part_id=0, text=SUMMARY.replace("leading", "driving"))],
-        skills=[PlannedSkills(part_id=1, items=["Tableau", "SQL", "Python", "Excel"])],
+        summaries=[PlannedSummary(part_id=100, text=SUMMARY.replace("leading", "driving"))],
+        skills=[PlannedSkills(part_id=101, items=["Tableau", "SQL", "Python", "Excel"])],
     )
     assert validate_plan(plan, blocks, de.full_text(d), True, parts)
     cleaned, notes = sanitize_plan(plan, blocks, de.full_text(d), True, parts)

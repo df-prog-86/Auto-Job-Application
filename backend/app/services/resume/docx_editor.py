@@ -262,8 +262,9 @@ def _split_items(tail: str) -> tuple[list[str], list[str]] | None:
     return items, seps
 
 
-def find_text_parts(doc, first_id: int = 0) -> list[TextPart]:
-    """Summary paragraphs and Skills lines that sit under a recognised heading and can be edited safely."""
+def find_text_parts(doc, first_id: int = 100) -> list[TextPart]:
+    """Summary paragraphs and Skills lines that sit under a recognised heading and can be edited safely.
+    Ids start at 100 so they can never be mistaken for a bullet or block id."""
     paragraphs = list(doc.element.body.iter(qn("w:p")))
     parts: list[TextPart] = []
     next_id = first_id

@@ -24,6 +24,15 @@ MIN_WORDS_KEPT = 0.6  # light tailor
 MIN_WORDS_KEPT_FIRM = 0.4  # firm tailor may rephrase more
 MAX_LENGTH_GROWTH_LIGHT = 1.1  # a light summary tweak barely changes length
 MAX_LENGTH_GROWTH_FIRM = 1.25  # a firm rewrite stays about as long, so the page layout does not shift
+# Everyday descriptive words are fine anywhere. Only invented numbers and invented tools, systems,
+# credentials or employers are flagged.
+DESCRIPTIVE_WORDS = frozenset(
+    "skilled proficient experienced accomplished seasoned expert adept versatile capable talented effective "
+    "results driven detail oriented forward thinking strategic dynamic innovative motivated dedicated passionate "
+    "analytical collaborative hands on proactive resourceful reliable successful proven strong highly "
+    "creative committed thoughtful customer focused data patient client people team goal outcome impact "
+    "senior leading lead leader professional".split()
+)
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?%?")
 _WORD = re.compile(r"[a-z0-9]+")
 _TERM = re.compile(r"[A-Za-z0-9][A-Za-z0-9+#./-]*")
@@ -155,7 +164,10 @@ def _check_rewrite(
             continue
         # An ordinary word capitalised only because it starts a sentence is not a new tool or credential.
         starts_sentence = new[: match.start()].rstrip().endswith((".", "!", "?", ":"))
-        if starts_sentence and not any(c.isdigit() for c in term) and not term.isupper() and "-" not in term[1:2]:
+        if starts_sentence and not any(c.isdigit() for c in term) and not term.isupper():
+            continue
+        # Plain descriptive words (skilled, proficient, results-driven...) are never a made-up system.
+        if all(p in DESCRIPTIVE_WORDS for p in pieces):
             continue
         if term[0].isupper() or any(c.isdigit() for c in term):
             problems.append(f"{label} introduces a term not found in the master resume: {term!r}")

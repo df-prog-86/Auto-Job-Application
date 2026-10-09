@@ -82,3 +82,14 @@ def test_compound_terms_made_of_resume_words_are_allowed():
     vocab = {"built", "an", "ai", "chatbot", "powered", "by", "gpt", "for", "claims"}
     assert _check_rewrite(1, "Built an AI chatbot powered by GPT.", "Built an AI-powered chatbot for claims.", vocab, True) == []
     assert _check_rewrite(1, "Built an AI chatbot powered by GPT.", "Built a Salesforce-powered chatbot.", vocab, True)
+
+
+def test_descriptive_words_are_never_flagged_but_invented_systems_are():
+    from app.services.resume.validation import _check_rewrite
+
+    vocab = {"led", "billing", "projects", "for", "hospitals", "epic"}
+    base = "Led billing projects for hospitals."
+    ok = "Experienced leader of billing projects. Skilled in hospital work, Proficient and Results-driven."
+    assert _check_rewrite(1, base, ok, vocab, True, label="summary", max_growth=3) == []
+    assert _check_rewrite(1, base, "Led billing projects for hospitals using Workday.", vocab, True)
+    assert _check_rewrite(1, base, "Led billing projects for hospitals using SAP.", vocab, True)

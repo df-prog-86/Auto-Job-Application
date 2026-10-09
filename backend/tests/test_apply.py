@@ -392,3 +392,13 @@ def test_starting_an_application_is_recorded_straight_away_and_once(app_and_db):
     assert first
     assert client.post("/api/v1/apply/started", json={"job_id": job_id}, headers=headers).status_code == 204
     assert client.get(f"/api/v1/jobs/{job_id}").json()["application_started_at"] == first
+
+
+def test_workday_application_steps_match_the_posting():
+    from app.services.apply.questions import urls_match
+
+    post = "https://bilh.wd1.myworkdayjobs.com/en-US/External/job/Beth-Israel/Process-Improvement-Project-Manager_JR103548"
+    assert urls_match(post + "/apply/applyManually?source=x", post)
+    assert urls_match(post + "/login", post)
+    assert urls_match(post.replace("en-US/", ""), post + "/apply")
+    assert not urls_match(post.replace("548", "549"), post)

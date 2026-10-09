@@ -31,6 +31,9 @@ def normalize_url(url: str) -> str:
     # An Ashby posting and its application form are the same job: ".../<id>" and ".../<id>/application".
     if host.endswith("ashbyhq.com") and path.lower().endswith("/application"):
         path = path[: -len("/application")]
+    # A Workday posting and its application steps are the same job: ".../<slug>_JR1" and ".../<slug>_JR1/apply/...".
+    if host.endswith("myworkdayjobs.com"):
+        path = re.sub(r"(/(apply|login)(/.*)?)$", "", path, flags=re.I)
     return f"{parts.scheme.lower()}://{host}{path}"
 
 
@@ -42,9 +45,23 @@ def greenhouse_job_id(url: str) -> str | None:
     return match.group(1) if match else None
 
 
+_WD_REQ = re.compile(r"_([A-Za-z]{1,4}-?\d{3,})(?:/|$)")
+
+
+def workday_req_id(url: str) -> str | None:
+    parts = urlsplit(url.strip())
+    if not parts.netloc.lower().endswith("myworkdayjobs.com"):
+        return None
+    match = _WD_REQ.search(normalize_url(url).split("//", 1)[-1] + "/")
+    return match.group(1).lower() if match else None
+
+
 def urls_match(page_url: str, job_url: str) -> bool:
-    """Exact (ignoring query, fragment and trailing slash), or the same Greenhouse job id."""
+    """Exact (ignoring query, fragment and trailing slash), or the same Greenhouse or Workday job id."""
     if normalize_url(page_url) == normalize_url(job_url):
+        return True
+    page_wd, job_wd = workday_req_id(page_url), workday_req_id(job_url)
+    if page_wd and page_wd == job_wd and urlsplit(page_url).netloc.lower() == urlsplit(job_url).netloc.lower():
         return True
     page_gh, job_gh = greenhouse_job_id(page_url), greenhouse_job_id(job_url)
     return bool(page_gh and page_gh == job_gh and "greenhouse" in page_url.lower() and "greenhouse" in job_url.lower())

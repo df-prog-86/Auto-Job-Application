@@ -297,7 +297,7 @@ function JobCard({ job }: { job: JobOut }) {
       <div className="grid gap-2 sm:grid-cols-2">
         {(
           [
-            ["light", "Light touch", "Keeps your wording. Reorders bullets so the ones that matter most come first."],
+            ["light", "Light touch", "Keeps your wording. Reorders bullets so the best fits come first, with a few small, careful word swaps."],
             ["firm", "Stronger touch", "Rewrites bullets more boldly for this job. Formatting never changes and nothing is invented."],
           ] as const
         ).map(([value, title, text]) => (

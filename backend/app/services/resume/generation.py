@@ -30,12 +30,14 @@ SYSTEM_PROMPT = (
     "You tailor a resume for one job. The resume is the candidate's single master resume, "
     "given to you as blocks of bullets (each block is one role's bullet list). Return ONLY JSON "
     "matching the schema.\n"
-    "Edit philosophy (soft rephrase): keep wording as close to the original as possible. For every "
-    "block, return ALL of its bullets exactly once, reordered by fit to the job description, best "
-    "fit first. Only tiny truthful word swaps or a light lead-in that matches the job's language "
-    "are allowed, woven into the substance of the bullet. If a bullet needs no change, return its "
-    "text exactly as given. Do not rewrite the candidate's voice and do not bolt keywords onto the "
-    "front of bullets.\n"
+    "Edit philosophy (light touch): keep the candidate's wording and voice. For every block, return "
+    "ALL of its bullets exactly once, reordered by fit to the job description, best fit first. Where "
+    "it clearly helps, you may make a few small, conservative word tweaks: swap a word or short phrase "
+    "for the job description's own term when it means the same thing and the bullet already supports "
+    "it (for example 'client' to 'patient' only if the bullet is truly about patients), or tighten "
+    "a phrase. Change at most a few words in a bullet, and leave most bullets exactly as given. If a "
+    "bullet needs no change, return its text exactly as given. Do not restructure sentences, do not "
+    "rewrite the candidate's voice and do not bolt keywords onto the front of bullets.\n"
     "Hard bans: never invent or imply tools, certifications, titles, employers, metrics, tenure, "
     "or specialties the master does not state. Never inflate years. If the job asks for something "
     "the master does not support, leave it out and instead add a note to the changelog. Do not add "
@@ -99,7 +101,7 @@ async def generate_plan(
         try:
             plan = await router.get_structured(
                 purpose="resume_tailoring",
-                prompt_version="v3-firm" if firm else "v2",
+                prompt_version="v3-firm" if firm else "v2-light-tweaks",
                 messages=messages,
                 response_model=TailorPlan,
             )

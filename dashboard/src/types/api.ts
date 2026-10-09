@@ -356,6 +356,8 @@ export interface JobSearchCriteria {
   require_salary: boolean;
   posted_within_days: 0 | 7 | 14 | 30;
   count: number;
+  /** True for "Show more results": only the saved employer lists are searched, which is instant. */
+  more?: boolean;
 }
 
 export interface JobSearchResultOut {
@@ -376,10 +378,46 @@ export interface JobSearchResultOut {
   status: string;
 }
 
+export interface CoverageOut {
+  employers: number;
+  postings: number;
+  matches: number;
+  matches_capped: boolean;
+  waiting: number;
+  refreshing: boolean;
+  by_system: Record<string, { employers: number; postings: number }>;
+}
+
 export interface JobSearchRunOut {
   found: number;
   skipped: number;
   results: JobSearchResultOut[];
+  coverage?: CoverageOut | null;
+  more_available?: number;
+  more_capped?: boolean;
+}
+
+export interface EmployerOut {
+  id: number;
+  name: string;
+  system: string;
+  enabled: boolean;
+  status: "new" | "ok" | "error" | "unreachable";
+  open_jobs: number;
+  last_read?: string | null;
+  last_error?: string | null;
+  source: string;
+}
+
+export interface EmployersOut {
+  employers: EmployerOut[];
+  total_employers: number;
+  total_postings: number;
+  refreshing: boolean;
+  refresh_done: number;
+  refresh_total: number;
+  last_refresh?: string | null;
+  disabled_systems: string[];
 }
 
 export interface AddSearchResultOut {

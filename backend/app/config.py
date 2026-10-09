@@ -53,6 +53,18 @@ class Settings(BaseSettings):
     JOB_SEARCH_ENGINE: str = "exa"  # "exa", "parallel", "perplexity" or "firecrawl"
     JOB_SEARCH_ENGINE_MODE: str | None = None  # exa: auto/fast/instant ($7 per 1,000), deep ($12); parallel: turbo/fast ($1), basic ($5)
 
+    # Job cache: a local copy of employers' public job lists, searched instead of (and alongside) the web search.
+    # It lives in its own database file so backups of job_agent.db stay small; it can always be rebuilt.
+    JOB_CACHE_PATH: str = str(DEFAULT_DATA_DIR / "job_cache.db")
+    JOB_CACHE_REFRESH_HOURS: int = 4  # how often the background refresh looks for employers that are due
+    JOB_CACHE_MAX_POSTINGS: int = 300_000  # oldest closed postings go first when the copy grows past this
+    # Hiring systems to switch off, comma separated: workday, greenhouse, lever, ashby. A kill switch if one ever objects.
+    JOB_CACHE_DISABLED_SYSTEMS: str = ""
+    JOB_CACHE_AUTO_REFRESH: bool = True  # False stops the app from reading employers on its own (tests turn it off)
+    # "always": the AI web search runs with every search (it also finds new employers). "auto": it runs only when the
+    # local copy found fewer results than asked for. "off": local copy only.
+    JOB_SEARCH_AI: str = "always"
+
     # --- Discovery scheduling (spec §18) -----------------------------------
     DISCOVERY_INTERVAL_HOURS: int = 12
 
@@ -77,6 +89,7 @@ class Settings(BaseSettings):
 
     def ensure_dirs(self) -> None:
         Path(self.DATABASE_PATH).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.JOB_CACHE_PATH).parent.mkdir(parents=True, exist_ok=True)
         Path(self.GENERATED_DOCUMENTS_DIR).mkdir(parents=True, exist_ok=True)
 
 

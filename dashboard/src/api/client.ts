@@ -8,6 +8,8 @@ import type {
   EmploymentInput,
   HealthResponse,
   AddSearchResultOut,
+  EmployerOut,
+  EmployersOut,
   JobDetailOut,
   JobSearchCriteria,
   JobSearchResultOut,
@@ -180,6 +182,12 @@ export const api = {
   removeSearchResult: (id: number) =>
     request<JobSearchResultOut>(`/job-search/results/${id}/remove`, { method: "POST" }),
   clearSearchResults: () => request<{ cleared: number }>("/job-search/clear", { method: "POST" }),
+  listEmployers: (q = "") => request<EmployersOut>(`/job-search/employers?limit=100${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ""}`),
+  addEmployer: (url: string) =>
+    request<EmployerOut>("/job-search/employers", { method: "POST", body: JSON.stringify({ url }) }),
+  setEmployerEnabled: (id: number, enabled: boolean) =>
+    request<EmployerOut>(`/job-search/employers/${id}`, { method: "PATCH", body: JSON.stringify({ enabled }) }),
+  refreshEmployers: () => request<EmployersOut>("/job-search/employers/refresh", { method: "POST" }),
   clearQuestions: (ids?: number[]) =>
     request<{ cleared: number }>("/needs-attention/clear", { method: "POST", body: JSON.stringify(ids ? { ids } : {}) }),
   forgetAnswer: (key: string) => request<void>(`/profile/answers/${encodeURIComponent(key)}`, { method: "DELETE" }),

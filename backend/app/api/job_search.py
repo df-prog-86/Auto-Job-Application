@@ -16,6 +16,7 @@ from app.schemas.discovery import JobOut
 from app.schemas.job_search import (
     AddResultOut,
     ClearOut,
+    CoverageOut,
     JobSearchIn,
     JobSearchResultOut,
     JobSearchRunOut,
@@ -25,6 +26,7 @@ from app.services.discovery.base import RawJobPosting
 from app.repositories.profile_repository import get_current_profile
 from app.services.discovery.normalization import html_to_text, parse_salary
 from app.services.discovery.pipeline import ingest_manual_posting
+from app.services.jobcache.keys import loose_keys
 from app.services.llm.exceptions import LLMError, LLMNotConfiguredError
 from app.services.qualification.pipeline import QualificationError, score_against
 
@@ -43,12 +45,17 @@ def _new_results(db: Session) -> list[JobSearchResult]:
     return [r for r in rows if r.url_key not in in_jobs]
 
 
-def _run_out(db: Session, found: int, skipped: int) -> JobSearchRunOut:
-    return JobSearchRunOut(
+def _run_out(db: Session, found: int, skipped: int, outcome: web_search.SearchOutcome | None = None) -> JobSearchRunOut:
+    out = JobSearchRunOut(
         found=found,
         skipped=skipped,
         results=[JobSearchResultOut.model_validate(r) for r in _new_results(db)],
     )
+    if outcome is not None:
+        out.coverage = CoverageOut(**outcome.coverage) if outcome.coverage else None
+        out.more_available = outcome.more_available
+        out.more_capped = outcome.more_capped
+    return out
 
 
 @router.get("/results", response_model=JobSearchRunOut)
@@ -58,8 +65,15 @@ def list_results(db: Session = Depends(get_db)) -> JobSearchRunOut:
 
 @router.post("/run", response_model=JobSearchRunOut)
 async def run_search(payload: JobSearchIn, db: Session = Depends(get_db)) -> JobSearchRunOut:
+    # Everything already saved or shown is passed in, so the saved employer lists return the NEXT best matches each time
+    # (this is what makes "Show more results" work) and never fill the list with postings you have already seen.
+    known: set[str] = set()
+    for (url,) in db.query(Job.canonical_application_url).all():
+        known |= loose_keys(url)
+    for (url,) in db.query(JobSearchResult.url).all():
+        known |= loose_keys(url)
     try:
-        items, closed = await web_search.search_jobs(payload)
+        outcome = await web_search.search_jobs_full(payload, known_keys=known, cache_only=payload.more)
     except LLMNotConfiguredError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -71,19 +85,17 @@ async def run_search(payload: JobSearchIn, db: Session = Depends(get_db)) -> Job
             detail="The search service didn't answer. Try again in a minute.",
         ) from exc
 
-    known = {web_search.url_key(u) for (u,) in db.query(Job.canonical_application_url).all()}
-    known |= {k for (k,) in db.query(JobSearchResult.url_key).all()}  # shown, added or removed before
     found = 0
-    skipped = closed  # postings that were clearly closed when the link was opened
-    for item in items:
-        if item["url_key"] in known:
+    skipped = outcome.skipped  # postings that were clearly closed when the link was opened
+    for item in outcome.items:
+        if loose_keys(item["url"]) & known:
             skipped += 1
             continue
-        known.add(item["url_key"])
+        known |= loose_keys(item["url"])
         db.add(JobSearchResult(**item, status="new", criteria=payload.model_dump()))
         found += 1
     db.commit()
-    return _run_out(db, found, skipped)
+    return _run_out(db, found, skipped, outcome)
 
 
 def _get_new(db: Session, result_id: int) -> JobSearchResult:

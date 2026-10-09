@@ -30,6 +30,17 @@ def _no_llm_provider(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings, attr, None)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_job_cache(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Every test gets its own empty job cache file, so tests never touch (or depend on) the real backend/data/job_cache.db."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "JOB_CACHE_PATH", str(tmp_path / "job_cache.db"))
+    monkeypatch.setattr(settings, "JOB_CACHE_DISABLED_SYSTEMS", "")
+    monkeypatch.setattr(settings, "JOB_SEARCH_AI", "always")
+    monkeypatch.setattr(settings, "JOB_CACHE_AUTO_REFRESH", False)  # tests never read real employer sites
+
+
 @pytest.fixture()
 def temp_db_path() -> Generator[str, None, None]:
     fd, path = tempfile.mkstemp(suffix=".db")

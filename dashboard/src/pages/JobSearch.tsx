@@ -6,11 +6,12 @@ import { api, ApiError } from "@/api/client";
 import { ChipInput } from "@/components/ChipInput";
 import { MenuItem, MoreMenu } from "@/components/MoreMenu";
 import { PageHeader } from "@/components/PageHeader";
+import { CoverageCard, EmployersPanel } from "@/components/JobSources";
 import { FitPill, MatchPanel, scoreColor } from "@/components/match";
 import { Button, Card, Ring } from "@/components/ui";
 import { autofillSite } from "@/lib/autofill";
 import { formatPosted } from "@/lib/jobText";
-import type { JobSearchCriteria, JobSearchResultOut } from "@/types/api";
+import type { CoverageOut, JobSearchCriteria, JobSearchResultOut } from "@/types/api";
 import {
   SAVED_KEY,
   loadSavedCriteria as loadSaved,
@@ -100,6 +101,10 @@ export function JobSearch() {
   const [savedList, setSavedList] = useState<SavedSearch[]>(loadSavedSearches);
   const [scoringAll, setScoringAll] = useState<{ done: number; total: number } | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
+  const [coverage, setCoverage] = useState<CoverageOut | null>(null);
+  const [moreAvailable, setMoreAvailable] = useState(0);
+  const [moreCapped, setMoreCapped] = useState(false);
+  const lastCriteria = useRef<JobSearchCriteria | null>(null);
 
   const results = useQuery({ queryKey: ["job-search-results"], queryFn: api.listSearchResults });
   const items = (results.data ?? []).filter((r) => r.status === "new");
@@ -150,9 +155,15 @@ export function JobSearch() {
       } catch {
         // remembering the boxes is a convenience only
       }
-      return api.runJobSearch(toApiCriteria(c));
+      const apiCriteria = toApiCriteria(c);
+      lastCriteria.current = apiCriteria;
+      return api.runJobSearch(apiCriteria);
     },
     onSuccess: (r) => {
+      setCoverage(r.coverage ?? null);
+      setMoreAvailable(r.more_available ?? 0);
+      setMoreCapped(r.more_capped ?? false);
+      void qc.invalidateQueries({ queryKey: ["job-employers"] });
       setNotice(
         r.found > 0
           ? {
@@ -167,6 +178,22 @@ export function JobSearch() {
       void qc.invalidateQueries({ queryKey: ["job-search-results"] });
     },
     onError: () => setNotice(null),
+  });
+
+  /** "Show more results": the next best matches from the saved employer lists. Instant, and no AI is used. */
+  const showMore = useMutation({
+    mutationFn: () => api.runJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), more: true }),
+    onSuccess: (r) => {
+      if (r.coverage) setCoverage(r.coverage);
+      setMoreAvailable(r.more_available ?? 0);
+      setMoreCapped(r.more_capped ?? false);
+      setNotice(
+        r.found > 0
+          ? { kind: "found", text: `Added ${r.found} more ${r.found === 1 ? "match" : "matches"} from the saved employer lists.` }
+          : { kind: "info", text: "No more matches in the saved employer lists. Search again to check the web too." },
+      );
+      void qc.invalidateQueries({ queryKey: ["job-search-results"] });
+    },
   });
 
   const navigate = useNavigate();
@@ -310,7 +337,7 @@ export function JobSearch() {
       )}
       <PageHeader
         title="Job Search"
-        description="Tell us what you want and we search the web for matching openings. Nothing is added to Jobs until you click Add to jobs."
+        description="Tell us what you want and we search employers' job lists and the web for matching openings. Nothing is added to Jobs until you click Add to jobs."
       />
 
       <Card className="overflow-hidden border border-[#e9e6f4] !shadow-[0_-6px_18px_rgba(60,50,120,0.08),0_1px_2px_rgba(31,27,46,0.08),0_12px_32px_rgba(60,50,120,0.12)]">
@@ -386,7 +413,7 @@ export function JobSearch() {
               />
             </div>
             <Button type="submit" variant="primary" className={`px-6 py-3 ${search.isPending ? "ai-working" : ""}`} disabled={!canSearch}>
-              {search.isPending ? "Searching..." : "Search the web"}
+              {search.isPending ? "Searching..." : "Search"}
             </Button>
           </div>
 
@@ -557,14 +584,16 @@ export function JobSearch() {
               <rect x="5" y="11" width="14" height="9" rx="2" />
               <path d="M8 11V8a4 4 0 018 0v3" />
             </svg>
-            Only the words above are sent. Nothing from your profile. Each search costs a small amount.
+            Only the words above are sent. Nothing from your profile. The web part of a search costs a small amount; the saved employer lists are free.
           </p>
         </form>
       </Card>
 
+      <EmployersPanel />
+
       {search.isPending && (
         <p className="animate-pulse text-sm text-ink-500" role="status">
-          Searching the web. This can take up to a minute.
+          Searching saved employer lists and the web. This can take up to a minute.
         </p>
       )}
       {search.isError && (
@@ -604,6 +633,12 @@ export function JobSearch() {
           </span>
         </p>
       )}
+      {showMore.isError && (
+        <p className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700" role="alert">
+          {errorText(showMore.error)}
+        </p>
+      )}
+      {coverage && coverage.employers > 0 && <CoverageCard coverage={coverage} />}
       {(add.isError || remove.isError || bulkError) && (
         <p className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700" role="alert">
           {bulkError ?? errorText(add.error ?? remove.error)}
@@ -621,7 +656,7 @@ export function JobSearch() {
             </svg>
           </div>
           <h2 className="text-base font-bold text-ink-900">No matches yet</h2>
-          <p className="mt-1 text-sm text-ink-500">Add a job title above and click Search the web.</p>
+          <p className="mt-1 text-sm text-ink-500">Add a job title above and click Search.</p>
         </Card>
       ) : (
         <section className="space-y-4">
@@ -713,6 +748,17 @@ export function JobSearch() {
                 />
               ))}
             </ul>
+          )}
+          {moreAvailable > 0 && (
+            <div className="flex flex-col items-center gap-1.5 pt-1">
+              <Button variant="primary" onClick={() => showMore.mutate()} disabled={showMore.isPending}>
+                {showMore.isPending ? "Looking..." : `Show ${Math.min(count, moreAvailable)} more results`}
+              </Button>
+              <p className="text-xs text-ink-500">
+                {moreAvailable.toLocaleString("en-US")}
+                {moreCapped ? "+" : ""} more fit your search. Results you removed stay hidden.
+              </p>
+            </div>
           )}
         </section>
       )}

@@ -19,6 +19,7 @@ from app.api import (
     apply,
     automation,
     discovery,
+    job_employers,
     job_search,
     jobs,
     needs_attention,
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(apply.router)
     app.include_router(needs_attention.router)
     app.include_router(job_search.router)
+    app.include_router(job_employers.router)
 
     # Serve the built dashboard, once it exists, at /app (spec §14). Any path
     # that isn't a real built file falls back to index.html so refreshing or

@@ -17,6 +17,7 @@ import json
 import logging
 import math
 import re
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -26,6 +27,7 @@ from app.config import settings
 from app.schemas.job_search import JobSearchIn
 from app.services.discovery.normalization import parse_posted_date, strip_tracking_params
 from app.services.discovery import ats
+from app.services.jobcache.keys import loose_keys
 from app.services.llm.client import LLMClient
 from app.services.llm.exceptions import LLMNotConfiguredError
 
@@ -616,7 +618,215 @@ def merge_same_jobs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def trim_to_count(items: list[dict[str, Any]], count: int) -> list[dict[str, Any]]:
     """Keeps the best-checked results first (the employer's own system confirmed them), then the rest, up to the count asked for."""
-    ranked = sorted(items, key=lambda i: (0 if i.get("ats_checked") else 1, _source_rank(i)))
+    ranked = sorted(items, key=lambda i: (-(i.get("fit") or 0.0), 0 if i.get("ats_checked") else 1, _source_rank(i)))
+    keep = {id(i) for i in ranked[:count]}
+    return [i for i in items if id(i) in keep]
+
+
+def _clean_items(
+    raw_items: list[dict[str, Any]], criteria: JobSearchIn, grounded_keys: set[str], why: dict[str, int] | None = None
+) -> list[dict[str, Any]]:
+    why = why if why is not None else {}
+
+    def skip(reason: str) -> None:
+        why[reason] = why.get(reason, 0) + 1
+
+    items: list[dict[str, Any]] = []
+    excluded = excluded_companies(criteria)
+    for raw_item in raw_items:
+        title = _clean(raw_item.get("title"), 300)
+        company = _clean(raw_item.get("company"), 300)
+        link = _clean(raw_item.get("url"), 1000)
+        if not title or not company or not link or not is_http_url(link):
+            skip("missing title, company or link")
+            continue
+        link = strip_tracking_params(link)
+        if is_excluded(company, excluded):
+            skip("excluded company")
+            continue
+        if criteria.target_salary:
+            mid = salary_midpoint(_clean(raw_item.get("salary"), 200))
+            if mid is not None and mid < salary_floor(criteria.target_salary):
+                skip("pay under your minimum")
+                continue  # posted pay is clearly under the floor
+        # "Only postings that state pay" is applied after the postings' own data is read: snippets rarely show pay.
+        posted = parse_posted_date(_clean(raw_item.get("posted"), 40))
+        if posted and criteria.posted_within_days and (dt.date.today() - posted).days > criteria.posted_within_days:
+            skip("older than the date window")
+            continue  # clearly older than the window asked for
+        work_type = _clean(raw_item.get("work_type"), 30)
+        work_type = work_type.lower() if work_type and work_type.lower() in WORK_TYPES else None
+        items.append(
+            {
+                "title": title,
+                "company": company,
+                "location": _clean(raw_item.get("location"), 300),
+                "work_type": work_type,
+                "salary_text": _clean(raw_item.get("salary"), 200),
+                "posted_at": posted,
+                "summary": _clean(raw_item.get("summary"), 800),
+                "url": link,
+                "url_key": url_key(link),
+                "grounded": url_key(link) in grounded_keys,
+            }
+        )
+    return items
+
+
+def search_model() -> str | None:
+    return settings.JOB_SEARCH_MODEL or settings.PRIMARY_FAST_MODEL
+
+
+def web_plugin(max_results: int) -> dict[str, Any]:
+    """The web-search settings: the engine is set explicitly so domain filters and the price do not depend on the model."""
+    plugin: dict[str, Any] = {"id": "web", "engine": settings.JOB_SEARCH_ENGINE, "max_results": max_results}
+    if settings.JOB_SEARCH_ENGINE_MODE:
+        plugin["mode"] = settings.JOB_SEARCH_ENGINE_MODE
+    return plugin
+
+
+async def _search_one(criteria: JobSearchIn, scope: str, model: str) -> list[dict[str, Any]]:
+    n = per_call_count(criteria, scope)
+    plugin = web_plugin(max(5, min(n + 2, 10)))
+    plugin.update({k: SCOPES[scope][k] for k in ("include", "exclude") if k in SCOPES[scope]})
+    if "include" in plugin:
+        plugin["include_domains"] = plugin.pop("include")
+    if "exclude" in plugin:
+        plugin["exclude_domains"] = plugin.pop("exclude")
+    result = await LLMClient().chat_completion(
+        model=model,
+        messages=build_messages(criteria, scope),
+        temperature=0.0,
+        max_tokens=2500,
+        extra={"plugins": [plugin]},
+        timeout=150.0,
+    )
+    parsed = parse_items(result.content)
+    why: dict[str, int] = {}
+    cleaned = _clean_items(parsed, criteria, cited_urls(result.raw), why)
+    log.warning("job search [%s]: AI returned %d, %d usable; left out: %s", scope, len(parsed), len(cleaned), why or "none")
+    return cleaned
+
+
+@dataclass
+class SearchOutcome:
+    items: list[dict[str, Any]]
+    skipped: int = 0  # dropped as closed, too old, below the pay minimum, or without an employer link
+    coverage: dict[str, Any] | None = None  # what the saved employer lists covered (None when there is no saved copy yet)
+    more_available: int = 0  # further matches in the saved lists that were not shown this time
+    more_capped: bool = False  # True when there may be many more than that number
+
+
+def _pool_size(criteria: JobSearchIn) -> int:
+    """How many candidates from the saved lists get checked against the employers' own systems. More when pay must be stated."""
+    return min(60, max(criteria.count * (4 if criteria.require_salary else 3), 24))
+
+
+def _dedupe_by_address(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    out = []
+    for item in items:
+        keys = loose_keys(item["url"])
+        if keys & seen:
+            continue
+        seen |= keys
+        out.append(item)
+    return out
+
+
+async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = None, cache_only: bool = False) -> SearchOutcome:
+    """
+    Two sources, merged. First the saved copy of employers' job lists (instant, no AI, can hold thousands of postings), then,
+    unless switched off or already plentiful, one AI web search per kind of source (Workday, Greenhouse/Ashby/Lever, company
+    sites), which also finds new employers to add to the saved copy. Every candidate is then checked by code, not by the AI:
+    the employer's own system says whether it is open and when it was published.
+    """
+    from app.services.jobcache import matcher, service as cache_service  # imported here: the cache reads this module too
+
+    known = known_keys or set()
+    try:
+        cached = await cache_service.search_cache(criteria, known, _pool_size(criteria))
+    except Exception:  # the saved copy is a bonus: if it fails the web search still runs
+        log.exception("job search: the saved employer lists could not be searched")
+        cached = cache_service.CacheOutcome()
+    mode = (settings.JOB_SEARCH_AI or "always").lower()
+    run_ai = not cache_only and mode != "off" and (mode == "always" or len(cached.items) < criteria.count)
+    model = search_model()
+    if run_ai and not model:
+        if not cached.items:
+            raise LLMNotConfiguredError("No LLM provider configured (PRIMARY_FAST_MODEL unset).")
+        run_ai = False  # the saved lists already have results; the web search needs the AI connection and is skipped
+
+    batches: list[list[dict[str, Any]]] = []
+    if run_ai:
+        outcomes = await asyncio.gather(*(_search_one(criteria, scope, model) for scope in SCOPES), return_exceptions=True)  # type: ignore[arg-type]
+        for scope, o in zip(SCOPES, outcomes):
+            if isinstance(o, BaseException):
+                log.warning("job search [%s]: failed: %s: %s", scope, type(o).__name__, o)
+        batches = [o for o in outcomes if isinstance(o, list)]
+        if not batches and not cached.items:
+            raise next(o for o in outcomes if isinstance(o, BaseException))  # every source failed: show the first reason
+
+    plan = matcher.build_plan(criteria)
+    web_items = [i for batch in batches for i in batch]
+    for item in web_items:  # the same measure of fit for every result, so they sort together
+        item["fit"] = matcher.fit_for_item(plan, item["title"], item.get("location"), item.get("work_type"), item.get("posted_at"))
+    if web_items:  # employers on the four systems that the web search found join the saved lists
+        try:
+            added = await asyncio.to_thread(cache_service.learn_from_links, [(i["url"], i["company"]) for i in web_items], "search")
+            if added:
+                cache_service.refresh_in_background(seed=False)
+        except Exception:
+            log.exception("job search: could not add the employers found to the saved lists")
+
+    items = _dedupe_by_address(cached.items + web_items)
+    merged = len(items)
+    items = merge_same_jobs(items)
+    items, not_found = await resolve_original_sources(items)
+    items = await upgrade_to_ats_links(items)
+    items, gone = await enrich_from_ats(items)
+    items, too_old = await fill_posted_dates(items, criteria.posted_within_days, need_pay=criteria.require_salary)
+    items, no_pay = apply_pay_rules(items, criteria)
+    too_old += no_pay
+    kept, closed = await drop_closed(items)
+    log.warning(
+        "job search: %d from saved lists, %d from the web, %d after merging, %d dropped (no employer link %d, closed by employer %d, too old or no pay %d, closed page %d), %d left",
+        len(cached.items), len(web_items), len(items) + not_found + gone + too_old, not_found + gone + too_old + closed, not_found, gone, too_old, closed, len(kept),
+    )
+    final = trim_to_count(kept, criteria.count)
+    from_saved = [i for i in final if i.get("employer_id")]
+    if from_saved:
+        await asyncio.to_thread(cache_service.record_hits, [i["employer_id"] for i in from_saved])
+    for item in final:  # working notes, not saved columns
+        for key in ("ats_checked", "ats_live", "site_url", "fit", "employer_id"):
+            item.pop(key, None)
+    coverage = None
+    if cached.coverage and cached.coverage.get("employers"):
+        coverage = {
+            **cached.coverage,
+            "matches": cached.matches,
+            "matches_capped": cached.matches_capped,
+            "waiting": max(cached.coverage["employers"] - cached.coverage["ready"] - sum(v["failing"] for v in cached.coverage["by_system"].values()), 0),
+            "refreshing": cache_service.STATE.running,
+        }
+    return SearchOutcome(
+        items=final,
+        skipped=closed + gone + not_found + too_old,
+        coverage=coverage,
+        more_available=max(cached.matches - len(from_saved), 0),
+        more_capped=cached.matches_capped,
+    )
+
+
+async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]:
+    """The search as (candidate postings not yet saved, how many were dropped as closed, too old or without an original)."""
+    outcome = await search_jobs_full(criteria)
+    return outcome.items, outcome.skipped
+
+
+def trim_to_count(items: list[dict[str, Any]], count: int) -> list[dict[str, Any]]:
+    """Keeps the best-checked results first (the employer's own system confirmed them), then the rest, up to the count asked for."""
+    ranked = sorted(items, key=lambda i: (-(i.get("fit") or 0.0), 0 if i.get("ats_checked") else 1, _source_rank(i)))
     keep = {id(i) for i in ranked[:count]}
     return [i for i in items if id(i) in keep]
 

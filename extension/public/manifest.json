@@ -11,6 +11,8 @@
     "http://127.0.0.1:8765/*",
     "https://*.greenhouse.io/*",
     "https://jobs.ashbyhq.com/*",
+    "https://jobs.lever.co/*",
+    "https://jobs.eu.lever.co/*",
     "https://*.myworkdayjobs.com/*"
   ],
 

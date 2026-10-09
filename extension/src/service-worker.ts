@@ -198,11 +198,14 @@ function waitForTabComplete(tabId: number, timeoutMs: number): Promise<void> {
  * waits for the form to appear, then runs the same fill as the popup button.
  * Still never submits; the person reviews and clicks Submit themselves.
  */
-/** Ashby shows the posting first; its form lives at ".../application". */
+/** Ashby shows the posting first (its form lives at ".../application"); Lever's form lives at ".../apply". */
 function applicationUrlFor(raw: string): string {
   const url = new URL(raw);
   if (url.hostname === "jobs.ashbyhq.com" && !/\/application\/?$/.test(url.pathname)) {
     url.pathname = `${url.pathname.replace(/\/$/, "")}/application`;
+  }
+  if ((url.hostname === "jobs.lever.co" || url.hostname === "jobs.eu.lever.co") && !/\/apply\/?$/.test(url.pathname)) {
+    url.pathname = `${url.pathname.replace(/\/$/, "")}/apply`;
   }
   return url.toString();
 }

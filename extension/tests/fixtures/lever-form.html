@@ -1,0 +1,47 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Revenue Cycle Manager - Acme</title></head><body>
+<form id="application-form" method="POST" novalidate>
+ <div class="application-page"><ul>
+  <li class="application-question resume"><label><div class="application-label">Resume/CV<span class="required">✱</span></div>
+    <div class="application-field"><input type="file" name="resume" id="resume-upload-input" required></div></label></li>
+  <li class="application-question"><label><div class="application-label">Full name<span class="required">✱</span></div>
+    <div class="application-field"><input type="text" name="name" required></div></label></li>
+  <li class="application-question"><label><div class="application-label">Email<span class="required">✱</span></div>
+    <div class="application-field"><input type="email" name="email" required></div></label></li>
+  <li class="application-question"><label><div class="application-label">Phone</div>
+    <div class="application-field"><input type="text" name="phone"></div></label></li>
+  <li class="application-question"><label><div class="application-label">Current location</div>
+    <div class="application-field"><input type="text" name="location" id="location-input"><input type="hidden" name="selectedLocation" id="selected-location"></div></label></li>
+  <li class="application-question"><label><div class="application-label">Current company</div>
+    <div class="application-field"><input type="text" name="org"></div></label></li>
+  <li class="application-question"><label><div class="application-label">LinkedIn URL</div>
+    <div class="application-field"><input type="text" name="urls[LinkedIn]"></div></label></li>
+  <li class="application-question"><label><div class="application-label">GitHub URL</div>
+    <div class="application-field"><input type="text" name="urls[GitHub]"></div></label></li>
+ </ul>
+ <ul>
+  <li class="application-question custom-question"><div class="application-label">Are you legally authorized to work in the United States?<span class="required">✱</span></div>
+    <div class="application-field"><ul data-qa="multiple-choice">
+      <li><label><input type="radio" name="cards[1][field0]" value="Yes" required><span class="application-answer-alternative">Yes</span></label></li>
+      <li><label><input type="radio" name="cards[1][field0]" value="No"><span class="application-answer-alternative">No</span></label></li></ul></div></li>
+  <li class="application-question custom-question"><div class="application-label">Will you now or in the future require sponsorship for employment visa status?<span class="required">✱</span></div>
+    <div class="application-field"><ul data-qa="multiple-choice">
+      <li><label><input type="radio" name="cards[2][field0]" value="Yes" required><span class="application-answer-alternative">Yes</span></label></li>
+      <li><label><input type="radio" name="cards[2][field0]" value="No"><span class="application-answer-alternative">No</span></label></li></ul></div></li>
+  <li class="application-question custom-question"><div class="application-label">Have you ever worked for Acme before?<span class="required">✱</span></div>
+    <div class="application-field"><ul data-qa="multiple-choice">
+      <li><label><input type="radio" name="cards[3][field0]" value="Yes" required><span class="application-answer-alternative">Yes</span></label></li>
+      <li><label><input type="radio" name="cards[3][field0]" value="No"><span class="application-answer-alternative">No</span></label></li></ul></div></li>
+  <li class="application-question"><label><div class="application-label">Additional information</div>
+    <div class="application-field"><textarea name="comments"></textarea></div></label></li>
+ </ul>
+ <ul>
+  <li class="application-question"><label><div class="application-label">Gender</div>
+    <div class="application-field"><select name="eeo[gender]"><option value="">Select...</option><option>Male</option><option>Female</option><option>Decline to self-identify</option></select></div></label></li>
+ </ul>
+ <button type="submit" id="btn-submit" class="postings-btn template-btn-submit">Submit application</button>
+ </div>
+</form>
+<script>
+  window.__submitted = 0;
+  document.getElementById('application-form').addEventListener('submit', e => { e.preventDefault(); window.__submitted++; });
+</script></body></html>

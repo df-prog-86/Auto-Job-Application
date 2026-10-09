@@ -32,6 +32,9 @@ def normalize_url(url: str) -> str:
     if host.endswith("ashbyhq.com") and path.lower().endswith("/application"):
         path = path[: -len("/application")]
     # A Workday posting and its application steps are the same job: ".../<slug>_JR1" and ".../<slug>_JR1/apply/...".
+    # A Lever posting and its application form are the same job: ".../<id>" and ".../<id>/apply".
+    if host.endswith("lever.co") and path.lower().endswith("/apply"):
+        path = path[: -len("/apply")]
     if host.endswith("myworkdayjobs.com"):
         path = re.sub(r"(/(apply|login)(/.*)?)$", "", path, flags=re.I)
     return f"{parts.scheme.lower()}://{host}{path}"

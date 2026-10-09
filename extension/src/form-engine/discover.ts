@@ -139,8 +139,11 @@ export function discoverFields(doc: Document): FormField[] {
       const group = Array.from(doc.querySelectorAll<HTMLInputElement>(`input[type="radio"]`)).filter(
         (r) => r.name === radio.name,
       );
-      const raw = groupLabel(radio, doc);
-      const groupEl = radio.closest("fieldset, [role='radiogroup'], [role='group']");
+      // Lever has no fieldset: each question sits in an "application-question" block with its own label.
+      const questionEl = radio.closest(".application-question");
+      let raw = groupLabel(radio, doc);
+      if (!clean(raw)) raw = questionEl?.querySelector(".application-label")?.textContent ?? "";
+      const groupEl = radio.closest("fieldset, [role='radiogroup'], [role='group']") ?? questionEl;
       fields.push({
         kind: "radio",
         el: radio,

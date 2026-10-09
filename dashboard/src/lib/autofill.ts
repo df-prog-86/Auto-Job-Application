@@ -7,7 +7,11 @@ const SUFFIXES: { suffix: string; name: string }[] = [
   { suffix: "greenhouse.io", name: "Greenhouse" },
   { suffix: "myworkdayjobs.com", name: "Workday" },
 ];
-const EXACT: { host: string; name: string }[] = [{ host: "jobs.ashbyhq.com", name: "Ashby" }];
+const EXACT: { host: string; name: string }[] = [
+  { host: "jobs.ashbyhq.com", name: "Ashby" },
+  { host: "jobs.lever.co", name: "Lever" },
+  { host: "jobs.eu.lever.co", name: "Lever" },
+];
 
 /** The site's name when the extension can fill applications there, otherwise null. */
 export function autofillSite(raw: string | null | undefined): string | null {

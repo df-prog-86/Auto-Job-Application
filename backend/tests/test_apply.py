@@ -402,3 +402,11 @@ def test_workday_application_steps_match_the_posting():
     assert urls_match(post + "/login", post)
     assert urls_match(post.replace("en-US/", ""), post + "/apply")
     assert not urls_match(post.replace("548", "549"), post)
+
+
+def test_lever_posting_and_application_form_match():
+    from app.services.apply.questions import urls_match
+
+    post = "https://jobs.lever.co/acme/1a2b3c4d-0000-1111-2222-333344445555"
+    assert urls_match(post + "/apply?lever-source=x", post)
+    assert not urls_match(post.replace("1a2b", "9z9z"), post)

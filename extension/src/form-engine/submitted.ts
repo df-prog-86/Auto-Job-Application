@@ -8,6 +8,7 @@
 const CONFIRMATION_PATHS = [
   /\/confirmation(\/|$)/i, // Greenhouse
   /\/jobTasks\/completed\/application/i, // Workday
+  /\/thanks\/?$/i, // Lever
 ];
 
 const CONFIRMATION_PHRASES = [

@@ -469,9 +469,9 @@ def test_each_source_gets_its_own_domain_filter(search):
         client.post("/api/v1/job-search/run", json={"titles": "revenue cycle consultant"})
     finally:
         web_search.LLMClient.chat_completion = original
-    assert len(seen) == 3
-    assert any(p.get("include_domains") == ["*.myworkdayjobs.com"] for p in seen)
-    assert any("jobs.ashbyhq.com" in p.get("include_domains", []) for p in seen)
+    assert len(seen) == 2  # one for the hiring systems, one for company sites
+    ats = [p for p in seen if "include_domains" in p][0]
+    assert "*.myworkdayjobs.com" in ats["include_domains"] and "jobs.ashbyhq.com" in ats["include_domains"]
     web = [p for p in seen if "exclude_domains" in p][0]
     assert "linkedin.com" in web["exclude_domains"] and all(p["engine"] == "exa" and "mode" not in p for p in seen)
 

@@ -14,6 +14,7 @@ import datetime as dt
 import ipaddress
 import json
 import logging
+import math
 import re
 from typing import Any
 from urllib.parse import urlsplit
@@ -457,11 +458,9 @@ async def fill_posted_dates(
 
 
 # The search is split by where jobs live, so each call looks at one kind of source and returns direct posting links.
-WORKDAY_DOMAINS = ["*.myworkdayjobs.com"]
-ATS_DOMAINS = ["boards.greenhouse.io", "job-boards.greenhouse.io", "jobs.ashbyhq.com", "jobs.lever.co"]
+ATS_DOMAINS = ["*.myworkdayjobs.com", "boards.greenhouse.io", "job-boards.greenhouse.io", "jobs.ashbyhq.com", "jobs.lever.co"]
 SCOPES: dict[str, dict[str, Any]] = {
-    "workday": {"include": WORKDAY_DOMAINS, "hint": "Search only Workday career sites."},
-    "ats": {"include": ATS_DOMAINS, "hint": "Search only Greenhouse, Ashby and Lever job pages."},
+    "ats": {"include": ATS_DOMAINS, "hint": "Search only Workday, Greenhouse, Ashby and Lever job pages."},
     "web": {
         "exclude": sorted(AGGREGATOR_DOMAINS) + ["myworkdayjobs.com", "greenhouse.io", "ashbyhq.com", "lever.co"],
         "hint": "Search company career sites.",
@@ -469,9 +468,10 @@ SCOPES: dict[str, dict[str, Any]] = {
 }
 
 
-def per_call_count(criteria: JobSearchIn) -> int:
-    """How many postings each source asks for: enough overlap to fill the list, without paying for the same job three times."""
-    return max(3, -(-criteria.count * 6 // 10))
+def per_call_count(criteria: JobSearchIn, scope: str = "ats") -> int:
+    """How many postings each source asks for. The hiring systems carry most jobs, so they get the larger share."""
+    share = 1.0 if scope == "ats" else 0.5
+    return max(3, min(10, math.ceil(criteria.count * share)))
 
 
 def build_messages(criteria: JobSearchIn, scope: str = "web") -> list[dict[str, str]]:
@@ -505,7 +505,7 @@ def build_messages(criteria: JobSearchIn, scope: str = "web") -> list[dict[str, 
         "salary (text from the posting or null), posted (YYYY-MM-DD only if the result shows it, else null; never guess), "
         "url, summary (one plain sentence from the posting)."
     )
-    user = f"Find up to {per_call_count(criteria)} postings:\n" + "\n".join(f"- {w}" for w in wanted)
+    user = f"Find up to {per_call_count(criteria, scope)} postings:\n" + "\n".join(f"- {w}" for w in wanted)
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
@@ -637,7 +637,7 @@ def web_plugin(max_results: int) -> dict[str, Any]:
 
 
 async def _search_one(criteria: JobSearchIn, scope: str, model: str) -> list[dict[str, Any]]:
-    n = per_call_count(criteria)
+    n = per_call_count(criteria, scope)
     plugin = web_plugin(max(5, min(n + 2, 10)))
     plugin.update({k: SCOPES[scope][k] for k in ("include", "exclude") if k in SCOPES[scope]})
     if "include" in plugin:

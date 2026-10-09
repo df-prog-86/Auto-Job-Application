@@ -21,7 +21,7 @@ from app.services.resume import docx_editor
 from app.services.resume.generation import generate_plan
 from app.services.resume.master import master_path
 from app.services.resume.naming import resume_filename
-from app.services.resume.validation import plan_to_dict
+from app.services.resume.validation import plan_to_dict, skills_to_dict, summaries_to_dict
 
 TEMPLATE_VERSION = "docx-inplace-1"
 ORIGINAL_TEMPLATE_VERSION = "original-1"  # the master resume, copied as it is
@@ -67,9 +67,11 @@ async def tailor_resume(db: Session, job: Job, candidate_name: str, strength: st
 
     doc = Document(str(master))  # read-only use of the master; saved elsewhere below
     blocks = docx_editor.find_blocks(doc)
-    result = await generate_plan(db, job, blocks, docx_editor.full_text(doc), strength)
+    parts = docx_editor.find_text_parts(doc)
+    result = await generate_plan(db, job, blocks, docx_editor.full_text(doc), strength, parts)
     if result.plan is not None:
         docx_editor.apply_plan(blocks, plan_to_dict(result.plan))
+        docx_editor.apply_text_plan(parts, summaries_to_dict(result.plan), skills_to_dict(result.plan, parts))
     docx_editor.clean_dashes(doc)
     docx_editor.strip_trailing_blank_paragraphs(doc)
 

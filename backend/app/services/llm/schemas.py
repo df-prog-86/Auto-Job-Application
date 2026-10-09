@@ -79,6 +79,18 @@ class PlannedBlock(BaseModel):
     )
 
 
+class PlannedSummary(BaseModel):
+    part_id: int
+    text: str = Field(description="The summary paragraph, reworded for the job using only facts already in it.")
+
+
+class PlannedSkills(BaseModel):
+    part_id: int
+    items: list[str] = Field(
+        description="Every item of this skills line exactly once, spelled exactly as given, best fit to the job first."
+    )
+
+
 class TailorPlan(BaseModel):
     """
     What the model decides for a tailored resume (spec §25-26, adapted): the
@@ -88,6 +100,8 @@ class TailorPlan(BaseModel):
     """
 
     blocks: list[PlannedBlock] = Field(default_factory=list)
+    summaries: list[PlannedSummary] = Field(default_factory=list)
+    skills: list[PlannedSkills] = Field(default_factory=list)
     changelog: list[str] = Field(
         default_factory=list,
         description="Plain notes for the candidate: what was reordered or lightly reworded, "

@@ -1,0 +1,56 @@
+from docx import Document
+
+from app.services.llm.schemas import PlannedSkills, PlannedSummary, TailorPlan
+from app.services.resume import docx_editor as de
+from app.services.resume.validation import skills_to_dict, summaries_to_dict, validate_plan
+
+SUMMARY = "Revenue cycle consultant with ten years of experience leading denial reduction and billing process improvement for hospital systems."
+
+
+def _doc():
+    d = Document()
+    d.add_paragraph("SUMMARY")
+    d.add_paragraph(SUMMARY)
+    d.add_paragraph("EXPERIENCE")
+    d.add_paragraph("Consultant | Acme Health")
+    d.add_paragraph("Reduced denials by 20%", style="List Bullet")
+    d.add_paragraph("SKILLS")
+    q = d.add_paragraph()
+    q.add_run("Tools: ").bold = True
+    q.add_run("Epic (Resolute, Cadence), SQL, Excel, Tableau")
+    d.add_paragraph("EDUCATION")
+    d.add_paragraph("UCF")
+    return d
+
+
+def test_summary_and_skills_are_found_and_edited_in_place():
+    d = _doc()
+    blocks, parts = de.find_blocks(d), de.find_text_parts(d)
+    assert [p.kind for p in parts] == ["summary", "skills"]
+    plan = TailorPlan(
+        summaries=[PlannedSummary(part_id=0, text=SUMMARY.replace("leading", "driving"))],
+        skills=[PlannedSkills(part_id=1, items=["tableau", "SQL", "Epic (Resolute, Cadence)", "Excel"])],
+    )
+    assert validate_plan(plan, blocks, de.full_text(d), False, parts) == []
+    assert de.apply_text_plan(parts, summaries_to_dict(plan), skills_to_dict(plan, parts)) == 2
+    texts = [p.text for p in d.paragraphs]
+    assert "driving denial reduction" in texts[1]
+    skills = d.paragraphs[6]
+    assert skills.text == "Tools: Tableau, SQL, Epic (Resolute, Cadence), Excel"
+    assert skills.runs[0].text == "Tools: " and skills.runs[0].bold
+
+
+def test_skills_cannot_be_added_or_dropped():
+    d = _doc()
+    blocks, parts = de.find_blocks(d), de.find_text_parts(d)
+    bad = TailorPlan(skills=[PlannedSkills(part_id=1, items=["Tableau", "SQL", "Python", "Excel"])])
+    assert validate_plan(bad, blocks, de.full_text(d), False, parts)
+
+
+def test_light_summary_cannot_invent_numbers_or_grow():
+    d = _doc()
+    blocks, parts = de.find_blocks(d), de.find_text_parts(d)
+    plan = TailorPlan(summaries=[PlannedSummary(part_id=0, text=SUMMARY.replace("ten", "15"))])
+    assert validate_plan(plan, blocks, de.full_text(d), False, parts)
+    longer = TailorPlan(summaries=[PlannedSummary(part_id=0, text=SUMMARY + " " + SUMMARY[:60])])
+    assert validate_plan(longer, blocks, de.full_text(d), False, parts)

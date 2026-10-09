@@ -15,7 +15,7 @@ from app.models.jobs import Job
 from app.services.llm.exceptions import LLMError
 from app.services.llm.router import ModelRouter
 from app.services.llm.schemas import TailorPlan
-from app.services.resume.docx_editor import Block
+from app.services.resume.docx_editor import Block, TextPart
 from app.services.resume.validation import validate_plan
 
 
@@ -38,6 +38,11 @@ SYSTEM_PROMPT = (
     "a phrase. Change at most a few words in a bullet, and leave most bullets exactly as given. If a "
     "bullet needs no change, return its text exactly as given. Do not restructure sentences, do not "
     "rewrite the candidate's voice and do not bolt keywords onto the front of bullets.\n"
+    "Summary paragraphs (listed as [S<id>]): return each one in 'summaries' with the same conservative rule: "
+    "keep the paragraph as it is except for a few small, truthful word swaps toward the job's own terms. "
+    "Keep its length about the same. Skills lines (listed as [K<id>]): return each in 'skills' with every "
+    "item exactly once, spelled exactly as given, reordered so the items the job asks for come first. "
+    "Never add, drop, rename or merge a skill; a skill the job wants that the master lacks goes in the changelog only.\n"
     "Hard bans: never invent or imply tools, certifications, titles, employers, metrics, tenure, "
     "or specialties the master does not state. Never inflate years. If the job asks for something "
     "the master does not support, leave it out and instead add a note to the changelog. Do not add "
@@ -59,6 +64,12 @@ FIRM_PROMPT = (
     "truthfully supports it. Keep each bullet about the same length as the original (never more than "
     "about a quarter longer) so the page layout does not change. Do not merge or split bullets. A bullet "
     "that already fits the job may stay as it is.\n"
+    "Summary paragraphs (listed as [S<id>]): return each one in 'summaries', rewritten so it speaks to this "
+    "job: lead with what matters most to it and use the job's vocabulary where the paragraph truthfully supports "
+    "it, using only facts already in the paragraph or the bullets. Keep it about the same length. Skills lines "
+    "(listed as [K<id>]): return each in 'skills' with every item exactly once, spelled exactly as given, "
+    "reordered so the items the job asks for come first. Never add, drop, rename or merge a skill; a skill the "
+    "job wants that the master lacks goes in the changelog only.\n"
     "Hard bans: every fact must come from the master: the same employers, titles, tools, numbers, "
     "scope and tenure. Never invent or imply tools, certifications, titles, employers, metrics, or "
     "specialties the master does not state. Never add numbers. Never inflate years or responsibility. "
@@ -70,6 +81,16 @@ FIRM_PROMPT = (
 )
 
 
+def _parts_text(parts: list[TextPart]) -> str:
+    lines: list[str] = []
+    for p in parts:
+        if p.kind == "summary":
+            lines.append(f"  [S{p.id}] {p.text}")
+        else:
+            lines.append(f"  [K{p.id}] {p.label}{' | '.join(p.items)}")
+    return "\n".join(lines)
+
+
 def _blocks_text(blocks: list[Block]) -> str:
     lines: list[str] = []
     for block in blocks:
@@ -79,10 +100,12 @@ def _blocks_text(blocks: list[Block]) -> str:
 
 
 async def generate_plan(
-    db: Session, job: Job, blocks: list[Block], master_text: str, strength: str = "light"
+    db: Session, job: Job, blocks: list[Block], master_text: str, strength: str = "light",
+    parts: list[TextPart] | None = None,
 ) -> PlanResult:
     firm = strength == "firm"
-    if not blocks:
+    parts = parts or []
+    if not blocks and not parts:
         return PlanResult(None, [], ["No bulleted experience was found in the master resume, so nothing was reordered."])
 
     router = ModelRouter(db)
@@ -93,6 +116,7 @@ async def generate_plan(
             "content": (
                 f"Job: {job.title} at {job.company}\n\nJob description:\n---\n"
                 f"{job.description or '(none)'}\n---\n\nMaster resume bullets:\n{_blocks_text(blocks)}"
+                + (f"\n\nSummary and skills (part ids are the numbers after S and K):\n{_parts_text(parts)}" if parts else "")
             ),
         },
     ]
@@ -101,14 +125,14 @@ async def generate_plan(
         try:
             plan = await router.get_structured(
                 purpose="resume_tailoring",
-                prompt_version="v3-firm" if firm else "v2-light-tweaks",
+                prompt_version="v4-firm-sections" if firm else "v3-light-sections",
                 messages=messages,
                 response_model=TailorPlan,
             )
         except LLMError as exc:
             all_problems.append(f"model call failed: {exc}")
             break
-        problems = validate_plan(plan, blocks, master_text, firm)
+        problems = validate_plan(plan, blocks, master_text, firm, parts)
         if not problems:
             return PlanResult(plan, [], list(plan.changelog))
         all_problems.extend(problems)

@@ -18,10 +18,11 @@ from __future__ import annotations
 import re
 
 from app.services.llm.schemas import TailorPlan
-from app.services.resume.docx_editor import Block
+from app.services.resume.docx_editor import Block, TextPart
 
 MIN_WORDS_KEPT = 0.6  # light tailor
 MIN_WORDS_KEPT_FIRM = 0.4  # firm tailor may rephrase more
+MAX_LENGTH_GROWTH_LIGHT = 1.1  # a light summary tweak barely changes length
 MAX_LENGTH_GROWTH_FIRM = 1.25  # a firm rewrite stays about as long, so the page layout does not shift
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?%?")
 _WORD = re.compile(r"[a-z0-9]+")
@@ -36,7 +37,9 @@ def _words(text: str) -> set[str]:
     return set(_WORD.findall(text.lower()))
 
 
-def validate_plan(plan: TailorPlan, blocks: list[Block], master_text: str, firm: bool = False) -> list[str]:
+def validate_plan(
+    plan: TailorPlan, blocks: list[Block], master_text: str, firm: bool = False, parts: list[TextPart] | None = None
+) -> list[str]:
     problems: list[str] = []
     blocks_by_id = {b.id: b for b in blocks}
     vocabulary = _words(master_text)
@@ -62,14 +65,69 @@ def validate_plan(plan: TailorPlan, blocks: list[Block], master_text: str, firm:
 
         for bullet in planned.bullets:
             problems.extend(_check_rewrite(bullet.bullet_id, original[bullet.bullet_id].text, bullet.text, vocabulary, firm))
+    problems.extend(_validate_text_parts(plan, parts or [], vocabulary, firm))
     return problems
 
 
-def _check_rewrite(bullet_id: int, original: str, new: str, vocabulary: set[str], firm: bool = False) -> list[str]:
+def _validate_text_parts(plan: TailorPlan, parts: list[TextPart], vocabulary: set[str], firm: bool) -> list[str]:
+    problems: list[str] = []
+    by_id = {p.id: p for p in parts}
+    seen: set[int] = set()
+    for planned in plan.summaries:
+        part = by_id.get(planned.part_id)
+        if part is None or part.kind != "summary":
+            problems.append(f"unknown summary id {planned.part_id}")
+            continue
+        if planned.part_id in seen:
+            problems.append(f"summary {planned.part_id} appears more than once")
+        seen.add(planned.part_id)
+        problems.extend(
+            _check_rewrite(
+                planned.part_id, part.text, planned.text, vocabulary, firm,
+                label="summary", max_growth=MAX_LENGTH_GROWTH_FIRM if firm else MAX_LENGTH_GROWTH_LIGHT,
+            )
+        )
+    for planned in plan.skills:
+        part = by_id.get(planned.part_id)
+        if part is None or part.kind != "skills":
+            problems.append(f"unknown skills id {planned.part_id}")
+            continue
+        if planned.part_id in seen:
+            problems.append(f"skills line {planned.part_id} appears more than once")
+        seen.add(planned.part_id)
+        if sorted(i.strip().lower() for i in planned.items) != sorted(i.lower() for i in part.items):
+            problems.append(
+                f"skills line {planned.part_id} must contain each of its items exactly once, spelled as given "
+                f"(expected {part.items})"
+            )
+    return problems
+
+
+def skills_to_dict(plan: TailorPlan, parts: list[TextPart]) -> dict[int, list[str]]:
+    """Skills orders with each item restored to its exact original spelling."""
+    by_id = {p.id: p for p in parts}
+    out: dict[int, list[str]] = {}
+    for planned in plan.skills:
+        part = by_id.get(planned.part_id)
+        if part is None:
+            continue
+        spelled = {i.lower(): i for i in part.items}
+        out[planned.part_id] = [spelled[i.strip().lower()] for i in planned.items]
+    return out
+
+
+def summaries_to_dict(plan: TailorPlan) -> dict[int, str]:
+    return {s.part_id: s.text for s in plan.summaries}
+
+
+def _check_rewrite(
+    bullet_id: int, original: str, new: str, vocabulary: set[str], firm: bool = False,
+    label: str = "bullet", max_growth: float | None = None,
+) -> list[str]:
     if new == original:
         return []
     problems: list[str] = []
-    label = f"bullet {bullet_id}"
+    label = f"{label} {bullet_id}"
 
     introduced = _numbers(new) - _numbers(original)
     if introduced:
@@ -81,7 +139,9 @@ def _check_rewrite(bullet_id: int, original: str, new: str, vocabulary: set[str]
         if kept < (MIN_WORDS_KEPT_FIRM if firm else MIN_WORDS_KEPT):
             problems.append(f"{label} rewords the original too heavily (keeps {kept:.0%} of its words)")
 
-    if firm and len(new) > len(original) * MAX_LENGTH_GROWTH_FIRM + 10:
+    if max_growth is None and firm:
+        max_growth = MAX_LENGTH_GROWTH_FIRM
+    if max_growth is not None and len(new) > len(original) * max_growth + 10:
         problems.append(f"{label} is much longer than the original, which could change the page layout")
 
     for index, term in enumerate(_TERM.findall(new)):

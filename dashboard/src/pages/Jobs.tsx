@@ -289,12 +289,16 @@ function JobCard({ job, highlight = false }: { job: JobOut; highlight?: boolean 
     onSuccess: refresh,
   });
   const [choosingStrength, setChoosingStrength] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (choosingStrength) pickerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [choosingStrength]);
   const tailorMutation = useMutation<TailorResumeOut, ApiError, "light" | "firm">({
     mutationFn: (strength) => api.tailorResume(job.id, strength),
     onSuccess: refresh,
   });
   const strengthPicker = choosingStrength && !tailorMutation.isPending && (
-    <div className="mt-3 rounded-2xl border border-[#e7e1fa] bg-[#f6f3ff] p-3">
+    <div ref={pickerRef} className="mt-3 rounded-2xl border border-[#e7e1fa] bg-[#f6f3ff] p-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs font-bold text-ink-900">How much should it change?</span>
         <button type="button" className="text-xs font-bold text-ink-500 hover:text-brand-700" onClick={() => setChoosingStrength(false)}>

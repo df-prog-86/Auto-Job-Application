@@ -178,7 +178,7 @@ export function JobSearch() {
     toastTimer.current = setTimeout(() => {
       if (toastHovered.current) armToast();
       else setToast(null);
-    }, 5000);
+    }, 3000);
   };
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);

@@ -13,6 +13,7 @@ import asyncio
 import datetime as dt
 import ipaddress
 import json
+import logging
 import re
 from typing import Any
 from urllib.parse import urlsplit
@@ -25,6 +26,8 @@ from app.services.discovery.normalization import parse_posted_date, strip_tracki
 from app.services.discovery import ats
 from app.services.llm.client import LLMClient
 from app.services.llm.exceptions import LLMNotConfiguredError
+
+log = logging.getLogger("job_search")
 
 WORK_TYPES = {"remote", "hybrid", "onsite"}
 
@@ -614,7 +617,12 @@ async def _search_one(criteria: JobSearchIn, scope: str, model: str) -> list[dic
         extra={"plugins": [plugin]},
         timeout=150.0,
     )
-    return _clean_items(parse_items(result.content), criteria, cited_urls(result.raw))
+    parsed = parse_items(result.content)
+    cleaned = _clean_items(parsed, criteria, cited_urls(result.raw))
+    log.warning(
+        "job search [%s]: AI returned %d, %d usable; answer starts: %r", scope, len(parsed), len(cleaned), (result.content or "")[:160]
+    )
+    return cleaned
 
 
 async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]:
@@ -627,6 +635,9 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
     if not model:
         raise LLMNotConfiguredError("No LLM provider configured (PRIMARY_FAST_MODEL unset).")
     outcomes = await asyncio.gather(*(_search_one(criteria, scope, model) for scope in SCOPES), return_exceptions=True)
+    for scope, o in zip(SCOPES, outcomes):
+        if isinstance(o, BaseException):
+            log.warning("job search [%s]: failed: %s: %s", scope, type(o).__name__, o)
     batches = [o for o in outcomes if isinstance(o, list)]
     if not batches:
         raise next(o for o in outcomes if isinstance(o, BaseException))  # every source failed: show the first reason
@@ -637,11 +648,16 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
             if item["url_key"] not in seen:
                 seen.add(item["url_key"])
                 items.append(item)
+    merged = len(items)
     items = merge_same_jobs(items)
     items, not_found = await resolve_original_sources(items)
     items, gone = await enrich_from_ats(items)
     items, too_old = await fill_posted_dates(items, criteria.posted_within_days)
     kept, closed = await drop_closed(items)
+    log.warning(
+        "job search: %d found across sources, %d after merging, %d dropped (no employer link %d, closed by employer %d, too old %d, closed page %d), %d left",
+        merged, len(items) + not_found + gone + too_old, not_found + gone + too_old + closed, not_found, gone, too_old, closed, len(kept),
+    )
     final = trim_to_count(kept, criteria.count)
     for item in final:  # working notes, not saved columns
         item.pop("ats_checked", None)

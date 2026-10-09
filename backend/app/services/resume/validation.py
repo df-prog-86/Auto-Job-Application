@@ -279,8 +279,7 @@ def sanitize_plan(
     for planned in plan.skills:
         part = by_id.get(planned.part_id)
         if part is None or part.kind != "skills":
-            notes.append("Ignored a skills line the AI listed that is not in your resume.")
-            continue
+            continue  # a line id the AI made up: nothing to change, nothing worth telling the person
         original = {i.lower() for i in part.items}
         kept: list[str] = []
         seen: set[str] = set()

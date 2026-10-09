@@ -183,8 +183,7 @@ async def generate_plan(
                 [],
                 list(cleaned.changelog)
                 + _added_note(cleaned, parts)
-                + ["Some edits didn't pass the accuracy checks and were left as you wrote them:"]
-                + skipped,
+                + (["Some edits didn't pass the accuracy checks and were left as you wrote them:"] + skipped if skipped else []),
             )
 
     return PlanResult(

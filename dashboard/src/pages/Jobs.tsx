@@ -281,10 +281,42 @@ function JobCard({ job }: { job: JobOut }) {
     mutationFn: () => api.useOriginalResume(job.id),
     onSuccess: refresh,
   });
-  const tailorMutation = useMutation<TailorResumeOut, ApiError, void>({
-    mutationFn: () => api.tailorResume(job.id),
+  const [choosingStrength, setChoosingStrength] = useState(false);
+  const tailorMutation = useMutation<TailorResumeOut, ApiError, "light" | "firm">({
+    mutationFn: (strength) => api.tailorResume(job.id, strength),
     onSuccess: refresh,
   });
+  const strengthPicker = choosingStrength && !tailorMutation.isPending && (
+    <div className="mt-3 rounded-2xl border border-[#e7e1fa] bg-[#f6f3ff] p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-bold text-ink-900">How much should it change?</span>
+        <button type="button" className="text-xs font-bold text-ink-500 hover:text-brand-700" onClick={() => setChoosingStrength(false)}>
+          Cancel
+        </button>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {(
+          [
+            ["light", "Light touch", "Keeps your wording. Reorders bullets so the ones that matter most come first."],
+            ["firm", "Stronger touch", "Rewrites bullets more boldly for this job. Formatting never changes and nothing is invented."],
+          ] as const
+        ).map(([value, title, text]) => (
+          <button
+            key={value}
+            type="button"
+            className="rounded-xl border border-[#ddd8f3] bg-white p-3 text-left transition hover:border-brand-400 hover:bg-brand-50"
+            onClick={() => {
+              setChoosingStrength(false);
+              tailorMutation.mutate(value);
+            }}
+          >
+            <div className="text-[13px] font-extrabold text-brand-700">{title}</div>
+            <div className="mt-0.5 text-xs text-ink-500">{text}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   const error =
     proceedMutation.error ?? requalifyMutation.error ?? tailorMutation.error ?? originalMutation.error ?? undoMutation.error ?? appliedMutation.error ?? notAppliedMutation.error ?? deleteMutation.error;
@@ -412,7 +444,7 @@ function JobCard({ job }: { job: JobOut }) {
             )}
             {!job.applied_at && proceeding && !hasResume && (
               <>
-                <Button variant="primary" className={tailorMutation.isPending ? "ai-working" : ""} onClick={() => tailorMutation.mutate()} disabled={busyResume}>
+                <Button variant="primary" className={tailorMutation.isPending ? "ai-working" : ""} onClick={() => setChoosingStrength(true)} disabled={busyResume}>
                   {tailorMutation.isPending ? "Creating…" : "Tailor my resume first"}
                 </Button>
                 <button type="button" className={linkClass} onClick={() => originalMutation.mutate()} disabled={busyResume}>
@@ -437,6 +469,7 @@ function JobCard({ job }: { job: JobOut }) {
           </div>
         </div>
 
+        {strengthPicker}
         {proceeding && !hasResume && !job.applied_at && (
           <p className="mt-2 text-xs text-ink-500">
             Either way, the application is filled from the resume you pick here, including each role's bullets.
@@ -535,7 +568,7 @@ function JobCard({ job }: { job: JobOut }) {
                       <button
                         type="button"
                         className={`text-xs font-bold text-ink-500 hover:text-brand-700 disabled:opacity-50 ${tailorMutation.isPending ? "ai-working rounded-full px-3 py-1 !text-brand-700" : ""}`}
-                        onClick={() => tailorMutation.mutate()}
+                        onClick={() => setChoosingStrength(true)}
                         disabled={busyResume}
                       >
                         {tailorMutation.isPending ? "Creating…" : usingOriginal ? "Tailor it instead" : "Recreate"}

@@ -101,6 +101,26 @@ FIRM_PROMPT = (
 )
 
 
+def _change_notes(plan: TailorPlan, blocks: list[Block], parts: list[TextPart], existing: list[str]) -> list[str]:
+    """Plain notes written by the code itself, so what actually changed is always listed, whatever the AI wrote."""
+    said = " ".join(existing).lower()
+    notes: list[str] = []
+    by_id = {p.id: p for p in parts}
+    if any(p.text != by_id[p.part_id].text for p in plan.summaries if p.part_id in by_id) and "summary" not in said:
+        notes.append("Reworded your summary for this job. Read it over to make sure it still sounds like you.")
+    if any(
+        [i.strip() for i in p.items][: len(by_id[p.part_id].items)] != by_id[p.part_id].items
+        for p in plan.skills
+        if p.part_id in by_id
+    ) and "skill" not in said:
+        notes.append("Reordered your skills so the ones this job asks for come first.")
+    bullets = {b.id: b.text for block in blocks for b in block.bullets}
+    reworded = sum(1 for pb in plan.blocks for b in pb.bullets if b.bullet_id in bullets and b.text != bullets[b.bullet_id])
+    if reworded and "reword" not in said and "rephras" not in said:
+        notes.append(f"Reworded {reworded} {'bullet' if reworded == 1 else 'bullets'} to fit the job.")
+    return notes
+
+
 def _added_note(plan: TailorPlan, parts: list[TextPart]) -> list[str]:
     extra = added_skills(plan, parts)
     if not extra:
@@ -163,7 +183,8 @@ async def generate_plan(
         last_plan = plan
         problems = validate_plan(plan, blocks, master_text, firm, parts, job.description or "")
         if not problems:
-            return PlanResult(plan, [], list(plan.changelog) + _added_note(plan, parts))
+            notes = list(plan.changelog)
+            return PlanResult(plan, [], notes + _change_notes(plan, blocks, parts, notes) + _added_note(plan, parts))
         logger.warning("resume tailor (%s) failed checks: %s", strength, "; ".join(problems)[:1500])
         all_problems.extend(problems)
         messages = messages + [
@@ -182,6 +203,7 @@ async def generate_plan(
                 cleaned,
                 [],
                 list(cleaned.changelog)
+                + _change_notes(cleaned, blocks, parts, list(cleaned.changelog))
                 + _added_note(cleaned, parts)
                 + (["Some edits didn't pass the accuracy checks and were left as you wrote them:"] + skipped if skipped else []),
             )

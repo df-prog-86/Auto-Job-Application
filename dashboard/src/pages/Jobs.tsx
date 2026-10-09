@@ -358,7 +358,7 @@ function JobCard({ job }: { job: JobOut }) {
                 </Ring>
               </div>
             ) : (
-              <Button size="sm" variant="primary" onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
+              <Button size="sm" variant="primary" className={requalifyMutation.isPending ? "ai-working" : ""} onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
                 {requalifyMutation.isPending ? "Scoring…" : "Score"}
               </Button>
             )}
@@ -412,7 +412,7 @@ function JobCard({ job }: { job: JobOut }) {
             )}
             {!job.applied_at && proceeding && !hasResume && (
               <>
-                <Button variant="primary" onClick={() => tailorMutation.mutate()} disabled={busyResume}>
+                <Button variant="primary" className={tailorMutation.isPending ? "ai-working" : ""} onClick={() => tailorMutation.mutate()} disabled={busyResume}>
                   {tailorMutation.isPending ? "Creating…" : "Tailor my resume first"}
                 </Button>
                 <button type="button" className={linkClass} onClick={() => originalMutation.mutate()} disabled={busyResume}>
@@ -534,7 +534,7 @@ function JobCard({ job }: { job: JobOut }) {
                     <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1.5">
                       <button
                         type="button"
-                        className="text-xs font-bold text-ink-500 hover:text-brand-700 disabled:opacity-50"
+                        className={`text-xs font-bold text-ink-500 hover:text-brand-700 disabled:opacity-50 ${tailorMutation.isPending ? "ai-working rounded-full px-3 py-1 !text-brand-700" : ""}`}
                         onClick={() => tailorMutation.mutate()}
                         disabled={busyResume}
                       >

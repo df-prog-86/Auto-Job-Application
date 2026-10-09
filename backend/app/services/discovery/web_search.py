@@ -549,7 +549,14 @@ def trim_to_count(items: list[dict[str, Any]], count: int) -> list[dict[str, Any
     return [i for i in items if id(i) in keep]
 
 
-def _clean_items(raw_items: list[dict[str, Any]], criteria: JobSearchIn, grounded_keys: set[str]) -> list[dict[str, Any]]:
+def _clean_items(
+    raw_items: list[dict[str, Any]], criteria: JobSearchIn, grounded_keys: set[str], why: dict[str, int] | None = None
+) -> list[dict[str, Any]]:
+    why = why if why is not None else {}
+
+    def skip(reason: str) -> None:
+        why[reason] = why.get(reason, 0) + 1
+
     items: list[dict[str, Any]] = []
     excluded = excluded_companies(criteria)
     for raw_item in raw_items:
@@ -557,18 +564,23 @@ def _clean_items(raw_items: list[dict[str, Any]], criteria: JobSearchIn, grounde
         company = _clean(raw_item.get("company"), 300)
         link = _clean(raw_item.get("url"), 1000)
         if not title or not company or not link or not is_http_url(link):
+            skip("missing title, company or link")
             continue
         link = strip_tracking_params(link)
         if is_excluded(company, excluded):
+            skip("excluded company")
             continue
         if criteria.target_salary:
             mid = salary_midpoint(_clean(raw_item.get("salary"), 200))
             if mid is not None and mid < salary_floor(criteria.target_salary):
+                skip("pay under your minimum")
                 continue  # posted pay is clearly under the floor
         if criteria.require_salary and not _clean(raw_item.get("salary"), 200):
+            skip("no pay stated")
             continue  # the person asked to see only postings that state pay
         posted = parse_posted_date(_clean(raw_item.get("posted"), 40))
         if posted and criteria.posted_within_days and (dt.date.today() - posted).days > criteria.posted_within_days:
+            skip("older than the date window")
             continue  # clearly older than the window asked for
         work_type = _clean(raw_item.get("work_type"), 30)
         work_type = work_type.lower() if work_type and work_type.lower() in WORK_TYPES else None
@@ -618,10 +630,9 @@ async def _search_one(criteria: JobSearchIn, scope: str, model: str) -> list[dic
         timeout=150.0,
     )
     parsed = parse_items(result.content)
-    cleaned = _clean_items(parsed, criteria, cited_urls(result.raw))
-    log.warning(
-        "job search [%s]: AI returned %d, %d usable; answer starts: %r", scope, len(parsed), len(cleaned), (result.content or "")[:160]
-    )
+    why: dict[str, int] = {}
+    cleaned = _clean_items(parsed, criteria, cited_urls(result.raw), why)
+    log.warning("job search [%s]: AI returned %d, %d usable; left out: %s", scope, len(parsed), len(cleaned), why or "none")
     return cleaned
 
 

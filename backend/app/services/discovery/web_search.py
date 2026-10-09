@@ -399,13 +399,31 @@ async def enrich_from_ats(items: list[dict[str, Any]]) -> tuple[list[dict[str, A
             item["ats_live"] = info.live
             if info.posted and not item.get("posted_at"):
                 item["posted_at"] = info.posted
+            if info.pay and not item.get("salary_text"):
+                item["salary_text"] = info.pay
 
         await asyncio.gather(*(one(i) for i in items))
     kept = [i for i in items if i.get("ats_live") is not False]
     return kept, len(items) - len(kept)
 
 
-async def fill_posted_dates(items: list[dict[str, Any]], within_days: int) -> tuple[list[dict[str, Any]], int]:
+def apply_pay_rules(items: list[dict[str, Any]], criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]:
+    """Pay filters, applied once pay has been read from the postings themselves."""
+    kept = []
+    for item in items:
+        if criteria.require_salary and not item.get("salary_text"):
+            continue
+        if criteria.target_salary and item.get("salary_text"):
+            mid = salary_midpoint(item["salary_text"])
+            if mid is not None and mid < salary_floor(criteria.target_salary):
+                continue
+        kept.append(item)
+    return kept, len(items) - len(kept)
+
+
+async def fill_posted_dates(
+    items: list[dict[str, Any]], within_days: int, need_pay: bool = False
+) -> tuple[list[dict[str, Any]], int]:
     """
     Results the AI gave no date for get one from the posting page itself. When a date window was asked for,
     postings that are clearly older are dropped. Still no date means it is kept, and shown as "date not listed".
@@ -413,14 +431,20 @@ async def fill_posted_dates(items: list[dict[str, Any]], within_days: int) -> tu
     gate = asyncio.Semaphore(5)
 
     async def one(item: dict[str, Any]) -> None:
-        if item.get("posted_at") or item.get("ats_checked") or not is_public_host(item["url"]):
+        needs_date = not item.get("posted_at") and not item.get("ats_checked")
+        needs_pay = need_pay and not item.get("salary_text") and not item.get("ats_checked")
+        if not (needs_date or needs_pay) or not is_public_host(item["url"]):
             return
         async with gate:
             try:
                 async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, max_redirects=5) as client:
                     resp = await client.get(item["url"], headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
                     if resp.status_code == 200:
-                        item["posted_at"] = extract_posted_date(resp.text[:600000])
+                        page = resp.text[:600000]
+                        if needs_date:
+                            item["posted_at"] = extract_posted_date(page)
+                        if needs_pay:
+                            item["salary_text"] = ats.extract_pay_text(page)
             except Exception:
                 return
 
@@ -575,9 +599,7 @@ def _clean_items(
             if mid is not None and mid < salary_floor(criteria.target_salary):
                 skip("pay under your minimum")
                 continue  # posted pay is clearly under the floor
-        if criteria.require_salary and not _clean(raw_item.get("salary"), 200):
-            skip("no pay stated")
-            continue  # the person asked to see only postings that state pay
+        # "Only postings that state pay" is applied after the postings' own data is read: snippets rarely show pay.
         posted = parse_posted_date(_clean(raw_item.get("posted"), 40))
         if posted and criteria.posted_within_days and (dt.date.today() - posted).days > criteria.posted_within_days:
             skip("older than the date window")
@@ -663,7 +685,9 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
     items = merge_same_jobs(items)
     items, not_found = await resolve_original_sources(items)
     items, gone = await enrich_from_ats(items)
-    items, too_old = await fill_posted_dates(items, criteria.posted_within_days)
+    items, too_old = await fill_posted_dates(items, criteria.posted_within_days, need_pay=criteria.require_salary)
+    items, no_pay = apply_pay_rules(items, criteria)
+    too_old += no_pay
     kept, closed = await drop_closed(items)
     log.warning(
         "job search: %d found across sources, %d after merging, %d dropped (no employer link %d, closed by employer %d, too old %d, closed page %d), %d left",

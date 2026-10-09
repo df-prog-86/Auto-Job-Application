@@ -49,7 +49,7 @@ def search(monkeypatch, app_and_db):
     async def unknown(url):
         return None  # tests never visit real sites
 
-    async def no_dates(items, within_days):
+    async def no_dates(items, within_days, need_pay=False):
         return items, 0  # tests never visit real sites
 
     monkeypatch.setattr(web_search, "check_live", unknown)
@@ -580,3 +580,30 @@ def test_investor_and_community_job_boards_are_caught_by_their_address_pattern()
     assert is_board_url("https://jobs.example-capital.com/companies/acme/jobs/123-analyst", "Acme")
     assert not is_board_url("https://acme.wd5.myworkdayjobs.com/en-US/c/job/R1", "Acme")
     assert not is_board_url("https://careers.acme.com/jobs/123-analyst", "Acme")
+
+
+def test_pay_is_read_from_the_postings_own_data():
+    from app.services import discovery  # noqa: F401
+    from app.services.discovery import ats
+
+    assert ats.extract_pay_text("<p>Base pay: $120,000 - $150,000 per year</p>") == "$120,000 - $150,000"
+    assert ats.extract_pay_text("Salary $95K to $110K plus bonus") == "$95K to $110K"
+    assert ats.extract_pay_text("&lt;p&gt;$80,000&nbsp;-&nbsp;$100,000&lt;/p&gt;") is not None  # escaped markup (Greenhouse)
+    assert ats.extract_pay_text("Competitive pay and great benefits") is None
+    assert ats.greenhouse_info(200, {"pay_input_ranges": [{"min_cents": 12000000, "max_cents": 15000000}]}).pay == "$120,000 - $150,000"
+    assert ats.workday_info(200, {"jobPostingInfo": {"jobDescription": "<b>$100,000 - $130,000</b>"}}).pay == "$100,000 - $130,000"
+    uid = "c771bcbd-1cc6-4228-a50a-8f18b8da2c0b"
+    board = {"jobs": [{"id": uid, "compensation": {"compensationTierSummary": "$130K - $160K"}}]}
+    assert ats.ashby_info(200, board, uid).pay == "$130K - $160K"
+    assert ats.lever_info(200, {"salaryRange": {"min": 90000, "max": 110000}}).pay == "$90,000 - $110,000"
+
+
+def test_only_show_jobs_with_pay_keeps_postings_whose_own_data_states_pay():
+    from app.schemas.job_search import JobSearchIn
+    from app.services.discovery.web_search import apply_pay_rules
+
+    items = [{"title": "a", "salary_text": "$120,000 - $150,000"}, {"title": "b", "salary_text": None}, {"title": "c", "salary_text": "$40,000 - $50,000"}]
+    kept, dropped = apply_pay_rules(items, JobSearchIn(titles="analyst", require_salary=True))
+    assert [i["title"] for i in kept] == ["a", "c"] and dropped == 1
+    kept, _ = apply_pay_rules(items, JobSearchIn(titles="analyst", target_salary=100000))
+    assert [i["title"] for i in kept] == ["a", "b"]  # unknown pay stays; clearly low pay goes

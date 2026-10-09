@@ -9,6 +9,7 @@ never removes a result.
 from __future__ import annotations
 
 import datetime as dt
+import html as htmllib
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -22,10 +23,35 @@ _UA = "Mozilla/5.0 (compatible; JobAgent/1.0)"
 _LANG = re.compile(r"[a-z]{2}-[A-Za-z]{2}")
 
 
+_MONEY_RANGE = re.compile(
+    r"\$\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?\s?[kK]?\s*(?:-|–|—|to)\s*\$?\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?\s?[kK]?"
+)
+
+
+def extract_pay_text(markup: Any) -> str | None:
+    """The first pay range written in a posting's text ("$120,000 - $150,000"), or None."""
+    if not isinstance(markup, str) or not markup:
+        return None
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", htmllib.unescape(htmllib.unescape(markup))))
+    for found in _MONEY_RANGE.finditer(text):
+        numbers = [float(n.replace(",", "")) for n in re.findall(r"\d{1,3}(?:,\d{3})*(?:\.\d+)?", found.group(0))]
+        scaled = [n * 1000 if "k" in found.group(0).lower() and n < 1000 else n for n in numbers]
+        if scaled and min(scaled) >= 15 and max(scaled) >= 1000 or (scaled and max(scaled) < 1000 and min(scaled) >= 15):
+            return found.group(0).strip()
+    return None
+
+
+def _money(cents: Any) -> str | None:
+    if isinstance(cents, (int, float)) and cents > 0:
+        return f"${cents / 100:,.0f}"
+    return None
+
+
 @dataclass
 class AtsInfo:
     live: bool | None = None  # True open, False clearly gone, None could not tell
     posted: dt.date | None = None
+    pay: str | None = None  # pay range the posting states, when its data includes one
     checked: bool = False  # the system itself answered, so no page check is needed
 
 
@@ -63,7 +89,7 @@ def workday_info(status: int, data: Any) -> AtsInfo:
 
     posted = parse_posted_date(info.get("startDate")) or extract_posted_date(f"Posted {info.get('postedOn', '')}")
     live = False if info.get("canApply") is False else True
-    return AtsInfo(live=live, posted=posted, checked=True)
+    return AtsInfo(live=live, posted=posted, pay=extract_pay_text(info.get("jobDescription")), checked=True)
 
 
 def greenhouse_ref(url: str) -> tuple[str, str] | None:
@@ -82,7 +108,12 @@ def greenhouse_info(status: int, data: Any) -> AtsInfo:
         return AtsInfo(live=False, checked=True)
     if status != 200 or not isinstance(data, dict):
         return AtsInfo()
-    return AtsInfo(live=True, posted=parse_posted_date(data.get("first_published")), checked=True)
+    pay = None
+    ranges = data.get("pay_input_ranges")
+    if isinstance(ranges, list) and ranges and isinstance(ranges[0], dict):
+        low, high = _money(ranges[0].get("min_cents")), _money(ranges[0].get("max_cents"))
+        pay = f"{low} - {high}" if low and high else low or high
+    return AtsInfo(live=True, posted=parse_posted_date(data.get("first_published")), pay=pay or extract_pay_text(data.get("content")), checked=True)
 
 
 def ashby_ref(url: str) -> tuple[str, str] | None:
@@ -100,7 +131,14 @@ def ashby_info(status: int, data: Any, job_id: str) -> AtsInfo:
         return AtsInfo()
     for job in data["jobs"]:
         if isinstance(job, dict) and str(job.get("id", "")).lower() == job_id:
-            return AtsInfo(live=job.get("isListed") is not False, posted=parse_posted_date(job.get("publishedAt")), checked=True)
+            comp = job.get("compensation") if isinstance(job.get("compensation"), dict) else {}
+            pay = comp.get("compensationTierSummary") or comp.get("scrapeableCompensationSalarySummary")
+            return AtsInfo(
+                live=job.get("isListed") is not False,
+                posted=parse_posted_date(job.get("publishedAt")),
+                pay=pay if isinstance(pay, str) and pay.strip() else extract_pay_text(job.get("descriptionHtml")),
+                checked=True,
+            )
     return AtsInfo(live=False, checked=True)  # the board is there and this posting is not on it
 
 
@@ -119,7 +157,12 @@ def lever_info(status: int, data: Any) -> AtsInfo:
         return AtsInfo(live=False, checked=True)
     if status != 200 or not isinstance(data, dict):
         return AtsInfo()
-    return AtsInfo(live=True, posted=_day_from_ms(data.get("createdAt")), checked=True)
+    pay = None
+    rng = data.get("salaryRange")
+    if isinstance(rng, dict) and rng.get("min") and rng.get("max"):
+        pay = f"${rng['min']:,.0f} - ${rng['max']:,.0f}" if isinstance(rng["min"], (int, float)) else None
+    pay = pay or extract_pay_text(data.get("salaryDescription")) or extract_pay_text(data.get("descriptionPlain"))
+    return AtsInfo(live=True, posted=_day_from_ms(data.get("createdAt")), pay=pay, checked=True)
 
 
 async def _get_json(client: httpx.AsyncClient, url: str) -> tuple[int, Any]:
@@ -138,11 +181,11 @@ async def inspect(url: str, client: httpx.AsyncClient, ashby_boards: dict[str, t
             return workday_info(*await _get_json(client, api))
         gh = greenhouse_ref(url)
         if gh:
-            return greenhouse_info(*await _get_json(client, f"https://boards-api.greenhouse.io/v1/boards/{gh[0]}/jobs/{gh[1]}"))
+            return greenhouse_info(*await _get_json(client, f"https://boards-api.greenhouse.io/v1/boards/{gh[0]}/jobs/{gh[1]}?pay_transparency=true"))
         ab = ashby_ref(url)
         if ab:
             if ab[0] not in ashby_boards:
-                ashby_boards[ab[0]] = await _get_json(client, f"https://api.ashbyhq.com/posting-api/job-board/{ab[0]}")
+                ashby_boards[ab[0]] = await _get_json(client, f"https://api.ashbyhq.com/posting-api/job-board/{ab[0]}?includeCompensation=true")
             return ashby_info(*ashby_boards[ab[0]], ab[1])
         lv = lever_ref(url)
         if lv:

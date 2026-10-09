@@ -168,7 +168,9 @@ AGGREGATOR_DOMAINS = frozenset(
         "jobget.com", "zippia.com", "joinhandshake.com", "simplify.jobs", "himalayas.app", "remotive.com",
         "workingnomads.com", "craigslist.org", "facebook.com", "builtin.com", "builtinnyc.com", "builtinboston.com",
         "builtinchicago.com", "builtinaustin.com", "builtinla.com", "builtinseattle.com", "builtinsf.com",
-        "builtincolorado.com",
+        "builtincolorado.com", "digitalhire.com", "diversityjobs.com", "careerjet.com", "jora.com", "jobsora.com",
+        "whatjobs.com", "recruit.net", "ihirehealthcare.com", "healthecareers.com", "jobtarget.com",
+        "diversityworking.com", "mediabistro.com", "ladders.com", "nexxt.com", "jobserve.com", "salary.com",
     }
 )
 MAX_RESOLVE = 8  # job-board results looked up per search, to keep the cost and wait predictable
@@ -178,6 +180,47 @@ def is_aggregator(url: str) -> bool:
     """True when the link is on a job board or aggregator rather than the employer's own site."""
     host = (urlsplit(url.strip()).hostname or "").lower().removeprefix("www.")
     return any(host == d or host.endswith(f".{d}") for d in AGGREGATOR_DOMAINS)
+
+
+# Hosts of real applicant-tracking and careers systems; a link here is the employer's own posting.
+_ATS_SUFFIXES = (
+    "myworkdayjobs.com", "greenhouse.io", "ashbyhq.com", "lever.co", "icims.com", "smartrecruiters.com", "taleo.net",
+    "oraclecloud.com", "successfactors.com", "successfactors.eu", "jobvite.com", "bamboohr.com", "paylocity.com",
+    "ultipro.com", "workable.com", "breezy.hr", "recruitee.com", "applytojob.com", "teamtailor.com", "pinpointhq.com",
+    "dayforcehcm.com", "paycomonline.net", "rippling.com", "myworkdaysite.com", "adp.com", "brassring.com", "avature.net",
+    "phenom.com", "eightfold.ai", "csod.com", "peopleadmin.com", "governmentjobs.com",
+)
+_BOARD_WORDS = re.compile(r"job|career|hire|hiring|recruit|talent|staff|employ|diversity|vacanc|opening", re.I)
+_COMPANY_STOP = {"the", "inc", "llc", "ltd", "corp", "co", "company", "group", "and"}
+
+
+def _registrable(host: str) -> str:
+    labels = host.split(".")
+    if len(labels) >= 3 and labels[-2] in ("co", "com", "org", "gov", "ac") and len(labels[-1]) == 2:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
+def is_board_url(url: str, company: str | None) -> bool:
+    """
+    True when the link is on a job board or a similar middleman. Known boards are listed; unknown ones are caught by their look:
+    a site that is not an applicant-tracking system, does not carry the employer's name, and is itself named like a jobs site.
+    """
+    if is_aggregator(url):
+        return True
+    host = (urlsplit(url.strip()).hostname or "").lower().removeprefix("www.")
+    if any(host == d or host.endswith(f".{d}") for d in _ATS_SUFFIXES):
+        return False
+    base = _registrable(host)
+    squashed = re.sub(r"[^a-z0-9]", "", base.split(".")[0])
+    words = [w for w in re.findall(r"[a-z0-9]+", (company or "").lower()) if w not in _COMPANY_STOP]
+    if words and (words[0] in squashed or "".join(words[:2]) in squashed or squashed in "".join(words)):
+        return False  # carries the employer's own name
+    return bool(_BOARD_WORDS.search(squashed))
+
+
+def is_board_result(item: dict[str, Any]) -> bool:
+    return is_board_url(item["url"], item.get("company"))
 
 
 _TITLE_STOP = {"the", "and", "for", "with", "of", "to", "a", "an", "in", "at", "ii", "iii", "i", "sr", "jr", "senior", "junior"}
@@ -220,7 +263,7 @@ def build_resolve_messages(item: dict[str, Any]) -> list[dict[str, str]]:
 
 async def _original_is_acceptable(item: dict[str, Any], url: str, grounded: bool) -> bool:
     """The found link must be a real, open, employer-side page for this job, not a lookalike."""
-    if not is_http_url(url) or not is_public_host(url) or is_aggregator(url):
+    if not is_http_url(url) or not is_public_host(url) or is_board_url(url, item.get("company")):
         return False
     if await check_live(url) is False:
         return False
@@ -249,7 +292,7 @@ async def resolve_original_sources(items: list[dict[str, Any]]) -> tuple[list[di
     A board result with no verified original is dropped: those links usually cannot be read, scored or filled.
     Returns the items and how many were dropped.
     """
-    todo = [i for i in items if is_aggregator(i["url"])]
+    todo = [i for i in items if is_board_result(i)]
     if not todo:
         return items, 0
     model = settings.PRIMARY_FAST_MODEL
@@ -285,7 +328,7 @@ async def resolve_original_sources(items: list[dict[str, Any]]) -> tuple[list[di
     seen: set[str] = set()
     dropped = 0
     for item in items:
-        if is_aggregator(item["url"]):
+        if is_board_result(item):
             item = replacement.get(id(item))  # type: ignore[assignment]
             if item is None:
                 dropped += 1
@@ -418,6 +461,7 @@ def build_messages(criteria: JobSearchIn, scope: str = "web") -> list[dict[str, 
         "You find current job postings with web search and report them as JSON. "
         "Each url must be the page of one single job (its description and apply button), never a list of jobs, a search page, "
         "a job-alert, sign-up, resume-upload or login page, a job board or recruiter page, or a redirect link. "
+        "Use the employer's own career site or applicant-tracking page only; never a job board, a niche or diversity job site, or a recruiter page. "
         "The title must be a close match for the role asked (same kind of work and level), not just share a word with it. "
         "Use only pages you found; never invent a job, company or link. "
         "Do not open pages to check if they are still open; that is checked afterwards. Skip duplicates. "

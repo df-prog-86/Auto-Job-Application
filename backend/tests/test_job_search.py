@@ -558,3 +558,16 @@ def test_search_results_carry_only_saved_fields_even_when_the_ats_check_ran(sear
     monkeypatch.setattr(web_search, "enrich_from_ats", marks)
     res = client.post("/api/v1/job-search/run", json={"titles": "analyst"})
     assert res.status_code == 200 and res.json()["found"] >= 1
+
+
+def test_unknown_job_sites_are_caught_by_how_they_look_but_employer_sites_are_not():
+    from app.services.discovery.web_search import is_board_url
+
+    assert is_board_url("https://jobs.digitalhire.com/job-listing/opening/3wLCvdw7", "Acme")
+    assert is_board_url("https://diversityjobs.com/career/18417213/Consultant", "Huron")
+    assert is_board_url("https://www.somenewjobsite.com/view/1", "Huron")  # not listed, but named like a jobs site
+    assert not is_board_url("https://jobs.huron.com/x", "Huron Consulting Group")
+    assert not is_board_url("https://careers.alvarezandmarsal.com/x", "Alvarez & Marsal")
+    assert not is_board_url("https://fticonsulting.com/careers/1", "FTI Consulting")
+    assert not is_board_url("https://careers-acme.icims.com/jobs/1", "Acme")
+    assert not is_board_url("https://acme.wd5.myworkdayjobs.com/en-US/c/job/R1", "Acme")

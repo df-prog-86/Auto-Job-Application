@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { autofillSite } from "@/lib/autofill";
 
 import { api, ApiError, documentDownloadUrl } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
@@ -51,6 +52,7 @@ export function Jobs() {
   const jobsQuery = useQuery({ queryKey: ["jobs"], queryFn: api.listJobs });
   const [params] = useSearchParams();
   const wanted = params.get("stage");
+  const highlightId = Number(params.get("highlight")) || null;
   const [stage, setStage] = useState<Stage>(() => (STAGES.some((s) => s.value === wanted) ? (wanted as Stage) : "all"));
   const [sortBy, setSortBy] = useState<SortBy>("newest");
   const [query, setQuery] = useState("");
@@ -175,7 +177,7 @@ export function Jobs() {
       {visible.length > 0 && (
         <ul className="space-y-3.5">
           {visible.map((job) => (
-            <JobCard key={job.id} job={job} />
+            <JobCard key={job.id} job={job} highlight={job.id === highlightId} />
           ))}
         </ul>
       )}
@@ -215,8 +217,13 @@ function Progress({ job }: { job: JobOut }) {
   );
 }
 
-function JobCard({ job }: { job: JobOut }) {
+function JobCard({ job, highlight = false }: { job: JobOut; highlight?: boolean }) {
   const queryClient = useQueryClient();
+  const cardRef = useRef<HTMLLIElement>(null);
+  const site = autofillSite(job.canonical_application_url);
+  useEffect(() => {
+    if (highlight) cardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlight]);
   const evaluation = job.evaluation;
   const proceeding = job.application_status === "proceeding";
   const resumeDocs = job.documents.filter((d) => d.document_type === "resume");
@@ -364,7 +371,7 @@ function JobCard({ job }: { job: JobOut }) {
   const wordDoc = resumeDocs.find((d) => d.format === "docx");
 
   return (
-    <li>
+    <li ref={cardRef} className={highlight ? "added-pulse" : undefined}>
       <Card className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -461,6 +468,14 @@ function JobCard({ job }: { job: JobOut }) {
               <button type="button" className={linkClass} onClick={() => setMarkingApplied(true)}>
                 I already applied
               </button>
+            )}
+            {site && !job.applied_at && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#e8f6ee] px-3 py-1 text-xs font-bold text-[#17603f]">
+                <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
+                  <path d="M13 2L4 14h6l-1 8 9-12h-6z" />
+                </svg>
+                Autofill ready on {site}
+              </span>
             )}
           </div>
           <div className="ml-auto flex items-center gap-3">

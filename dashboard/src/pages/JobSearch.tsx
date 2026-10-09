@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 import { api, ApiError } from "@/api/client";
 import { ChipInput } from "@/components/ChipInput";
@@ -169,9 +169,26 @@ export function JobSearch() {
     onError: () => setNotice(null),
   });
 
+  const navigate = useNavigate();
+  const [toast, setToast] = useState<{ jobId: number; title: string } | null>(null);
+  const toastHovered = useRef(false);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const armToast = () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => {
+      if (toastHovered.current) armToast();
+      else setToast(null);
+    }, 5000);
+  };
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
+
   const add = useMutation({
     mutationFn: (id: number) => api.addSearchResult(id),
     onSuccess: (r) => {
+      setToast({ jobId: r.job.id, title: r.job.title });
+      armToast();
       setNotice({
         kind: "added",
         text: r.from_summary
@@ -268,6 +285,27 @@ export function JobSearch() {
 
   return (
     <div className="space-y-5">
+      {toast && (
+        <div
+          className="added-toast fixed bottom-6 right-6 z-50 flex items-center gap-4 rounded-2xl bg-[rgba(28,27,58,0.82)] py-3 pl-5 pr-3 text-sm text-white shadow-lg backdrop-blur"
+          role="status"
+          onMouseEnter={() => (toastHovered.current = true)}
+          onMouseLeave={() => (toastHovered.current = false)}
+        >
+          <span>Added to Jobs</span>
+          <button
+            type="button"
+            className="rounded-full bg-white px-4 py-2 text-[13px] font-bold text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-white/60"
+            onClick={() => {
+              const id = toast.jobId;
+              setToast(null);
+              navigate(`/jobs?highlight=${id}`);
+            }}
+          >
+            Go to job listing
+          </button>
+        </div>
+      )}
       <PageHeader
         title="Job Search"
         description="Tell us what you want and we search the web for matching openings. Nothing is added to Jobs until you click Add to jobs."

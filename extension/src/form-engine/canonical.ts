@@ -309,6 +309,17 @@ const US_STATES: Record<string, string> = {
   VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
 };
 
+/** "Boston, MA" or "Boston, Massachusetts, United States" -> "Massachusetts". Null when no US state is named. */
+export function stateNameFromLocation(loc: string): string | null {
+  for (const part of loc.split(",").slice(1)) {
+    const t = part.trim().replace(/\.$/, "");
+    if (/^[A-Za-z]{2}$/.test(t) && US_STATES[t.toUpperCase()]) return US_STATES[t.toUpperCase()];
+    const full = Object.values(US_STATES).find((n) => n.toLowerCase() === t.toLowerCase());
+    if (full) return full;
+  }
+  return null;
+}
+
 /**
  * "Boston, MA" -> what to type ("Boston") and the full entries a place list
  * would show ("Boston, Massachusetts, United States"). Anything that is not
@@ -396,15 +407,15 @@ export function resolveValue(
       return hits.length === 1 ? hits[0] : null;
     }
     case "city": {
-      const m = /^\s*([^,]+?)\s*,\s*[A-Za-z]{2}\b/.exec(c.location ?? "");
+      const m = /^\s*([^,]+?)\s*,\s*[A-Za-z]{2,}/.exec(c.location ?? "");
       return m ? m[1] : null;
     }
     case "state": {
-      const m = /,\s*([A-Za-z]{2})\b/.exec(c.location ?? "");
-      const name = m ? US_STATES[m[1].toUpperCase()] : undefined;
+      const name = stateNameFromLocation(c.location ?? "");
       if (!name) return null;
       if (options.length === 0) return name;
-      const hits = options.filter((o) => o.trim().toLowerCase() === name.toLowerCase());
+      const want = name.toLowerCase();
+      const hits = options.filter((o) => o.trim().toLowerCase() === want);
       return hits.length === 1 ? hits[0] : null;
     }
     case "location":

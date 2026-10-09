@@ -187,6 +187,8 @@ export function discoverFields(doc: Document): FormField[] {
       label = clean(heads[heads.length - 1]?.textContent);
     }
     if (!label && inputType === "file") label = clean(`${name} ${el.id}`.replace(/[_-]+/g, " ")) || "File upload";
+    // Workday wraps each question in a formField block whose label is not linked to the box.
+    if (!label) label = clean(el.closest("[data-automation-id^='formField']")?.querySelector("label, legend")?.textContent);
     if (!label) continue; // unlabeled controls (search boxes, country pickers) are not questions
 
     const isCombobox = tag === "input" && (el.getAttribute("role") === "combobox" || el.getAttribute("data-uxi-widget-type") === "selectinput");

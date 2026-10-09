@@ -16,6 +16,7 @@ import type { ComboboxHints } from "@/form-engine/fill";
 import { base64ToFile, currentValue, fillCheckbox, fillField, fillFile, readComboboxOptions, readDropdownOptions } from "@/form-engine/fill";
 import { clearMarks, mark, showBanner } from "@/form-engine/highlight";
 import { trackFlagged } from "@/form-engine/learn";
+import { flagUncovered } from "@/form-engine/uncovered";
 import { fillHistory, isDateInput } from "@/form-engine/workday-history";
 import type { ApplyContext, FillReport } from "@/form-engine/types";
 
@@ -175,6 +176,7 @@ export async function fillPage(
     }
   }
 
+  flagUncovered(doc, fields, report);
   showBanner(doc, report.filled.length, report.flagged.length);
   return report;
 }

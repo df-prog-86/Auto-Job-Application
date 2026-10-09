@@ -176,7 +176,7 @@ AGGREGATOR_DOMAINS = frozenset(
         "diversityworking.com", "mediabistro.com", "ladders.com", "nexxt.com", "jobserve.com", "salary.com",
     }
 )
-MAX_RESOLVE = 8  # job-board results looked up per search, to keep the cost and wait predictable
+MAX_RESOLVE = 5  # job-board results looked up per search, to keep the cost and wait predictable
 
 
 def is_aggregator(url: str) -> bool:
@@ -210,22 +210,23 @@ _PORTFOLIO_BOARD_PATH = re.compile(r"^/(companies|company|orgs?)/[^/]+/(jobs?|po
 
 def is_board_url(url: str, company: str | None) -> bool:
     """
-    True when the link is on a job board or a similar middleman. Known boards are listed; unknown ones are caught by their look:
-    a site that is not an applicant-tracking system, does not carry the employer's name, and is itself named like a jobs site.
+    True when the link is NOT clearly the employer's own posting. A link passes only when it is on a known applicant-tracking or
+    careers system, or on a site that carries the employer's own name. Everything else is treated as a middleman (job boards,
+    niche and investor job sites, recruiter pages), so boards nobody has listed yet are caught too.
     """
     if is_aggregator(url):
         return True
-    host = (urlsplit(url.strip()).hostname or "").lower().removeprefix("www.")
+    parts = urlsplit(url.strip())
+    host = (parts.hostname or "").lower().removeprefix("www.")
     if any(host == d or host.endswith(f".{d}") for d in _ATS_SUFFIXES):
         return False
-    if _PORTFOLIO_BOARD_PATH.match(urlsplit(url.strip()).path):
+    if _PORTFOLIO_BOARD_PATH.match(parts.path):
         return True  # a middleman's page about one company's job, not the company's own site
-    base = _registrable(host)
-    squashed = re.sub(r"[^a-z0-9]", "", base.split(".")[0])
+    squashed = re.sub(r"[^a-z0-9]", "", _registrable(host).split(".")[0])
     words = [w for w in re.findall(r"[a-z0-9]+", (company or "").lower()) if w not in _COMPANY_STOP]
-    if words and (words[0] in squashed or "".join(words[:2]) in squashed or squashed in "".join(words)):
-        return False  # carries the employer's own name
-    return bool(_BOARD_WORDS.search(squashed))
+    if not words:
+        return bool(_BOARD_WORDS.search(squashed))  # no employer name to compare with: fall back to how the site looks
+    return not (words[0] in squashed or "".join(words[:2]) in squashed or squashed in "".join(words))
 
 
 def is_board_result(item: dict[str, Any]) -> bool:

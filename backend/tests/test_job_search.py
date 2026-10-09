@@ -18,7 +18,7 @@ ITEMS = [
     {"title": "No link", "company": "Gamma", "location": None, "work_type": "unknown", "salary": None,
      "url": "not a url", "summary": "x"},
     {"title": "Already saved", "company": "Delta", "location": None, "work_type": "remote", "salary": None,
-     "url": "https://delta.example.com/jobs/7", "summary": "x"},
+     "url": "https://jobs.deltahealth.com/jobs/7", "summary": "x"},
 ]
 
 
@@ -69,7 +69,7 @@ def _saved_job(SessionLocal) -> None:
     now = dt.datetime.now(dt.timezone.utc)
     with SessionLocal() as db:
         db.add(Job(canonical_job_key="k-delta", company="Delta", normalized_company="delta", title="Analyst",
-                   normalized_title="analyst", canonical_application_url="https://delta.example.com/jobs/7",
+                   normalized_title="analyst", canonical_application_url="https://jobs.deltahealth.com/jobs/7",
                    first_seen=now, last_seen=now, application_status="not_started"))
         db.commit()
 
@@ -565,7 +565,8 @@ def test_unknown_job_sites_are_caught_by_how_they_look_but_employer_sites_are_no
 
     assert is_board_url("https://jobs.digitalhire.com/job-listing/opening/3wLCvdw7", "Acme")
     assert is_board_url("https://diversityjobs.com/career/18417213/Consultant", "Huron")
-    assert is_board_url("https://www.somenewjobsite.com/view/1", "Huron")  # not listed, but named like a jobs site
+    assert is_board_url("https://www.somenewjobsite.com/view/1", "Huron")  # not listed, but not the employer's either
+    assert is_board_url("https://www.randomcompany.com/view/1", "Huron")  # any site that does not carry the employer's name
     assert not is_board_url("https://jobs.huron.com/x", "Huron Consulting Group")
     assert not is_board_url("https://careers.alvarezandmarsal.com/x", "Alvarez & Marsal")
     assert not is_board_url("https://fticonsulting.com/careers/1", "FTI Consulting")

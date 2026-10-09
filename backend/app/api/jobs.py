@@ -30,7 +30,7 @@ from app.schemas.discovery import (
     MarkAppliedIn,
     TailorResumeOut,
 )
-from app.services.discovery import manual_extraction
+from app.services.discovery import ats, manual_extraction
 from app.services.discovery.pipeline import ingest_manual_posting
 from app.services.followup.draft import FollowUpDraftError, draft_follow_up
 from app.services.qualification.pipeline import qualify_job
@@ -91,6 +91,8 @@ async def add_job_by_url(payload: ManualJobIn, db: Session = Depends(get_db)) ->
     except manual_extraction.ManualExtractionError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
+    if page.apply_link:
+        posting.application_url = page.apply_link  # the careers page applies through a hiring system: use that posting
     job, created = ingest_manual_posting(db, posting, source_label="manual_url")
     # Qualification is not run here -- it costs an LLM call, so it only runs
     # when the candidate asks for it via POST /jobs/{id}/qualify (the
@@ -121,6 +123,9 @@ async def add_job_from_extension(
     except manual_extraction.ManualExtractionError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
+    linked = ats.pick_ats_link(payload.apply_links, payload.url)
+    if linked:
+        posting.application_url = linked
     job, created = ingest_manual_posting(db, posting, source_label="extension_capture")
     # Same as above: no automatic scoring, so capturing a job never calls
     # the LLM by itself either.

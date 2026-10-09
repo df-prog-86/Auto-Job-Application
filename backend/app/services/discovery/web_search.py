@@ -393,26 +393,7 @@ def extract_posted_date(html: str) -> dt.date | None:
     return today - dt.timedelta(days=int(ago.group(2)) * unit)
 
 
-_HREF = re.compile(r"""href=["']([^"']+)["']""", re.I)
-
-
-def find_ats_link(markup: str, base_url: str) -> str | None:
-    """
-    Many employers run Workday, Greenhouse, Ashby or Lever behind their own careers website. The page's Apply link
-    shows which: this returns that posting's link on the hiring system, or None when the page has none.
-    """
-    for found in _HREF.finditer(markup[:600000]):
-        link = urljoin(base_url, htmllib.unescape(found.group(1)).strip())
-        parts = urlsplit(link)
-        host = (parts.hostname or "").lower()
-        if parts.scheme != "https":
-            continue
-        if host.endswith(".myworkdayjobs.com") and "/job/" in parts.path:
-            path = re.sub(r"/apply(/.*)?$", "", parts.path.rstrip("/"))
-            return urlunsplit(("https", host, path, "", ""))
-        if ats.greenhouse_ref(link) or ats.ashby_ref(link) or ats.lever_ref(link):
-            return urlunsplit(("https", host, parts.path.rstrip("/"), "", ""))
-    return None
+find_ats_link = ats.find_ats_link  # kept here too: the search and its tests call it by this name
 
 
 async def upgrade_to_ats_links(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

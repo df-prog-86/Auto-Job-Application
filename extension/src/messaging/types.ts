@@ -49,6 +49,7 @@ export interface CapturedPage {
   title: string;
   jsonLd: string[];
   bodyText: string;
+  applyLinks: string[];
 }
 
 export interface FillJobChoice {

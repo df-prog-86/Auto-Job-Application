@@ -176,6 +176,8 @@ class CaptureJobIn(BaseModel):
     page_title: str | None = None
     json_ld: list[str] = []
     body_text: str = ""
+    # Links on the page that point at a posting on a hiring system (Workday, Greenhouse, Ashby, Lever), read in the browser.
+    apply_links: list[str] = []
 
 
 class DiscoveryRunOut(BaseModel):

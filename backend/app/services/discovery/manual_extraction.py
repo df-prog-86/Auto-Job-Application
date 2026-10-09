@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 import httpx
 from sqlalchemy.orm import Session
 
+from app.services.discovery import ats
 from app.services.discovery.base import RawJobPosting
 from app.services.discovery.normalization import html_to_text, parse_posted_date
 from app.services.llm.exceptions import LLMError
@@ -56,6 +57,7 @@ class FetchedPage:
     json_ld_blocks: list[str]
     body_text: str
     title: str | None = None
+    apply_link: str | None = None  # the posting on Workday/Greenhouse/Ashby/Lever that this careers page applies through
 
 
 async def fetch_page(url: str) -> FetchedPage:
@@ -84,6 +86,7 @@ async def fetch_page(url: str) -> FetchedPage:
         json_ld_blocks=_JSONLD_PATTERN.findall(html),
         body_text=_visible_text(html),
         title=_extract_title(html),
+        apply_link=ats.find_ats_link(html, str(resp.url)),
     )
 
 

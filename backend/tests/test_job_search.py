@@ -649,3 +649,18 @@ def test_upgrade_swaps_the_link_and_merges_duplicates(monkeypatch):
     ]
     out = asyncio.run(ws.upgrade_to_ats_links(items))
     assert len(out) == 1 and out[0]["url"].startswith("https://bilh.wd1.myworkdayjobs.com/")
+
+
+def test_the_apply_link_wins_and_a_page_already_on_a_hiring_system_is_left_alone():
+    from app.services.discovery import ats
+
+    page = (
+        '<a href="https://acme.wd5.myworkdayjobs.com/en-US/c/job/Other-Role_R9">Similar job</a>'
+        '<a href="https://acme.wd5.myworkdayjobs.com/en-US/c/job/This-Role_R1/apply?x=1">Apply</a>'
+    )
+    assert ats.find_ats_link(page, "https://careers.acme.com/jobs/1") == "https://acme.wd5.myworkdayjobs.com/en-US/c/job/This-Role_R1"
+    assert ats.find_ats_link(page, "https://acme.wd5.myworkdayjobs.com/en-US/c/job/This-Role_R1") is None
+    links = ["https://www.linkedin.com/x", "https://job-boards.greenhouse.io/acme/jobs/5", "https://job-boards.greenhouse.io/acme/jobs/6/apply"]
+    assert ats.pick_ats_link(links, "https://acme.com/careers/6") == "https://job-boards.greenhouse.io/acme/jobs/6"
+    assert ats.pick_ats_link(links, "https://job-boards.greenhouse.io/acme/jobs/6") is None
+    assert ats.pick_ats_link(["https://www.linkedin.com/x"], "https://acme.com/c") is None

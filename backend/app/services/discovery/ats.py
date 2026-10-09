@@ -13,7 +13,7 @@ import html as htmllib
 import re
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -193,3 +193,57 @@ async def inspect(url: str, client: httpx.AsyncClient, ashby_boards: dict[str, t
     except Exception:
         return AtsInfo()
     return AtsInfo()
+
+
+_HREF = re.compile(r"""href=["']([^"']+)["']""", re.I)
+
+
+def ats_posting_link(link: str) -> str | None:
+    """A link to one job on Workday, Greenhouse, Ashby or Lever, cleaned to the posting itself; None for any other link."""
+    parts = urlsplit(link)
+    host = (parts.hostname or "").lower()
+    if parts.scheme != "https":
+        return None
+    if host.endswith(".myworkdayjobs.com") and "/job/" in parts.path:
+        path = re.sub(r"/apply(/.*)?$", "", parts.path.rstrip("/"))
+        return urlunsplit(("https", host, path, "", ""))
+    segs = [p for p in parts.path.split("/") if p]
+    if greenhouse_ref(link):
+        return urlunsplit(("https", host, "/" + "/".join(segs[:3]), "", ""))
+    if ashby_ref(link) or lever_ref(link):
+        return urlunsplit(("https", host, "/" + "/".join(segs[:2]), "", ""))  # drops a trailing /apply or /application
+    return None
+
+
+def _is_hiring_system(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").lower()
+    return any(host == d or host.endswith(f".{d}") for d in ("myworkdayjobs.com", "greenhouse.io", "ashbyhq.com", "lever.co"))
+
+
+def _best(links: list[str]) -> str | None:
+    """Of the page's links to hiring-system postings, the Apply link (the one that goes to /apply) wins; else the first."""
+    found = [(l, ats_posting_link(l)) for l in links]
+    found = [(raw, clean) for raw, clean in found if clean]
+    for raw, clean in found:
+        if re.search(r"/apply(/|\?|$)", raw):
+            return clean
+    return found[0][1] if found else None
+
+
+def find_ats_link(markup: str, base_url: str) -> str | None:
+    """
+    Many employers run Workday, Greenhouse, Ashby or Lever behind their own careers website. The page's Apply link
+    shows which: this returns that posting's link on the hiring system, or None when the page has none.
+    A page that is already on a hiring system keeps its own address.
+    """
+    if _is_hiring_system(base_url):
+        return None
+    links = [urljoin(base_url, htmllib.unescape(m.group(1)).strip()) for m in _HREF.finditer(markup[:600000])]
+    return _best(links[:300])
+
+
+def pick_ats_link(links: list[str], page_url: str = "") -> str | None:
+    """The best of the page's links that is a posting on a hiring system (the extension sends these from the page it read)."""
+    if page_url and _is_hiring_system(page_url):
+        return None
+    return _best([l.strip() for l in links[:30]])

@@ -35,6 +35,11 @@ function readJobPostingFromPage(bodyTextLimit: number): CapturedPage {
     title: document.title,
     jsonLd,
     bodyText: (document.body?.innerText || "").slice(0, bodyTextLimit),
+    // Only links that point at a hiring system's posting, so the saved job applies through the real application page.
+    applyLinks: Array.from(document.querySelectorAll("a[href]"))
+      .map((a) => (a as HTMLAnchorElement).href)
+      .filter((h) => /^https:\/\/[^/]*(myworkdayjobs\.com|greenhouse\.io|ashbyhq\.com|lever\.co)\//i.test(h))
+      .slice(0, 20),
   };
 }
 

@@ -301,7 +301,7 @@ async def resolve_original_sources(items: list[dict[str, Any]]) -> tuple[list[di
     todo = [i for i in items if is_board_result(i)]
     if not todo:
         return items, 0
-    model = settings.PRIMARY_FAST_MODEL
+    model = search_model()
     gate = asyncio.Semaphore(3)
 
     async def one(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -312,7 +312,7 @@ async def resolve_original_sources(items: list[dict[str, Any]]) -> tuple[list[di
                     messages=build_resolve_messages(item),
                     temperature=0.0,
                     max_tokens=400,
-                    extra={"plugins": [{"id": "web", "max_results": 5}]},
+                    extra={"plugins": [web_plugin(5)]},
                     timeout=90.0,
                 )
             except Exception:  # a failed lookup just means no original found
@@ -586,9 +586,21 @@ def _clean_items(raw_items: list[dict[str, Any]], criteria: JobSearchIn, grounde
     return items
 
 
+def search_model() -> str | None:
+    return settings.JOB_SEARCH_MODEL or settings.PRIMARY_FAST_MODEL
+
+
+def web_plugin(max_results: int) -> dict[str, Any]:
+    """The web-search settings: the engine is set explicitly so domain filters and the price do not depend on the model."""
+    plugin: dict[str, Any] = {"id": "web", "engine": settings.JOB_SEARCH_ENGINE, "max_results": max_results}
+    if settings.JOB_SEARCH_ENGINE_MODE:
+        plugin["mode"] = settings.JOB_SEARCH_ENGINE_MODE
+    return plugin
+
+
 async def _search_one(criteria: JobSearchIn, scope: str, model: str) -> list[dict[str, Any]]:
     n = per_call_count(criteria)
-    plugin: dict[str, Any] = {"id": "web", "engine": "exa", "max_results": max(5, min(n + 2, 10))}
+    plugin = web_plugin(max(5, min(n + 2, 10)))
     plugin.update({k: SCOPES[scope][k] for k in ("include", "exclude") if k in SCOPES[scope]})
     if "include" in plugin:
         plugin["include_domains"] = plugin.pop("include")
@@ -611,7 +623,7 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
     not by the AI: the employer's system says whether each is open and when it was published.
     Returns the candidate postings (not yet saved) and how many were dropped as closed, too old or without an original.
     """
-    model = settings.PRIMARY_FAST_MODEL
+    model = search_model()
     if not model:
         raise LLMNotConfiguredError("No LLM provider configured (PRIMARY_FAST_MODEL unset).")
     outcomes = await asyncio.gather(*(_search_one(criteria, scope, model) for scope in SCOPES), return_exceptions=True)

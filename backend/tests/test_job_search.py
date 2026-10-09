@@ -473,7 +473,7 @@ def test_each_source_gets_its_own_domain_filter(search):
     assert any(p.get("include_domains") == ["*.myworkdayjobs.com"] for p in seen)
     assert any("jobs.ashbyhq.com" in p.get("include_domains", []) for p in seen)
     web = [p for p in seen if "exclude_domains" in p][0]
-    assert "linkedin.com" in web["exclude_domains"] and all(p["engine"] == "exa" for p in seen)
+    assert "linkedin.com" in web["exclude_domains"] and all(p["engine"] == "parallel" and p["mode"] == "fast" for p in seen)
 
 
 def test_search_still_returns_results_when_one_source_fails(search, monkeypatch):

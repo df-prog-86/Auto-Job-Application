@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     ESCALATION_MODEL: str | None = None
     EMBEDDING_MODEL: str | None = None
 
+    # Job Search. The web lookup is billed per search by its engine (about $0.007 each on Exa, $0.001 on Parallel "fast"),
+    # separately from the model. A separate model can be set for search; empty uses PRIMARY_FAST_MODEL.
+    JOB_SEARCH_MODEL: str | None = None
+    JOB_SEARCH_ENGINE: str = "parallel"  # "exa", "parallel", "perplexity" or "firecrawl"
+    JOB_SEARCH_ENGINE_MODE: str | None = "fast"  # parallel: turbo/fast ($1 per 1,000), basic/advanced ($5); exa: auto/fast ($7)
+
     # --- Discovery scheduling (spec §18) -----------------------------------
     DISCOVERY_INTERVAL_HOURS: int = 12
 

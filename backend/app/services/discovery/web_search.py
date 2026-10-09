@@ -690,7 +690,7 @@ async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]
     too_old += no_pay
     kept, closed = await drop_closed(items)
     log.warning(
-        "job search: %d found across sources, %d after merging, %d dropped (no employer link %d, closed by employer %d, too old %d, closed page %d), %d left",
+        "job search: %d found across sources, %d after merging, %d dropped (no employer link %d, closed by employer %d, too old or no pay %d, closed page %d), %d left",
         merged, len(items) + not_found + gone + too_old, not_found + gone + too_old + closed, not_found, gone, too_old, closed, len(kept),
     )
     final = trim_to_count(kept, criteria.count)

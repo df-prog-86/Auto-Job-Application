@@ -201,6 +201,10 @@ def _registrable(host: str) -> str:
     return ".".join(labels[-2:])
 
 
+# Venture-capital and community job boards (Getro, Consider and similar) list many companies' jobs under /companies/<name>/jobs/.
+_PORTFOLIO_BOARD_PATH = re.compile(r"^/(companies|company|orgs?)/[^/]+/(jobs?|positions?|openings?)(/|$)", re.I)
+
+
 def is_board_url(url: str, company: str | None) -> bool:
     """
     True when the link is on a job board or a similar middleman. Known boards are listed; unknown ones are caught by their look:
@@ -211,6 +215,8 @@ def is_board_url(url: str, company: str | None) -> bool:
     host = (urlsplit(url.strip()).hostname or "").lower().removeprefix("www.")
     if any(host == d or host.endswith(f".{d}") for d in _ATS_SUFFIXES):
         return False
+    if _PORTFOLIO_BOARD_PATH.match(urlsplit(url.strip()).path):
+        return True  # a middleman's page about one company's job, not the company's own site
     base = _registrable(host)
     squashed = re.sub(r"[^a-z0-9]", "", base.split(".")[0])
     words = [w for w in re.findall(r"[a-z0-9]+", (company or "").lower()) if w not in _COMPANY_STOP]

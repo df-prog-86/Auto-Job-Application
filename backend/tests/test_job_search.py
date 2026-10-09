@@ -571,3 +571,12 @@ def test_unknown_job_sites_are_caught_by_how_they_look_but_employer_sites_are_no
     assert not is_board_url("https://fticonsulting.com/careers/1", "FTI Consulting")
     assert not is_board_url("https://careers-acme.icims.com/jobs/1", "Acme")
     assert not is_board_url("https://acme.wd5.myworkdayjobs.com/en-US/c/job/R1", "Acme")
+
+
+def test_investor_and_community_job_boards_are_caught_by_their_address_pattern():
+    from app.services.discovery.web_search import is_board_url
+
+    assert is_board_url("https://jobs.rre.com/companies/ostro/jobs/96108253-director-senior-director-ostro-strategy", "Ostro")
+    assert is_board_url("https://jobs.example-capital.com/companies/acme/jobs/123-analyst", "Acme")
+    assert not is_board_url("https://acme.wd5.myworkdayjobs.com/en-US/c/job/R1", "Acme")
+    assert not is_board_url("https://careers.acme.com/jobs/123-analyst", "Acme")

@@ -42,7 +42,7 @@
       const root = this.attachShadow({ mode: "open" });
       const required = this.hasAttribute("required");
       // A type-ahead box: like the live form, the real input sits one more shadow root down, inside spl-internal-field.
-      if (this.hasAttribute("combo")) { root.innerHTML = `<spl-internal-field suggest='${this.getAttribute("suggest") || "[]"}'></spl-internal-field>`; return; }
+      if (this.hasAttribute("combo")) { root.innerHTML = `<spl-internal-field suggest='${this.getAttribute("suggest") || "[]"}' input-id="${this.getAttribute("input-id") || ""}" ${this.hasAttribute("notyped") ? "notyped" : ""}></spl-internal-field>`; return; }
       // Like the real phone box, an inner spl-input may have no label of its own and carry the question as aria-label instead.
       const aria = this.getAttribute("aria");
       root.innerHTML = `${this.hasAttribute("label") ? `<label>${this.getAttribute("label")}</label>` : ""}<input id="${this.getAttribute("input-id") || ""}" type="${this.getAttribute("type") || "text"}" ${aria ? `aria-label="${aria}"` : ""} ${required ? "required" : ""}>`;
@@ -72,7 +72,7 @@
   class SplAutocomplete extends HTMLElement {
     connectedCallback() {
       const root = this.attachShadow({ mode: "open" });
-      root.innerHTML = `<spl-input label="${this.getAttribute("label")}" input-id="spl-form-element_10" type="text"></spl-input>`;
+      root.innerHTML = `<spl-input label="${this.getAttribute("label")}" input-id="spl-form-element_10" combo notyped suggest='["Boston, MA, US","Boston, GA, US","Cambridge, MA, US"]'></spl-input>`;
     }
   }
   class SplPhoneField extends HTMLElement {
@@ -97,7 +97,7 @@
     connectedCallback() {
       const id = "lb-" + (++comboN);
       const root = this.attachShadow({ mode: "open" });
-      root.innerHTML = `<input type="text" role="combobox" aria-expanded="false" aria-controls="${id}"><div role="listbox" id="${id}"></div>`;
+      root.innerHTML = `<input type="text" id="${this.getAttribute("input-id") || ""}" role="combobox" aria-expanded="false" aria-controls="${id}"><div role="listbox" id="${id}"></div>`;
       const input = root.querySelector("input");
       const list = root.querySelector("div");
       const suggest = JSON.parse(this.getAttribute("suggest") || "[]");
@@ -105,13 +105,16 @@
         const text = input.value.trim();
         list.innerHTML = "";
         if (!text) { input.setAttribute("aria-expanded", "false"); return; }
-        const rows = [text, ...suggest.filter((x) => x.toLowerCase().includes(text.toLowerCase()))];
+        // The live list has no typed-text row for City; it ends with a "Cannot find your city?" row instead.
+        const rows = [...(this.hasAttribute("notyped") ? [] : [text]), ...suggest.filter((x) => x.toLowerCase().includes(text.toLowerCase()))];
         for (const r of rows) {
           const o = document.createElement("spl-select-option");
-          o.textContent = r;
+          // Like the live page, a row's text is rendered several times over (hidden copies for tooltips).
+          o.textContent = `${r} ${r} ${r}`;
           o.addEventListener("click", () => { input.value = r; list.innerHTML = ""; input.setAttribute("aria-expanded", "false"); });
           list.append(o);
         }
+        if (this.hasAttribute("notyped")) { const o = document.createElement("spl-select-option"); o.textContent = "Cannot find your city? Click here to fill in manually"; list.append(o); }
         input.setAttribute("aria-expanded", "true");
       });
     }

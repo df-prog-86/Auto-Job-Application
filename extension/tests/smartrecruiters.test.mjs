@@ -71,7 +71,7 @@ test("fills a SmartRecruiters form inside shadow roots: name, email, phone, Link
   // Left alone on purpose.
   assert.equal(await deepValue(page, "dz-apply-with-resume-container"), 0, "the box that parses a resume into the form is not used");
   assert.equal(await deepValue(page, "profile-image"), 0, "no resume in the profile image box");
-  assert.equal(await deepValue(page, "spl-form-element_10"), "", "the City typeahead needs a suggestion picked, so it is left to the person");
+  assert.equal(await deepValue(page, "spl-form-element_10"), "Boston, MA, US", "City: the one suggestion that is the saved city and state is picked");
   assert.equal(await deepValue(page, "country-search"), "", "the phone's country search box is not a question");
   assert.equal(await deepValue(page, "facebook-input"), "");
   assert.equal(await deepValue(page, "twitter-input"), "");
@@ -101,7 +101,10 @@ const JOBS = [
   { title: "Financial Analyst", employer: "Huron", location: "Boston, MA", start_date: "2019-03", end_date: "2021-08", current: false, description: "- Built models\n- Led the close" },
   { title: "Senior Associate", employer: "Chartis", location: null, start_date: "2021-09", end_date: null, current: true, description: "Advised health systems" },
 ];
-const SCHOOLS = [{ institution: "Boston College", degree: "Bachelor of Science", field: "Finance", start_date: "2013-09", end_date: "2017" }];
+const SCHOOLS = [
+  { institution: "Boston College", degree: "Bachelor of Science", field: "Finance", start_date: "2013-09", end_date: "2017" },
+  { institution: "Babson College", degree: "Masters in Business Administration", field: "Business Administration", start_date: "2022-01", end_date: "2023-12" },
+];
 
 test("adds Experience and Education entries from the saved resume, saving each, and never submits", async () => {
   const page = await open();
@@ -109,8 +112,10 @@ test("adds Experience and Education entries from the saved resume, saving each, 
   const report = await page.evaluate(([c, r]) => window.__jobAgentFill(c, r), [withHistory({ experience: JOBS, education: SCHOOLS }), resume]);
   const entries = await page.evaluate(() => window.__entries);
 
-  assert.equal(entries.length, 3, "two jobs and one school were saved");
-  const [job1, job2, school] = entries;
+  assert.equal(entries.length, 4, "two jobs and two schools were saved, one after another");
+  const [job1, job2, school, school2] = entries;
+  assert.equal(school2.Institution, "Babson College");
+  assert.equal(school2.to, "2023-12-01");
   assert.equal(job1.Title, "Financial Analyst");
   assert.equal(job1.Company, "Huron", "the exact text is picked, never a similar-looking suggestion (Huron Consulting Group)");
   assert.equal(job1["Office location"], "Boston, MA");
@@ -127,7 +132,7 @@ test("adds Experience and Education entries from the saved resume, saving each, 
   assert.ok(!school.to, "a graduation year with no month is not turned into an invented month");
 
   assert.ok(report.filled.includes("Experience 1: saved") && report.filled.includes("Education 1: saved"));
-  assert.equal(await page.evaluate(() => window.__saveClicks), 3, "only each entry's own Save was pressed");
+  assert.equal(await page.evaluate(() => window.__saveClicks), 4, "only each entry's own Save was pressed");
   assert.equal(await page.evaluate(() => window.__submitClicks), 0);
   // The general pass leaves the (now closed) entry forms alone and still does the rest of the page.
   assert.equal(await deepValue(page, "first-name-input"), "Jane");
@@ -145,7 +150,7 @@ test("a required date that is not on the resume stops that section: the form is 
   assert.ok(report.flagged.some((f) => /Experience 1: To/.test(f.label)), "the missing end date is flagged");
   const forms = await page.evaluate(() => document.querySelector("oc-experience").shadowRoot.querySelectorAll("oc-experience-edit-form").length);
   assert.equal(forms, 1, "the form stays open for the person to finish");
-  assert.equal(entries.filter((e) => e.kind === "education").length, 1, "the other section still fills");
+  assert.equal(entries.filter((e) => e.kind === "education").length, 2, "the other section still fills");
   assert.equal(await page.evaluate(() => window.__submitClicks), 0);
   await page.close();
 });
@@ -161,6 +166,6 @@ test("a section that already has an entry is never touched", async () => {
   await page.evaluate(([c, r]) => window.__jobAgentFill(c, r), [withHistory({ experience: JOBS, education: SCHOOLS }), resume]);
   const entries = await page.evaluate(() => window.__entries);
   assert.equal(entries.filter((e) => e.kind === "experience").length, 0);
-  assert.equal(entries.filter((e) => e.kind === "education").length, 1);
+  assert.equal(entries.filter((e) => e.kind === "education").length, 2);
   await page.close();
 });

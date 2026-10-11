@@ -13,6 +13,7 @@
  * It runs only on jobs.smartrecruiters.com.
  */
 
+import { expandLocation } from "@/form-engine/canonical";
 import { deepQueryAll, shadowHost } from "@/form-engine/deep";
 import { setNativeValue } from "@/form-engine/fill";
 import { mark } from "@/form-engine/highlight";
@@ -91,28 +92,53 @@ function typed(el: Box, text: string): void {
 }
 
 /**
- * A type-ahead box: types the text and picks the row that matches it exactly (the list always offers the typed text itself
- * as a row). True only when the box ends up holding that text. On failure the box is emptied again.
+ * The page renders each suggestion's text several times over (hidden copies for tooltips), so a row reads like
+ * "Financial Analyst Financial Analyst Financial Analyst". Every way of reading that as one repeated phrase.
  */
-async function pickTyped(input: HTMLInputElement, text: string): Promise<boolean> {
-  const want = clean(text).toLowerCase();
-  typed(input, text.trim());
+function unrepeat(text: string): string[] {
+  const t = clean(text);
+  const words = t.split(" ");
+  const out: string[] = [];
+  for (let k = 1; k <= 6; k++) {
+    if (words.length % k !== 0) continue;
+    const chunk = words.slice(0, words.length / k).join(" ");
+    if (Array(k).fill(chunk).join(" ") === t) out.push(chunk);
+  }
+  return out.length > 0 ? out : [t];
+}
+
+/**
+ * A type-ahead box: types the text and clicks the suggestion `accept` approves (only when `unique` is set, only if exactly
+ * one row qualifies). True only when a row was clicked and the box now holds something. On failure the box is emptied again.
+ */
+async function pickRow(input: HTMLInputElement, typeText: string, accept: (candidates: string[]) => boolean, unique = false): Promise<boolean> {
+  typed(input, typeText.trim());
   const id = input.getAttribute("aria-controls");
-  const rowFor = (): HTMLElement | null => {
-    if (!id) return null;
+  const rowsNow = (): HTMLElement[] => {
+    if (!id) return [];
     const list = deepQueryAll<HTMLElement>(input.ownerDocument, `#${CSS.escape(id)}`)[0];
-    if (!list) return null;
-    return inside(list, "spl-select-option").find((r) => clean(deepText(r)).toLowerCase() === want) ?? null;
+    if (!list) return [];
+    return inside(list, "spl-select-option").filter((r) => accept(unrepeat(deepText(r))));
   };
-  const row = await waitFor(rowFor, 24, 125);
-  if (row) {
-    row.click();
+  let rows = (await waitFor(() => (rowsNow().length > 0 ? rowsNow() : null), 32, 125)) ?? [];
+  if (unique && rows.length > 0) {
+    await sleep(500); // let any further suggestions arrive before deciding there is exactly one
+    rows = rowsNow();
+  }
+  if (rows.length > 0 && (!unique || rows.length === 1)) {
+    rows[0].click();
     await sleep(300);
-    if (clean(input.value).toLowerCase() === want) return true;
+    if (clean(input.value) !== "") return true;
   }
   typed(input, "");
   input.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
   return false;
+}
+
+/** The row that is exactly the text typed (the list always offers it first). */
+async function pickTyped(input: HTMLInputElement, text: string): Promise<boolean> {
+  const want = clean(text).toLowerCase();
+  return pickRow(input, text, (c) => c.some((x) => x.toLowerCase() === want));
 }
 
 /** Writes "MM/YYYY" into a month-and-year box and checks the page's date picker understood it. */
@@ -244,6 +270,7 @@ async function addEntry(doc: Document, section: HTMLElement, kind: Kind, n: numb
     return false;
   }
   report.filled.push(`${tag}: saved`);
+  await sleep(500); // the page settles before the next Add
   return true;
 }
 
@@ -268,8 +295,31 @@ async function fillSection(doc: Document, kind: Kind, items: Array<ApplyExperien
   mark(section, report.flagged.length > before.flagged ? "flagged" : report.filled.length > before.filled ? "filled" : "flagged");
 }
 
+/** The City box at the top: typed from the saved location, then the one suggestion that is that city and state. */
+async function fillCity(doc: Document, ctx: ApplyContext, report: FillReport): Promise<void> {
+  const loc = ctx.candidate.location?.trim();
+  if (!loc) return;
+  const input = deepQueryAll<HTMLInputElement>(doc, "input").find(
+    (e) => e.type === "text" && e.getAttribute("role") === "combobox" && labelOf(e).toLowerCase() === "city",
+  );
+  if (!input || input.value.trim() !== "") return;
+  const m = /^\s*([^,]+?)\s*,\s*([A-Za-z]{2})\b/.exec(loc);
+  const city = (m ? m[1] : loc.split(",")[0]).trim();
+  const variants = (m ? [`${city}, ${m[2]}`, ...(expandLocation(`${city}, ${m[2]}`)?.alternates ?? [])] : [city]).map((v) => v.toLowerCase());
+  const accept = (c: string[]) => c.some((x) => variants.some((v) => x.toLowerCase() === v || x.toLowerCase().startsWith(`${v},`)));
+  const host = deepQueryAll<HTMLElement>(doc, "spl-autocomplete").find((h) => (h.getAttribute("label") ?? "").toLowerCase() === "city");
+  if (await pickRow(input, m ? `${city}, ${m[2]}` : city, accept, true)) {
+    report.filled.push("City");
+    if (host) mark(host, "filled");
+  } else {
+    flag(report, "City (pick it from the list)");
+    if (host) mark(host, "flagged");
+  }
+}
+
 export async function fillSmartRecruitersHistory(doc: Document, ctx: ApplyContext, report: FillReport): Promise<void> {
   if (doc.location?.hostname !== "jobs.smartrecruiters.com") return;
+  await fillCity(doc, ctx, report);
   await fillSection(doc, "experience", (ctx.experience ?? []).slice(0, MAX_JOBS), report);
   await fillSection(doc, "education", (ctx.education ?? []).slice(0, MAX_SCHOOLS), report);
 }

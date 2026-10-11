@@ -254,3 +254,13 @@ test("the page-world helper does the picking while the extension script only pas
   assert.ok(report.filled.includes("Experience 1: saved"), "the helper's result is passed back into the report");
   await page.close();
 });
+
+test("when the page ignores clicks and only takes a pick made with the keyboard, the row is still chosen and accepted", async () => {
+  const page = await open(FORM_URL + "&keys=1");
+  await page.evaluate(bundle);
+  const report = await page.evaluate(([c, r]) => window.__jobAgentFill(c, r), [withHistory({ experience: [], education: SCHOOLS.slice(1, 2) }), resume]);
+  const entries = await page.evaluate(() => window.__entries);
+  assert.equal(entries.length, 1, JSON.stringify(report.flagged));
+  assert.equal(entries[0].Institution, "Babson College");
+  await page.close();
+});

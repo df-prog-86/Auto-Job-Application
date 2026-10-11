@@ -115,7 +115,7 @@
         for (const [n, d] of db) rows.push([n, plain ? `${n}${d ? " " + d : ""}` : `${n} ${n} ${n}${d ? " " + d : ""}`]);
         for (const [value, shown] of rows) {
           const o = document.createElement("spl-select-option");
-          o.textContent = shown;
+          o.textContent = shown; o.dataset.value = value;
           o.addEventListener(new URLSearchParams(location.search).has("plain") ? "mousedown" : "click", () => { input.value = value; list.innerHTML = ""; input.setAttribute("aria-expanded", "false"); });
           list.append(o);
         }

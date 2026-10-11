@@ -143,7 +143,28 @@ function press(el: HTMLElement): void {
   el.dispatchEvent(new MouseEvent("click", at));
 }
 
-async function pickRow(input: HTMLInputElement, typeText: string, choose: Chooser): Promise<boolean> {
+/** The message the page shows under a box that has no accepted value ("Please provide institution"), or "". */
+function boxError(input: HTMLInputElement): string {
+  let host = shadowHost(input);
+  while (host) {
+    if (host.getAttribute("label")) {
+      const m = /please (?:provide|enter|select|choose)[^.!?]*/i.exec(clean(deepText(host)));
+      return m ? m[0].trim() : host.getAttribute("invalid") === "true" || host.getAttribute("aria-invalid") === "true" ? "marked invalid" : "";
+    }
+    host = shadowHost(host);
+  }
+  return "";
+}
+
+function key(input: HTMLInputElement, name: string, code: number): void {
+  const init = { key: name, code: name, keyCode: code, which: code, bubbles: true, composed: true, cancelable: true };
+  input.dispatchEvent(new KeyboardEvent("keydown", init));
+  input.dispatchEvent(new KeyboardEvent("keyup", init));
+}
+
+type How = "click" | "keys";
+
+async function pickOnce(input: HTMLInputElement, typeText: string, choose: Chooser, how: How): Promise<boolean> {
   why = "";
   typed(input, typeText.trim());
   const id = input.getAttribute("aria-controls");
@@ -154,30 +175,55 @@ async function pickRow(input: HTMLInputElement, typeText: string, choose: Choose
   };
   await waitFor(() => (read().length > 0 ? true : null), 32, 125);
   await sleep(600); // more suggestions can still arrive after the first
-  let pick = choose(read());
+  let rows = read();
+  let pick = choose(rows);
   if (!pick) {
     await sleep(900);
-    pick = choose(read());
+    rows = read();
+    pick = choose(rows);
   }
   if (pick) {
-    press(pick);
-    await sleep(300);
-    if (clean(input.value) === "") {
-      pick.click(); // the plain click, in case the full press was not enough
+    if (how === "click") {
+      press(pick);
       await sleep(300);
+      if (clean(input.value) === "") pick.click(); // the plain click, in case the full press was not enough
+    } else {
+      // The way a person would with the keyboard: arrow down to the row, then Enter.
+      input.focus();
+      const at = rows.findIndex((r) => r.el === pick);
+      for (let i = 0; i < at; i++) {
+        key(input, "ArrowDown", 40);
+        await sleep(80);
+      }
+      key(input, "Enter", 13);
     }
+    await sleep(400);
     if (clean(input.value) !== "") {
-      // The page empties a box whose pick did not register once it loses focus, so check again after that.
+      // Leaving the box makes the page check it: a pick it did not accept brings back its error or empties the box.
+      input.blur();
       input.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
-      await sleep(400);
-      if (clean(input.value) !== "") return true;
-      why = "the pick did not stay";
+      input.dispatchEvent(new FocusEvent("focusout", { bubbles: true, composed: true }));
+      await sleep(500);
+      const error = boxError(input);
+      if (clean(input.value) !== "" && !error) return true;
+      why = error ? `the ${how} pick was not accepted: ${error}` : `the ${how} pick did not stay`;
     }
   }
-  const seen = read();
-  why = why || (seen.length === 0 ? "no suggestions appeared" : `saw ${seen.length}: ${seen.slice(0, 3).map((r) => clean(r.text).slice(0, 40)).join(" | ")}`);
+  if (!why) {
+    const seen = read();
+    why = seen.length === 0 ? "no suggestions appeared" : `saw ${seen.length}: ${seen.slice(0, 3).map((r) => clean(r.text).slice(0, 40)).join(" | ")}`;
+  }
   typed(input, "");
   input.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
+  return false;
+}
+
+/** A search box: tries picking the row with a click, then with the keyboard. True only when the page accepted the pick. */
+async function pickRow(input: HTMLInputElement, typeText: string, choose: Chooser): Promise<boolean> {
+  if (await pickOnce(input, typeText, choose, "click")) return true;
+  const first = why;
+  if (await pickOnce(input, typeText, choose, "keys")) return true;
+  why = `${first}; ${why}`;
   return false;
 }
 
@@ -379,7 +425,8 @@ async function addEntry(doc: Document, section: HTMLElement, kind: Kind, n: numb
   save.click();
   const closed = await waitFor(() => (inside(section, `oc-${kind}-edit-form`).length === 0 ? true : null), 40, 125);
   if (!closed) {
-    flag(report, `${tag}: finish and save this entry`);
+    const errors = Array.from(new Set(clean(deepText(form)).match(/please (?:provide|enter|select|choose)[^.!?]*/gi) ?? [])).slice(0, 3);
+    flag(report, `${tag}: finish and save this entry${errors.length ? ` (${errors.join("; ")})` : ""}`);
     return false;
   }
   report.filled.push(`${tag}: saved`);

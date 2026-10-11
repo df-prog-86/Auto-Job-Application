@@ -202,3 +202,23 @@ test("an expired SmartRecruiters job is recognized, and a live page or another s
   assert.equal(await check("jobs.smartrecruiters.com", posting, "<h1>Financial Analyst</h1><a>I'm interested</a>"), false, "a live posting");
   assert.equal(await check("example.com", posting, "<p>This job has expired</p>"), false, "another site is never judged");
 });
+
+test("works the way Chrome runs an extension (an isolated world that cannot read the page's own properties)", async () => {
+  const page = await open();
+  const cdp = await page.context().newCDPSession(page);
+  const { frameTree } = await cdp.send("Page.getFrameTree");
+  const { executionContextId: contextId } = await cdp.send("Page.createIsolatedWorld", { frameId: frameTree.frame.id, worldName: "ext" });
+  const run = async (expression) => {
+    const r = await cdp.send("Runtime.evaluate", { expression, contextId, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400));
+    return r.result.value;
+  };
+  await run(bundle);
+  const report = await run(`window.__jobAgentFill(${JSON.stringify(withHistory({ experience: JOBS.slice(0, 1), education: SCHOOLS.slice(2) }))}, null)`);
+  const entries = await page.evaluate(() => window.__entries);
+  assert.equal(entries.length, 2, JSON.stringify(report.flagged));
+  assert.equal(entries[0].Title, "Financial Analyst");
+  assert.equal(entries[0].from, "2019-03-01", "month and year are accepted without reading the picker's own value");
+  assert.equal(entries[1].Institution, "Rollins College");
+  await page.close();
+});

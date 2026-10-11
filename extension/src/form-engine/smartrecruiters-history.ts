@@ -222,8 +222,10 @@ async function writeMonth(input: HTMLInputElement, date: string | null | undefin
   await sleep(200);
   let host: Element | null = shadowHost(input);
   while (host && host.tagName.toLowerCase() !== "spl-date-picker") host = shadowHost(host);
+  // The picker's own parsed date lives on the page's side; Chrome's extension sandbox cannot read it (undefined), so
+  // only an explicit empty answer counts as "not understood".
   const parsed = host ? (host as unknown as { value?: unknown }).value : true;
-  return input.value === text && !!parsed;
+  return input.value === text && parsed !== null && parsed !== false && parsed !== "";
 }
 
 function dateBox(form: Element, label: "From" | "To"): HTMLInputElement | null {

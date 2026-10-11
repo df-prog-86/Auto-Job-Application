@@ -475,3 +475,101 @@ def test_the_search_endpoint_returns_coverage_and_show_more_gives_the_next_resul
     assert more["found"] == 5 and more["more_available"] == 2
     urls = [r["url"] for r in more["results"]]
     assert len(urls) == len(set(urls)) == 10  # nothing repeated
+
+
+# ---- finding employers by industry and city ---------------------------------------------------------------------
+
+def test_cities_are_cleaned_and_names_become_addresses():
+    from app.services.jobcache import finder
+
+    assert finder.clean_cities([" Boston, MA ", "boston, ma", "", "x", "Austin  TX"]) == ["Boston, MA", "Austin TX"]
+    assert len(finder.clean_cities([f"City {i}" for i in range(9)])) == finder.MAX_CITIES
+    assert finder.slug_guesses("Flatiron Health, Inc.") == ["flatironhealth", "flatiron-health"]
+    assert finder.slug_guesses("The Acme Corp") == ["acme"]
+    assert finder.slug_guesses("Inc") == []
+
+
+def _fake_finder(monkeypatch, suggestions, readable):
+    """AI suggestions per city; `readable` is the set of (system, identifier) whose job list exists and has jobs."""
+    from app.services.jobcache import finder
+
+    async def suggest(industry, city, model):
+        return [dict(s, city=city) for s in suggestions.get(city, [])]
+
+    async def read(system, identifier, client, throttle):
+        if (system, identifier) not in readable:
+            raise readers.ReaderError("that job list was not found", gone=True)
+        return readers.ReadResult(postings=[post(1, "Nurse Manager"), post(2, "Analyst")])
+
+    monkeypatch.setattr(finder, "_suggest", suggest)
+    monkeypatch.setattr(finder, "read_employer", read)
+    monkeypatch.setattr(finder, "search_model", lambda: "test-model")
+    return finder
+
+
+def test_finder_adds_only_employers_whose_job_list_can_be_read(monkeypatch):
+    import asyncio
+
+    suggestions = {
+        "Boston, MA": [
+            {"company": "Acme Health", "url": "https://job-boards.greenhouse.io/acme/jobs/1"},  # a real link from the AI
+            {"company": "Flatiron Health, Inc.", "url": None},  # no link: found by trying its name as an address
+            {"company": "Made Up Corp", "url": "https://careers.madeup.example.com"},  # not on the four systems, no guess works
+        ],
+        "Cambridge, MA": [
+            {"company": "acme health", "url": None},  # same company again from another city
+            {"company": "Moderna", "url": "https://modernatx.wd1.myworkdayjobs.com/en-US/M_tx/job/Cambridge/Role_R1"},
+        ],
+    }
+    readable = {("greenhouse", "acme"), ("lever", "flatiron-health"), ("workday", "modernatx.wd1.myworkdayjobs.com|modernatx|M_tx")}
+    finder = _fake_finder(monkeypatch, suggestions, readable)
+    out = asyncio.run(finder.find_employers("Healthcare", ["Boston, MA", "Cambridge, MA"]))
+
+    assert out.suggested == 4  # "Acme Health" from both cities counts once
+    assert sorted((f.name, f.system) for f in out.added) == [("Acme Health", "greenhouse"), ("Flatiron Health, Inc.", "lever"), ("Moderna", "workday")]
+    assert out.unreadable == ["Made Up Corp"] and out.already == []
+    cache = JobCache()
+    assert cache.counts()["employers"] == 3 and cache.counts()["postings"] == 6
+    assert {e["source"] for e in cache.list_employers()} == {"industry"}
+    assert {e["industry"] for e in cache.list_employers()} == {"Healthcare"}
+
+
+def test_finder_reports_employers_already_saved_and_leaves_no_trace_of_failures(monkeypatch):
+    import asyncio
+
+    JobCache().upsert_employer("greenhouse", "acme", "Acme Health", "saved_job")
+    finder = _fake_finder(monkeypatch, {"Boston, MA": [{"company": "Acme Health", "url": "https://boards.greenhouse.io/acme"}, {"company": "Ghost Co", "url": None}]}, {("greenhouse", "acme")})
+    out = asyncio.run(finder.find_employers("Healthcare", ["Boston, MA"]))
+    assert out.added == [] and out.already == ["Acme Health"] and out.unreadable == ["Ghost Co"]
+    assert [e["name"] for e in JobCache().list_employers()] == ["Acme Health"]  # the failed guesses were removed
+
+
+def test_finder_respects_switched_off_systems_and_empty_lists(monkeypatch):
+    import asyncio
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "JOB_CACHE_DISABLED_SYSTEMS", "greenhouse")
+    finder = _fake_finder(monkeypatch, {"Boston, MA": [{"company": "Acme Health", "url": "https://boards.greenhouse.io/acme"}]}, {("greenhouse", "acme"), ("greenhouse", "acmehealth")})
+    out = asyncio.run(finder.find_employers("Healthcare", ["Boston, MA"]))
+    assert out.added == [] and out.unreadable == ["Acme Health"]
+
+
+def test_finder_needs_the_ai_connection(monkeypatch):
+    import asyncio
+    from app.services.jobcache import finder
+    from app.services.llm.exceptions import LLMNotConfiguredError
+
+    monkeypatch.setattr(finder, "search_model", lambda: None)
+    with pytest.raises(LLMNotConfiguredError):
+        asyncio.run(finder.find_employers("Healthcare", ["Boston, MA"]))
+
+
+def test_find_endpoint(app_and_db, monkeypatch):
+    client, _ = app_and_db
+    _fake_finder(monkeypatch, {"Boston, MA": [{"company": "Acme Health", "url": "https://boards.greenhouse.io/acme"}]}, {("greenhouse", "acme")})
+    ok = client.post("/api/v1/job-search/employers/find", json={"industry": "Healthcare", "cities": ["Boston, MA", "Austin, TX"]})
+    assert ok.status_code == 200, ok.text
+    body = ok.json()
+    assert body["added"][0]["name"] == "Acme Health" and body["total_employers"] == 1 and body["cities"] == ["Boston, MA", "Austin, TX"]
+    assert client.post("/api/v1/job-search/employers/find", json={"industry": "Healthcare", "cities": []}).status_code == 422
+    assert client.post("/api/v1/job-search/employers/find", json={"industry": "H", "cities": ["Boston"]}).status_code == 422

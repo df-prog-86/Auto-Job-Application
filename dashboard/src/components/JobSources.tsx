@@ -12,6 +12,7 @@ const SOURCE_NOTES: Record<string, string> = {
   user_link: "added from a link",
   search: "found by a search",
   starter: "starter list",
+  industry: "found by industry search",
 };
 
 const num = (v: number) => v.toLocaleString("en-US");
@@ -72,6 +73,158 @@ function statusLine(e: EmployerOut): { text: string; bad: boolean } {
 }
 
 const SHOWN_AT_FIRST = 12;
+const MAX_CITIES = 5;
+
+/** Industry plus one or more cities: the AI suggests employers there, and each one's real job list is checked before it is added. */
+function FindEmployersBox() {
+  const qc = useQueryClient();
+  const [industry, setIndustry] = useState("");
+  const [cities, setCities] = useState<string[]>([]);
+  const [draft, setDraft] = useState("");
+
+  const addCity = (raw: string) => {
+    const city = raw.trim().replace(/\s+/g, " ");
+    if (city.length < 2) return;
+    setCities((prev) => (prev.length >= MAX_CITIES || prev.some((c) => c.toLowerCase() === city.toLowerCase()) ? prev : [...prev, city]));
+    setDraft("");
+  };
+  const allCities = draft.trim().length >= 2 && cities.length < MAX_CITIES ? [...cities, draft.trim()] : cities;
+  const ready = industry.trim().length >= 2 && allCities.length > 0;
+
+  const find = useMutation({
+    mutationFn: () => api.findEmployers(industry.trim(), allCities),
+    onSuccess: () => {
+      setDraft("");
+      void qc.invalidateQueries({ queryKey: ["job-employers"] });
+    },
+  });
+  const result = find.data;
+  const addedJobs = result ? result.added.reduce((sum, e) => sum + e.open_jobs, 0) : 0;
+
+  return (
+    <div className="space-y-3 rounded-2xl bg-brand-50 px-4 py-4">
+      <div>
+        <p className="text-sm font-extrabold text-ink-900">Find employers by industry and city</p>
+        <p className="text-xs text-ink-500">
+          The AI suggests employers with an office or headquarters in those cities. Each one's real job list is read before it is added, so only employers
+          with open jobs join the list. Only the words you type are sent. Each search costs a small amount.
+        </p>
+      </div>
+      <form
+        className="space-y-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (ready && !find.isPending) find.mutate();
+        }}
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="js-find-industry" className="mb-1 block text-xs font-bold text-ink-700">
+              Industry
+            </label>
+            <input
+              id="js-find-industry"
+              value={industry}
+              onChange={(e) => setIndustry(e.target.value)}
+              placeholder="Healthcare, hospitals and health systems"
+              maxLength={120}
+              className="w-full rounded-full border border-[#8f88bb] bg-white px-4 py-2.5 text-[13px] text-ink-900 placeholder:text-[#6a6585] focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
+            />
+          </div>
+          <div>
+            <label htmlFor="js-find-city" className="mb-1 block text-xs font-bold text-ink-700">
+              Cities (up to {MAX_CITIES})
+            </label>
+            <input
+              id="js-find-city"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === ",") {
+                  e.preventDefault();
+                  if (draft.trim()) addCity(draft);
+                  else if (e.key === "Enter" && ready && !find.isPending) find.mutate();
+                }
+              }}
+              onBlur={() => addCity(draft)}
+              disabled={cities.length >= MAX_CITIES}
+              placeholder={cities.length ? "Add another city" : "Boston, MA (press Enter to add more)"}
+              maxLength={80}
+              className="w-full rounded-full border border-[#8f88bb] bg-white px-4 py-2.5 text-[13px] text-ink-900 placeholder:text-[#6a6585] focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:bg-[#f3f2fa]"
+            />
+          </div>
+        </div>
+        {cities.length > 0 && (
+          <ul className="flex flex-wrap gap-2" aria-label="Cities to search">
+            {cities.map((c) => (
+              <li key={c} className="flex items-center gap-1.5 rounded-full bg-white py-1 pl-3 pr-1.5 text-[13px] font-semibold text-ink-900">
+                {c}
+                <button
+                  type="button"
+                  aria-label={`Remove ${c}`}
+                  onClick={() => setCities((prev) => prev.filter((x) => x !== c))}
+                  className="flex h-5 w-5 items-center justify-center rounded-full text-ink-500 hover:bg-brand-50 hover:text-ink-900"
+                >
+                  x
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Button type="submit" size="sm" disabled={!ready || find.isPending}>
+          {find.isPending ? "Searching..." : "Find employers"}
+        </Button>
+      </form>
+      {find.isPending && (
+        <p className="text-[13px] text-ink-500" role="status">
+          Searching and reading job lists. This can take a minute or two. You can leave this page open.
+        </p>
+      )}
+      {find.isError && (
+        <p className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700" role="alert">
+          {errorText(find.error)}
+        </p>
+      )}
+      {result && !find.isPending && (
+        <div className="space-y-2 rounded-xl bg-white px-4 py-3 text-[13px] text-ink-700" role="status">
+          <p className="font-bold text-ink-900">
+            {result.added.length > 0
+              ? `Added ${num(result.added.length)} ${plural(result.added.length, "employer", "employers")} with ${num(addedJobs)} open ${plural(addedJobs, "job", "jobs")} in ${result.cities.join(", ")}.`
+              : result.suggested === 0
+                ? `No employers came back for that search in ${result.cities.join(", ")}. Try a broader industry.`
+                : `Nothing new was added from ${num(result.suggested)} suggested ${plural(result.suggested, "employer", "employers")}.`}
+          </p>
+          {(result.already.length > 0 || result.unreadable.length > 0) && (
+            <p className="text-ink-500">
+              {result.already.length > 0 ? `${num(result.already.length)} already on your list. ` : ""}
+              {result.unreadable.length > 0
+                ? `${num(result.unreadable.length)} couldn't be read, usually because their jobs are on a site we can't read yet.`
+                : ""}
+            </p>
+          )}
+          {result.added.length > 0 && (
+            <details>
+              <summary className="cursor-pointer font-bold text-brand-600">See what was added</summary>
+              <ul className="mt-1.5 space-y-0.5">
+                {result.added.map((e) => (
+                  <li key={`${e.system}-${e.name}`}>
+                    {e.name} <span className="text-ink-500">({SYSTEM_NAMES[e.system] ?? e.system}, {num(e.open_jobs)} {plural(e.open_jobs, "job", "jobs")})</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {result.unreadable.length > 0 && (
+            <details>
+              <summary className="cursor-pointer font-bold text-brand-600">See what couldn't be read</summary>
+              <p className="mt-1.5 text-ink-500">{result.unreadable.join(", ")}</p>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** The employers whose job lists are saved and searched: add one from a link, switch one off, update now. */
 export function EmployersPanel() {
@@ -143,6 +296,8 @@ export function EmployersPanel() {
             Job Search reads these employers' public job lists, the same ones on their careers pages, and keeps a copy on this computer. The copy updates in the
             background. Employers join the list from jobs you save, links you add here, and searches.
           </p>
+
+          <FindEmployersBox />
 
           <form
             className="flex flex-wrap items-center gap-2.5"

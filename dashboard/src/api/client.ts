@@ -10,6 +10,7 @@ import type {
   AddSearchResultOut,
   EmployerOut,
   EmployersOut,
+  FindEmployersOut,
   JobDetailOut,
   JobSearchCriteria,
   JobSearchResultOut,
@@ -187,6 +188,8 @@ export const api = {
     request<EmployerOut>("/job-search/employers", { method: "POST", body: JSON.stringify({ url }) }),
   setEmployerEnabled: (id: number, enabled: boolean) =>
     request<EmployerOut>(`/job-search/employers/${id}`, { method: "PATCH", body: JSON.stringify({ enabled }) }),
+  findEmployers: (industry: string, cities: string[]) =>
+    request<FindEmployersOut>("/job-search/employers/find", { method: "POST", body: JSON.stringify({ industry, cities }) }),
   refreshEmployers: () => request<EmployersOut>("/job-search/employers/refresh", { method: "POST" }),
   clearQuestions: (ids?: number[]) =>
     request<{ cleared: number }>("/needs-attention/clear", { method: "POST", body: JSON.stringify(ids ? { ids } : {}) }),

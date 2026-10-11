@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import datetime as dt
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
-from app.schemas.job_search import AddEmployerIn, EmployerOut, EmployersOut, EnabledIn
-from app.services.jobcache import service
+from app.schemas.job_search import AddEmployerIn, EmployerOut, EmployersOut, EnabledIn, FindEmployersIn, FindEmployersOut, FoundEmployerOut
+from app.services.jobcache import finder, service
 from app.services.jobcache.store import JobCache
+from app.services.llm.exceptions import LLMError, LLMNotConfiguredError
 
 router = APIRouter(prefix="/api/v1/job-search/employers", tags=["job-search"])
 
@@ -88,3 +90,30 @@ def refresh_now(db: Session = Depends(get_db)) -> EmployersOut:
     service.seed_from_app(db)
     service.refresh_in_background(seed=False, force=True)
     return _listing()
+
+
+@router.post("/find", response_model=FindEmployersOut)
+async def find_employers(payload: FindEmployersIn) -> FindEmployersOut:
+    """AI suggests employers in an industry and cities; code reads each one's real job list and adds the ones that check out."""
+    cities = finder.clean_cities(payload.cities)
+    if not cities:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Enter at least one city.")
+    try:
+        outcome = await finder.find_employers(payload.industry, cities)
+    except LLMNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Finding employers needs the AI connection, which isn't set up yet. See the backend README.",
+        ) from exc
+    except (httpx.HTTPError, LLMError) as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="The search service didn't answer. Try again in a minute.") from exc
+    counts = JobCache().counts()
+    return FindEmployersOut(
+        cities=outcome.cities,
+        suggested=outcome.suggested,
+        added=[FoundEmployerOut(name=f.name, system=f.system, open_jobs=f.open_jobs, city=f.city) for f in outcome.added],
+        already=outcome.already[:60],
+        unreadable=outcome.unreadable[:60],
+        total_employers=counts["employers"],
+        total_postings=counts["postings"],
+    )

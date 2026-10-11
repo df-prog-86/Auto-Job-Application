@@ -420,6 +420,23 @@ export interface EmployersOut {
   disabled_systems: string[];
 }
 
+export interface FoundEmployerOut {
+  name: string;
+  system: string;
+  open_jobs: number;
+  city?: string | null;
+}
+
+export interface FindEmployersOut {
+  cities: string[];
+  suggested: number;
+  added: FoundEmployerOut[];
+  already: string[];
+  unreadable: string[];
+  total_employers: number;
+  total_postings: number;
+}
+
 export interface AddSearchResultOut {
   job: JobOut;
   from_summary: boolean;

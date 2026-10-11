@@ -98,6 +98,28 @@ class AddEmployerIn(BaseModel):
     url: str = Field(min_length=8, max_length=1000)
 
 
+class FindEmployersIn(BaseModel):
+    industry: str = Field(min_length=2, max_length=120)
+    cities: list[str] = Field(min_length=1, max_length=5)
+
+
+class FoundEmployerOut(BaseModel):
+    name: str
+    system: str
+    open_jobs: int
+    city: str | None = None
+
+
+class FindEmployersOut(BaseModel):
+    cities: list[str]
+    suggested: int
+    added: list[FoundEmployerOut]
+    already: list[str]
+    unreadable: list[str]
+    total_employers: int
+    total_postings: int
+
+
 class EnabledIn(BaseModel):
     enabled: bool
 

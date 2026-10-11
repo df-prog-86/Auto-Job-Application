@@ -27,6 +27,9 @@ class JobSearchResult(Base, TimestampMixin):
     posted_at: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     # The posting's requirements as read from its page, kept so scoring and adding do not read it twice.
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # How well the title, place and date fit the search (0 to 1), worked out by code when the result was found, and a short why.
+    fit_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fit_note: Mapped[str | None] = mapped_column(String(300), nullable=True)
     match_score: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0 to 1, set when the person asks
     match_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     match_gaps: Mapped[list | None] = mapped_column(JSON, nullable=True)

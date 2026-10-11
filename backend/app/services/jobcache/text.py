@@ -258,3 +258,43 @@ def workday_posted(text: str | None, today: dt.date | None = None) -> dt.date | 
     if m:
         return today - dt.timedelta(days=int(m.group(1)))
     return None
+
+
+# ---- employer and title tidying ---------------------------------------------------------------------------------
+
+# Employers whose list address gives a run-together or shortened name ("danafarber"), shown the way people write them.
+COMPANY_NAMES = {
+    "danafarber": "Dana-Farber Cancer Institute",
+    "massgeneralbrigham": "Mass General Brigham",
+    "hcsc": "HCSC",
+    "bilh": "Beth Israel Lahey Health",
+    "intersystems": "InterSystems",
+    "genetixbiotherapeutics": "Genetix Biotherapeutics",
+}
+_ORG_CODE = re.compile(r"^(?:[A-Za-z]{1,4}\d{2,6}|\d{3,6})\s+(?=\S)")  # "1000 Abbott ...", "LE001 Berkeley ..."
+_TRAIL_CODE = re.compile(r"\s*\((?:[A-Za-z]{2,6})\)\s*$")  # "Inc(ALI)"
+
+
+def _squash(text_: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (text_ or "").lower())
+
+
+def clean_company(name: str | None) -> str:
+    """An employer's name without the system's internal codes ("1000 Abbott Laboratories Inc(ALI)" -> "Abbott Laboratories Inc")."""
+    out = re.sub(r"\s+", " ", name or "").strip()
+    cleaned = _TRAIL_CODE.sub("", _ORG_CODE.sub("", out)).strip(" ,-")
+    out = cleaned or out
+    return COMPANY_NAMES.get(_squash(out), out)
+
+
+def clean_title(title: str | None, company: str | None = None) -> str:
+    """A job title without a trailing "at <Employer>" ("Program Manager at Massgeneralbrigham" -> "Program Manager")."""
+    out = re.sub(r"\s+", " ", title or "").strip()
+    if not company:
+        return out
+    squashed = {_squash(company), _squash(clean_company(company))} - {""}
+    m = re.search(r"\s+(?:at|@|-|\|)\s+([^@|]+)$", out)
+    if m and _squash(m.group(1)) in squashed:
+        shorter = out[: m.start()].strip()
+        return shorter or out
+    return out

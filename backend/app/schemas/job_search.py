@@ -32,6 +32,8 @@ class JobSearchResultOut(BaseModel):
     work_type: str | None
     salary_text: str | None
     posted_at: dt.date | None = None
+    fit_score: float | None = None
+    fit_note: str | None = None
     match_score: float | None = None
     match_summary: str | None = None
     match_gaps: list[str] | None = None

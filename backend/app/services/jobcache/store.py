@@ -363,6 +363,16 @@ class JobCache:
                 rows = db.execute(sql, [*[f"%{t}%" for t in terms], *params, limit]).fetchall()
         return [dict(r) for r in rows]
 
+    def locations_sample(self, limit: int = 4000) -> list[str]:
+        """The places postings name, most common first, for city suggestions."""
+        with self.session() as db:
+            rows = db.execute(
+                "SELECT location FROM postings WHERE location IS NOT NULL AND location LIKE '%, __%' "
+                "GROUP BY location ORDER BY COUNT(*) DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [r["location"] for r in rows]
+
     def counts(self) -> dict[str, Any]:
         """How much is saved: employers and open postings, overall and for each hiring system. Reads one small table, so it stays instant."""
         with self.session() as db:

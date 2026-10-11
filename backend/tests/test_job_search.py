@@ -13,11 +13,11 @@ ITEMS = [
     {"title": "Revenue Cycle Analyst", "company": "Acme Health", "location": "Remote, US", "work_type": "remote",
      "salary": "$85,000 - $95,000", "posted": "2026-09-30", "url": "https://acme.wd5.myworkdayjobs.com/en-US/careers/job/Remote/Analyst_R1?utm_source=x",
      "summary": "Analyze denials and payer trends."},
-    {"title": "Billing Analyst", "company": "Beta Care", "location": "Boston, MA", "work_type": "hybrid", "salary": None, "posted": "2020-01-01",
+    {"title": "Revenue Cycle Billing Analyst", "company": "Beta Care", "location": "Boston, MA", "work_type": "hybrid", "salary": None, "posted": "2020-01-01",
      "url": "https://jobs.betacare.com/postings/42", "summary": "Own claim edits."},
-    {"title": "No link", "company": "Gamma", "location": None, "work_type": "unknown", "salary": None,
+    {"title": "Revenue Cycle Analyst No Link", "company": "Gamma", "location": None, "work_type": "unknown", "salary": None,
      "url": "not a url", "summary": "x"},
-    {"title": "Already saved", "company": "Delta", "location": None, "work_type": "remote", "salary": None,
+    {"title": "Revenue Cycle Analyst Saved", "company": "Delta", "location": None, "work_type": "remote", "salary": None,
      "url": "https://jobs.deltahealth.com/jobs/7", "summary": "x"},
 ]
 
@@ -91,10 +91,10 @@ def test_search_keeps_real_links_marks_grounded_ones_and_skips_known_ones(search
     out = client.post("/api/v1/job-search/run", json={"titles": "revenue cycle analyst", "work_type": "remote"}).json()
     assert out["found"] == 2 and out["skipped"] == 1  # the bad link is dropped, the saved job is skipped
     by_title = {r["title"]: r for r in out["results"]}
-    assert set(by_title) == {"Revenue Cycle Analyst", "Billing Analyst"}
+    assert set(by_title) == {"Revenue Cycle Analyst", "Revenue Cycle Billing Analyst"}
     assert by_title["Revenue Cycle Analyst"]["grounded"] is True  # the search engine returned this link
     assert "utm_source" not in by_title["Revenue Cycle Analyst"]["url"]
-    assert by_title["Billing Analyst"]["grounded"] is False
+    assert by_title["Revenue Cycle Billing Analyst"]["grounded"] is False
 
     again = client.post("/api/v1/job-search/run", json={"titles": "revenue cycle analyst"}).json()
     assert again["found"] == 0 and len(again["results"]) == 2  # nothing is duplicated
@@ -111,12 +111,12 @@ def test_add_uses_the_summary_when_the_page_cannot_be_read_and_remove_hides_a_re
 
     monkeypatch.setattr(manual_extraction, "fetch_page", blocked)
     out = client.post("/api/v1/job-search/run", json={"titles": "analyst"}).json()
-    first = next(r for r in out["results"] if r["title"] == "Billing Analyst")
+    first = next(r for r in out["results"] if r["title"] == "Revenue Cycle Billing Analyst")
     other = next(r for r in out["results"] if r["title"] == "Revenue Cycle Analyst")
 
     added = client.post(f"/api/v1/job-search/results/{first['id']}/add").json()
-    assert added["from_summary"] is True and added["job"]["title"] == "Billing Analyst"
-    assert "Billing Analyst" in [j["title"] for j in client.get("/api/v1/jobs").json()]
+    assert added["from_summary"] is True and added["job"]["title"] == "Revenue Cycle Billing Analyst"
+    assert "Revenue Cycle Billing Analyst" in [j["title"] for j in client.get("/api/v1/jobs").json()]
 
     assert client.post(f"/api/v1/job-search/results/{other['id']}/remove").json()["status"] == "removed"
     assert client.get("/api/v1/job-search/results").json()["results"] == []
@@ -148,7 +148,7 @@ def test_a_job_added_elsewhere_disappears_from_the_search_list(search):
     client.post("/api/v1/job-search/run", json={"titles": "analyst"})
     _saved_job(SessionLocal)  # the Delta posting now sits on the Jobs page
     titles = [r["title"] for r in client.get("/api/v1/job-search/results").json()["results"]]
-    assert "Already saved" not in titles and "Billing Analyst" in titles
+    assert "Revenue Cycle Analyst Saved" not in titles and "Revenue Cycle Billing Analyst" in titles
 
 
 def test_clearly_closed_postings_are_dropped_but_unclear_ones_stay(search, monkeypatch):
@@ -162,7 +162,7 @@ def test_clearly_closed_postings_are_dropped_but_unclear_ones_stay(search, monke
     monkeypatch.setattr(web_search, "check_live", verdict)
     out = client.post("/api/v1/job-search/run", json={"titles": "analyst"}).json()
     assert "Revenue Cycle Analyst" not in [r["title"] for r in out["results"]]
-    assert "Billing Analyst" in [r["title"] for r in out["results"]]
+    assert "Revenue Cycle Billing Analyst" in [r["title"] for r in out["results"]]
     assert out["skipped"] >= 1
 
 
@@ -191,7 +191,7 @@ def test_salary_minimum_is_a_floor_on_the_pay_midpoint_with_five_percent_slack(s
     low = client.post("/api/v1/job-search/run", json={"titles": "analyst", "target_salary": 100000}).json()
     titles = [r["title"] for r in low["results"]]
     assert "Revenue Cycle Analyst" not in titles  # posted $85,000 is under the $95,000 floor
-    assert "Billing Analyst" in titles  # no posted pay stays unless the pay box is ticked
+    assert "Revenue Cycle Billing Analyst" in titles  # no posted pay stays unless the pay box is ticked
 
 
 def test_posted_date_and_pay_range_follow_the_job_into_the_jobs_list(search, monkeypatch):
@@ -216,14 +216,14 @@ def test_posted_date_and_pay_range_follow_the_job_into_the_jobs_list(search, mon
 def test_postings_older_than_the_window_are_left_out(search):
     client, _ = search
     out = client.post("/api/v1/job-search/run", json={"titles": "analyst", "posted_within_days": 7}).json()
-    assert "Billing Analyst" not in [r["title"] for r in out["results"]]  # posted in 2020
+    assert "Revenue Cycle Billing Analyst" not in [r["title"] for r in out["results"]]  # posted in 2020
 
 
 _PROFILE = {
     "extraction": {
         "contact": {"name": "Jane Doe", "email": "jane@example.com"},
         "employment": [
-            {"employer": "Acme Corp", "title": "Billing Analyst", "start_date": "2021-04", "end_date": None,
+            {"employer": "Acme Corp", "title": "Revenue Cycle Billing Analyst", "start_date": "2021-04", "end_date": None,
              "source_text": "Worked denials and payer follow up."}
         ],
         "education": [],
@@ -341,7 +341,7 @@ def _board_items():
     base = {"company": "Acme Health", "location": None, "work_type": "remote", "salary": None, "summary": "x"}
     return [
         {**base, "title": "Revenue Cycle Analyst", "url": "https://www.linkedin.com/jobs/view/1", "url_key": "linkedin.com/jobs/view/1"},
-        {**base, "title": "Billing Analyst", "url": "https://www.indeed.com/viewjob?jk=2", "url_key": "indeed.com/viewjob?jk=2"},
+        {**base, "title": "Revenue Cycle Billing Analyst", "url": "https://www.indeed.com/viewjob?jk=2", "url_key": "indeed.com/viewjob?jk=2"},
         {**base, "title": "Claims Analyst", "url": "https://jobs.acme.com/claims", "url_key": "jobs.acme.com/claims"},
     ]
 
@@ -374,7 +374,7 @@ def test_board_result_is_swapped_for_the_employers_own_posting(monkeypatch):
     out, dropped = asyncio.run(ws.resolve_original_sources(_board_items()))
     by_title = {i["title"]: i for i in out}
     assert by_title["Revenue Cycle Analyst"]["url"] == "https://acme.wd5.myworkdayjobs.com/en-US/careers/job/R1"
-    assert "Billing Analyst" not in by_title  # no original found, so the board link is dropped
+    assert "Revenue Cycle Billing Analyst" not in by_title  # no original found, so the board link is dropped
     assert by_title["Claims Analyst"]["url"] == "https://jobs.acme.com/claims"  # employer links are untouched
     assert dropped == 1
 
@@ -391,7 +391,7 @@ def test_two_board_results_pointing_at_one_original_are_merged(monkeypatch):
     import asyncio
 
     same = "https://acme.example.com/jobs/1"
-    ws = _resolver(monkeypatch, {"Revenue Cycle Analyst": same, "Billing Analyst": same})
+    ws = _resolver(monkeypatch, {"Revenue Cycle Analyst": same, "Revenue Cycle Billing Analyst": same})
     out, dropped = asyncio.run(ws.resolve_original_sources(_board_items()))
     assert sorted(i["title"] for i in out) == ["Claims Analyst", "Revenue Cycle Analyst"] and dropped == 1
 
@@ -537,7 +537,7 @@ def test_same_job_from_two_sources_is_one_result_and_the_ats_link_wins():
 
     site = {"title": "Revenue Cycle Consultant", "company": "Huron", "url": "https://huron.com/careers/1", "grounded": True}
     ats = {"title": "Revenue Cycle  Consultant", "company": "HURON", "url": "https://huron.wd1.myworkdayjobs.com/en-US/c/job/R1", "grounded": False}
-    other = {"title": "Billing Analyst", "company": "Huron", "url": "https://huron.com/careers/2", "grounded": False}
+    other = {"title": "Revenue Cycle Billing Analyst", "company": "Huron", "url": "https://huron.com/careers/2", "grounded": False}
     assert merge_same_jobs([site, ats, other]) == [ats, other]
 
 
@@ -675,3 +675,74 @@ def test_lever_application_link_reads_the_posting_page_and_title():
     got = extract_from_lever_page(post, "Acme Health - Revenue Cycle Manager", "About the role ...")
     assert (got.company, got.title, got.application_url) == ("Acme Health", "Revenue Cycle Manager", post)
     assert extract_from_lever_page("https://example.com/x", "Acme - Role", "") is None
+
+
+def test_names_and_titles_are_tidied_twins_merged_and_off_topic_results_left_out():
+    import datetime as dt
+
+    from app.services.discovery import web_search
+    from app.services.jobcache import matcher
+    from app.services.jobcache.text import clean_company, clean_title
+
+    assert clean_company("1000 Abbott Laboratories Inc(ALI)") == "Abbott Laboratories Inc"
+    assert clean_company("LE001 Berkeley Research Group, LLC") == "Berkeley Research Group, LLC"
+    assert clean_company("4100 Exact Sciences Corp") == "Exact Sciences Corp"
+    assert clean_company("Danafarber") == "Dana-Farber Cancer Institute"
+    assert clean_company("Massgeneralbrigham") == "Mass General Brigham"
+    assert clean_company("Hcsc") == "HCSC"
+    assert clean_company("Disney") == "Disney"
+    assert clean_title("Program Manager at Massgeneralbrigham", "Massgeneralbrigham") == "Program Manager"
+    assert clean_title("Senior Project Manager, Information Technology at Bilh", "Bilh") == "Senior Project Manager, Information Technology"
+    assert clean_title("Analyst at Large Scale Data", "Acme") == "Analyst at Large Scale Data"  # not that employer: left alone
+
+    day = dt.date(2026, 10, 7)
+    twins = [
+        {"title": "Marketing Project Manager", "company": "Abbott", "location": "Alameda", "salary_text": "$90,000 - $180,000", "posted_at": day, "url": "https://a.example/1"},
+        {"title": "Marketing Project Manager", "company": "Exact Sciences", "location": "Alameda", "salary_text": "$90,000 - $180,000", "posted_at": day, "url": "https://b.example/2"},
+        {"title": "Project Manager", "company": "Disney", "location": "Anaheim", "salary_text": None, "posted_at": day, "url": "https://c.example/3"},
+        {"title": "Project Manager", "company": "Other", "location": "Anaheim", "salary_text": None, "posted_at": day, "url": "https://d.example/4"},
+    ]
+    kept = web_search.merge_twin_postings(twins)
+    assert [i["company"] for i in kept] == ["Abbott", "Disney", "Other"]  # a posting with no stated pay is never joined to another
+
+    class Criteria:
+        titles = "project manager"
+        location = "Boston, MA"
+        work_type = "any"
+        keywords = None
+        target_salary = None
+        exclude_companies = None
+        posted_within_days = 0
+
+    plan = matcher.build_plan(Criteria())
+    assert matcher.title_fit(plan, "Sr. Enterprise Account Executive") < matcher.MIN_TITLE_FIT
+    assert matcher.title_fit(plan, "Senior Project Manager") >= matcher.MIN_TITLE_FIT
+    note = web_search.fit_note(plan, {"title": "Senior Project Manager", "location": "Boston, MA", "work_type": None, "posted_at": dt.date.today()})
+    assert note == "Title matches closely · In your area · Posted today"
+
+
+def test_results_carry_a_fit_score_and_a_short_reason(search):
+    client, _ = search
+    out = client.post("/api/v1/job-search/run", json={"titles": "revenue cycle analyst", "work_type": "remote"}).json()
+    first = out["results"][0]
+    assert first["fit_score"] is not None and 0 < first["fit_score"] <= 1
+    assert "Title" in first["fit_note"]
+
+
+def test_city_suggestions_complete_what_is_typed(search):
+    from app.services.jobcache import places
+
+    labels = lambda q, **kw: [p["label"] for p in places.suggest(q, **kw)]
+    assert labels("Bost")[0] == "Boston, MA"
+    assert labels("Orlan")[0] == "Orlando, FL"
+    assert labels("bos, ma")[0] == "Boston, MA"
+    assert "Boston, MA" not in labels("Bost, TX")
+    assert labels("San ")[0] == "San Antonio, TX"  # larger cities first
+    assert labels("B") == []  # too short to guess
+    assert labels("Hartfo")[0] == "Hartford, CT"
+    assert labels("Rem")[-1] == "Remote"
+    assert labels("Zzyzx", extra_locations=["Zzyzxville, CA", "Zzyzxville, CA"]) == ["Zzyzxville, CA"]  # a town only the job lists mention
+
+    client, _ = search
+    got = client.get("/api/v1/job-search/places", params={"q": "Orlan"}).json()
+    assert got[0] == {"label": "Orlando, FL", "city": "Orlando", "state": "FL"}

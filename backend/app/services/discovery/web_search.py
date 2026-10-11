@@ -616,6 +616,52 @@ def merge_same_jobs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [i for i in items if best[_same_job_key(i)] is i]
 
 
+def tidy_items(items: list[dict[str, Any]]) -> None:
+    """Employer names and titles in plain words, in place: no system codes, no "at <Employer>" tails."""
+    from app.services.jobcache.text import clean_company, clean_title
+
+    for item in items:
+        raw_company = item.get("company") or ""
+        item["title"] = clean_title(item.get("title"), raw_company) or item.get("title") or ""
+        item["company"] = clean_company(raw_company) or raw_company
+
+
+def merge_twin_postings(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    One posting listed under two employer names (a company and its parent or sister entity on one hiring site) is one result:
+    same title, place, pay and posting date. Only merged when place, pay and date are all stated, so two different
+    openings that merely share a title are never joined.
+    """
+    squash = lambda text: re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+    best: dict[str, dict[str, Any]] = {}
+    keys: dict[int, str | None] = {}
+    for item in items:
+        loc, pay, posted = item.get("location"), item.get("salary_text"), item.get("posted_at")
+        key = f"{squash(item['title'])}|{squash(loc)}|{squash(pay)}|{posted}" if (loc and pay and posted) else None
+        keys[id(item)] = key
+        if key and (key not in best or _source_rank(item) < _source_rank(best[key])):
+            best[key] = item
+    return [i for i in items if keys[id(i)] is None or best[keys[id(i)]] is i]
+
+
+def fit_note(plan: Any, item: dict[str, Any]) -> str:
+    """A short plain reason for an item's fit, from the same free measures used to rank it ("Title matches · In Boston, MA · Posted 2 days ago")."""
+    from app.services.jobcache import matcher
+    from app.services.jobcache.text import location_fit
+
+    parts: list[str] = []
+    tf = matcher.title_fit(plan, item["title"])
+    parts.append("Title matches closely" if tf >= 0.8 else "Title is a related role" if tf >= 0.5 else "Title partly matches")
+    lf = location_fit(plan.loc, item.get("location"), item.get("work_type"))
+    if not plan.loc.empty:
+        parts.append("In your area" if lf >= 0.95 else "Remote" if item.get("work_type") == "remote" else "Same state" if lf >= 0.7 else "Place not stated" if lf >= 0.5 else "Elsewhere")
+    posted = item.get("posted_at")
+    if isinstance(posted, dt.date):
+        days = (dt.date.today() - posted).days
+        parts.append("Posted today" if days <= 0 else "Posted yesterday" if days == 1 else f"Posted {days} days ago" if days < 60 else "Posted a while ago")
+    return " \u00b7 ".join(parts)
+
+
 def trim_to_count(items: list[dict[str, Any]], count: int) -> list[dict[str, Any]]:
     """Keeps the best-checked results first (the employer's own system confirmed them), then the rest, up to the count asked for."""
     ranked = sorted(items, key=lambda i: (-(i.get("fit") or 0.0), 0 if i.get("ats_checked") else 1, _source_rank(i)))
@@ -767,8 +813,18 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
         if not batches and not cached.items:
             raise next(o for o in outcomes if isinstance(o, BaseException))  # every source failed: show the first reason
 
-    plan = matcher.build_plan(criteria)
+    try:
+        extra_titles = await cache_service.expand_titles(criteria.titles)  # remembered after the first time, so this costs nothing
+    except Exception:
+        extra_titles = []
+    plan = matcher.build_plan(criteria, extra_titles)
     web_items = [i for batch in batches for i in batch]
+    tidy_items(web_items)
+    # A web result whose title has nothing to do with the titles asked for (an "Account Executive" under "project manager") is left out.
+    off_topic = [i for i in web_items if matcher.title_fit(plan, i["title"]) < matcher.MIN_TITLE_FIT]
+    if off_topic:
+        log.warning("job search: %d web results left out as off topic", len(off_topic))
+        web_items = [i for i in web_items if i not in off_topic]
     for item in web_items:  # the same measure of fit for every result, so they sort together
         item["fit"] = matcher.fit_for_item(plan, item["title"], item.get("location"), item.get("work_type"), item.get("posted_at"))
     if web_items:  # employers on the four systems that the web search found join the saved lists
@@ -779,9 +835,11 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
         except Exception:
             log.exception("job search: could not add the employers found to the saved lists")
 
+    tidy_items(cached.items)
     items = _dedupe_by_address(cached.items + web_items)
     merged = len(items)
     items = merge_same_jobs(items)
+    items = merge_twin_postings(items)
     items, not_found = await resolve_original_sources(items)
     items = await upgrade_to_ats_links(items)
     items, gone = await enrich_from_ats(items)
@@ -794,6 +852,9 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
         len(cached.items), len(web_items), len(items) + not_found + gone + too_old, not_found + gone + too_old + closed, not_found, gone, too_old, closed, len(kept),
     )
     final = trim_to_count(kept, criteria.count)
+    for item in final:  # shown on each result, so results can be compared at a glance
+        item["fit_score"] = item.get("fit")
+        item["fit_note"] = fit_note(plan, item)
     from_saved = [i for i in final if i.get("employer_id")]
     if from_saved:
         await asyncio.to_thread(cache_service.record_hits, [i["employer_id"] for i in from_saved])

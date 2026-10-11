@@ -58,6 +58,19 @@ def _run_out(db: Session, found: int, skipped: int, outcome: web_search.SearchOu
     return out
 
 
+@router.get("/places")
+def suggest_places(q: str = "") -> list[dict[str, str]]:
+    """City suggestions while typing in the place box ("Bost" offers "Boston, MA")."""
+    from app.services.jobcache import places
+    from app.services.jobcache.store import JobCache
+
+    try:
+        known = JobCache().locations_sample()
+    except Exception:  # the saved lists are a bonus: the built-in cities still work without them
+        known = []
+    return places.suggest(q[:60], known)
+
+
 @router.get("/results", response_model=JobSearchRunOut)
 def list_results(db: Session = Depends(get_db)) -> JobSearchRunOut:
     return _run_out(db, 0, 0)

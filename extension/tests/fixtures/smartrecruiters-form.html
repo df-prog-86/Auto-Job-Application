@@ -111,11 +111,12 @@
         const exactDb = db.some(([n]) => n.toLowerCase() === text.toLowerCase());
         const rows = [];
         if (!this.hasAttribute("notyped") && !exactDb) rows.push([text, text]);
-        for (const [n, d] of db) rows.push([n, `${n} ${n} ${n}${d ? " " + d : ""}`]);
+        const plain = new URLSearchParams(location.search).has("plain"); // plain: no repeated text, and a row is chosen on mouse press only
+        for (const [n, d] of db) rows.push([n, plain ? `${n}${d ? " " + d : ""}` : `${n} ${n} ${n}${d ? " " + d : ""}`]);
         for (const [value, shown] of rows) {
           const o = document.createElement("spl-select-option");
           o.textContent = shown;
-          o.addEventListener("click", () => { input.value = value; list.innerHTML = ""; input.setAttribute("aria-expanded", "false"); });
+          o.addEventListener(new URLSearchParams(location.search).has("plain") ? "mousedown" : "click", () => { input.value = value; list.innerHTML = ""; input.setAttribute("aria-expanded", "false"); });
           list.append(o);
         }
         if (this.hasAttribute("notyped")) { const o = document.createElement("spl-select-option"); o.textContent = "Cannot find your city? Click here to fill in manually"; list.append(o); }

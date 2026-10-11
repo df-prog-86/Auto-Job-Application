@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Job Agent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Browser execution layer for the Job Agent automated application platform.",
   "minimum_chrome_version": "116",
 

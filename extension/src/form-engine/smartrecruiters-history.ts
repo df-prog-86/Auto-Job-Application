@@ -132,6 +132,17 @@ type Chooser = (rows: Row[]) => HTMLElement | null;
  */
 let why = "";
 
+/** A real-looking mouse press on a suggestion: pointer down, mouse down, pointer up, mouse up, click (all crossing shadow roots). */
+function press(el: HTMLElement): void {
+  const r = el.getBoundingClientRect();
+  const at = { bubbles: true, composed: true, cancelable: true, button: 0, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, view: el.ownerDocument.defaultView };
+  el.dispatchEvent(new PointerEvent("pointerdown", { ...at, pointerType: "mouse", isPrimary: true }));
+  el.dispatchEvent(new MouseEvent("mousedown", at));
+  el.dispatchEvent(new PointerEvent("pointerup", { ...at, pointerType: "mouse", isPrimary: true }));
+  el.dispatchEvent(new MouseEvent("mouseup", at));
+  el.dispatchEvent(new MouseEvent("click", at));
+}
+
 async function pickRow(input: HTMLInputElement, typeText: string, choose: Chooser): Promise<boolean> {
   why = "";
   typed(input, typeText.trim());
@@ -149,8 +160,12 @@ async function pickRow(input: HTMLInputElement, typeText: string, choose: Choose
     pick = choose(read());
   }
   if (pick) {
-    pick.click();
+    press(pick);
     await sleep(300);
+    if (clean(input.value) === "") {
+      pick.click(); // the plain click, in case the full press was not enough
+      await sleep(300);
+    }
     if (clean(input.value) !== "") return true;
   }
   const seen = read();
@@ -193,7 +208,14 @@ const school =
     const key = core(saved);
     if (!key) return null;
     const near = db.filter((r) => core(r.name) === key);
-    return near.length === 1 ? near[0].el : null;
+    if (near.length === 1) return near[0].el;
+    if (near.length > 1) return null;
+    // Rows whose text is not repeated (the name, then a detail such as "Winter Park, US"): the one row that starts with the saved name.
+    const starts = rows.filter((r) => {
+      const t = clean(r.text).toLowerCase();
+      return t === want || t.startsWith(`${want} `);
+    });
+    return starts.length === 1 ? starts[0].el : null;
   };
 
 /** "Boston, MA" -> what to type and which rows ("Boston, MA, US") are that city and state. */

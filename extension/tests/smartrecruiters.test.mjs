@@ -222,3 +222,13 @@ test("works the way Chrome runs an extension (an isolated world that cannot read
   assert.equal(entries[1].Institution, "Rollins College");
   await page.close();
 });
+
+test("a suggestion list with plain row text, chosen only by a real mouse press, still gets its row picked", async () => {
+  const page = await open(FORM_URL + "&plain=1");
+  await page.evaluate(bundle);
+  await page.evaluate(([c, r]) => window.__jobAgentFill(c, r), [withHistory({ experience: [], education: SCHOOLS.slice(1, 2) }), resume]);
+  const entries = await page.evaluate(() => window.__entries);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].Institution, "Babson College");
+  await page.close();
+});

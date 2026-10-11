@@ -5,8 +5,8 @@ import { api, ApiError } from "@/api/client";
 import { Button, Card } from "@/components/ui";
 import type { CoverageOut, EmployerOut } from "@/types/api";
 
-const SYSTEM_NAMES: Record<string, string> = { workday: "Workday", greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby" };
-const SYSTEM_ORDER = ["workday", "greenhouse", "lever", "ashby"];
+const SYSTEM_NAMES: Record<string, string> = { workday: "Workday", greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby", smartrecruiters: "SmartRecruiters" };
+const SYSTEM_ORDER = ["workday", "greenhouse", "lever", "ashby", "smartrecruiters"];
 const SOURCE_NOTES: Record<string, string> = {
   saved_job: "from your saved jobs",
   user_link: "added from a link",
@@ -34,7 +34,7 @@ export function CoverageCard({ coverage }: { coverage: CoverageOut }) {
         Searched {num(coverage.employers)} {plural(coverage.employers, "employer", "employers")} and {num(coverage.postings)} open{" "}
         {plural(coverage.postings, "posting", "postings")}. {fits} {plural(coverage.matches, "fits", "fit")} this search.
       </p>
-      <div className="mt-3 grid gap-x-6 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-3 grid gap-x-6 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-5">
         {systems.map((s) => {
           const info = coverage.by_system[s];
           return (

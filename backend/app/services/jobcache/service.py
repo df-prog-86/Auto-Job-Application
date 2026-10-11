@@ -26,7 +26,7 @@ from app.services.jobcache.text import fold, parse_location_query, place_ref
 
 log = logging.getLogger("job_cache")
 
-SYSTEM_LABELS = {"workday": "Workday", "greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby"}
+SYSTEM_LABELS = {"workday": "Workday", "greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "smartrecruiters": "SmartRecruiters"}
 CONCURRENT_EMPLOYERS = 4
 PRIORITY_HOURS, REGULAR_HOURS = 6.0, 24.0
 
@@ -244,7 +244,7 @@ class AddEmployerError(Exception):
 async def add_employer(url: str, company: str | None = None) -> dict[str, Any]:
     ref = employer_ref(url)
     if ref is None:
-        raise AddEmployerError("That link isn't from Workday, Greenhouse, Lever or Ashby, so it can't be added yet. Paste a link to one of its job postings or its job list.")
+        raise AddEmployerError("That link isn't from Workday, Greenhouse, Lever, Ashby or SmartRecruiters, so it can't be added yet. Paste a link to one of its job postings or its job list.")
     system, identifier = ref
     if system in disabled_systems():
         raise AddEmployerError(f"Reading {SYSTEM_LABELS[system]} is switched off.")

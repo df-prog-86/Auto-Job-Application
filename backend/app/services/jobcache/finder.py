@@ -30,7 +30,7 @@ CONCURRENCY = 4
 SOURCE = "industry"
 # Hiring systems whose public lists can be tried from a company name alone (Workday needs its exact address, so it only
 # comes from a link the AI found).
-GUESSABLE = ("greenhouse", "lever", "ashby")
+GUESSABLE = ("greenhouse", "lever", "ashby", "smartrecruiters")
 _SUFFIXES = frozenset("inc llc ltd corp corporation co company plc the group holdings".split())
 
 
@@ -72,13 +72,31 @@ def slug_guesses(company: str) -> list[str]:
     return list(dict.fromkeys(s for s in out if len(s) >= 3))
 
 
+def guesses_for(system: str, company: str) -> list[str]:
+    """Addresses to try for one hiring system. SmartRecruiters writes names run together with capitals (BoschGroup)."""
+    base = slug_guesses(company)
+    if system != "smartrecruiters":
+        return base
+    words = [w for w in fold(company).split() if w not in _SUFFIXES]
+    return list(dict.fromkeys(["".join(w.capitalize() for w in words), *base[:1]])) if words else []
+
+
+def _same_company(company: str, found: str) -> bool:
+    """True when the name a hiring system reports is about the same as the name suggested ("Visa Inc." and "Visa", but not "Delta" and "Delta Dental of Massachusetts")."""
+    a = {w for w in fold(company).split() if w not in _SUFFIXES}
+    b = {w for w in fold(found).split() if w not in _SUFFIXES}
+    if not a or not b:
+        return True
+    return len(a & b) / len(a | b) >= 0.5
+
+
 def build_messages(industry: str, city: str) -> list[dict[str, str]]:
     system = (
         "You find employers with web search and report them as JSON. "
         "List real companies and organizations that currently hire and have their headquarters or an office in the city asked "
         "or its greater metro area (the nearby cities and suburbs, for example Cambridge and Quincy for Boston), in the industry asked. Include large and mid-size employers, not only the best known. "
         "For each, give the page of its job list or any one of its job postings on its own careers site or hiring system "
-        "(Workday, Greenhouse, Lever, Ashby, or its own site) as careers_url, or null if you did not find one. "
+        "(Workday, Greenhouse, Lever, Ashby, SmartRecruiters, or its own site) as careers_url, or null if you did not find one. "
         "Never use a job board, recruiter, staffing agency or news page as careers_url. "
         "Use only companies you found in results; never invent a company or a link. Skip duplicates. "
         "Return fewer items rather than weak ones; if none match, return []. "
@@ -110,7 +128,7 @@ async def _suggest(industry: str, city: str, model: str) -> list[dict[str, Any]]
     return items
 
 
-async def _read_and_add(cache: JobCache, system: str, identifier: str, company: str, industry: str, client: Any, throttle: Throttle) -> tuple[str, dict[str, Any]] | None:
+async def _read_and_add(cache: JobCache, system: str, identifier: str, company: str, industry: str, client: Any, throttle: Throttle, guessed: bool = False) -> tuple[str, dict[str, Any]] | None:
     """Reads one job list. ("added", row) when new and has open jobs, ("already", row) when saved before, None when it can't be used."""
     eid, created = await asyncio.to_thread(cache.upsert_employer, system, identifier, company, SOURCE, industry)
     if not created:
@@ -125,7 +143,8 @@ async def _read_and_add(cache: JobCache, system: str, identifier: str, company: 
         log.exception("job cache: employer finder could not read %s %s", system, identifier)
         await asyncio.to_thread(cache.delete_employer, eid)
         return None
-    if not result.postings:  # an empty or placeholder list is no use
+    if not result.postings or (guessed and result.name and not _same_company(company, result.name)):
+        # an empty list is no use, and a guessed address that belongs to a different company must not be added
         await asyncio.to_thread(cache.delete_employer, eid)
         return None
     await asyncio.to_thread(cache.apply_refresh, eid, result.postings, now_ts(), service.PRIORITY_HOURS, result.complete)
@@ -143,8 +162,8 @@ async def _check_company(item: dict[str, Any], industry: str, cache: JobCache, c
     for system in GUESSABLE:
         if system in off:
             continue
-        for slug in slug_guesses(company):
-            got = await _read_and_add(cache, system, slug, company, industry, client, throttle)
+        for slug in guesses_for(system, company):
+            got = await _read_and_add(cache, system, slug, company, industry, client, throttle, guessed=True)
             if got:
                 return got
     return "unreadable", None

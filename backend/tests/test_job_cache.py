@@ -633,3 +633,95 @@ def test_the_area_around_a_place_is_asked_once_and_remembered(monkeypatch):
     assert len(calls) == 1
     assert asyncio.run(service.expand_places("remote")) == []  # no city to expand
     assert asyncio.run(service.expand_places(None)) == [] and len(calls) == 1
+
+
+# ---- SmartRecruiters ---------------------------------------------------------------------------------------------
+
+def test_smartrecruiters_links_are_recognised():
+    ref = readers.employer_ref
+    assert ref("https://jobs.smartrecruiters.com/BoschGroup/743999-software-engineer") == ("smartrecruiters", "BoschGroup")
+    assert ref("https://careers.smartrecruiters.com/Visa") == ("smartrecruiters", "Visa")
+    assert ref("https://www.smartrecruiters.com/Visa/74944235-experienced-seo-consultant-?oga=true") == ("smartrecruiters", "Visa")
+    assert ref("https://www.smartrecruiters.com/product/recruiting") is None  # their own marketing pages are not employers
+    assert ref("https://jobs.smartrecruiters.com/search") is None
+
+
+SR_PAGE = {
+    "totalFound": 3,
+    "content": [
+        {"id": "7001", "name": "Revenue Cycle Manager", "releasedDate": "2026-10-01T12:21:43.462Z",
+         "location": {"city": "Boston", "region": "MA", "country": "us", "remote": False}, "company": {"identifier": "Acme", "name": "Acme Health"}},
+        {"id": "7002", "name": "Billing Analyst", "releasedDate": "2026-09-20T08:00:00.000Z",
+         "location": {"city": "", "region": "", "country": "us", "remote": True}, "company": {"identifier": "Acme", "name": "Acme Health"}},
+        {"id": "7003", "name": "Data Engineer", "location": {"city": "Toronto", "region": "ON", "country": "ca", "remote": False}, "company": {"identifier": "Acme", "name": "Acme Health"}},
+        {"name": "No id is skipped"},
+    ],
+}
+
+
+def test_smartrecruiters_postings_are_parsed():
+    got = readers.parse_smartrecruiters(SR_PAGE, "Acme")
+    assert [p.title for p in got] == ["Revenue Cycle Manager", "Billing Analyst", "Data Engineer"]
+    first, remote, abroad = got
+    assert first.url == "https://jobs.smartrecruiters.com/Acme/7001-revenue-cycle-manager"
+    assert first.location == "Boston, MA" and first.posted_at == dt.date(2026, 10, 1) and first.work_type is None
+    assert remote.location == "Remote" and remote.work_type == "remote"
+    assert abroad.location == "Toronto, ON, CA"
+
+
+def test_smartrecruiters_reader_pages_through_the_list_and_reports_the_company_name():
+    import asyncio
+
+    pages = []
+
+    class FakeResp:
+        status_code = 200
+        headers = {}
+
+        def __init__(self, body):
+            self._body = body
+
+        def json(self):
+            return self._body
+
+    class FakeClient:
+        async def request(self, method, url, **kw):
+            offset = kw["params"]["offset"]
+            pages.append((url, kw["params"]["limit"], offset))
+            n = 100 if offset == 0 else 30  # 130 jobs: a full page, then a short one
+            return FakeResp({"totalFound": 130, "content": [
+                {"id": str(offset + i), "name": f"Job {offset + i}", "company": {"identifier": "Acme", "name": "Acme Health"}} for i in range(n)]})
+
+    class NoWait:
+        async def wait(self, host, gap):
+            return None
+
+    res = asyncio.run(readers.read_employer("smartrecruiters", "Acme", FakeClient(), NoWait()))
+    assert len(res.postings) == 130 and res.complete and res.name == "Acme Health"
+    assert pages == [("https://api.smartrecruiters.com/v1/companies/Acme/postings", 100, 0), ("https://api.smartrecruiters.com/v1/companies/Acme/postings", 100, 100)]
+
+
+def test_the_finder_tries_smartrecruiters_and_rejects_a_guess_that_is_another_company(monkeypatch):
+    import asyncio
+
+    from app.services.jobcache import finder
+
+    assert finder.guesses_for("smartrecruiters", "Acme Health, Inc.") == ["AcmeHealth", "acmehealth"]
+    assert finder.guesses_for("lever", "Acme Health") == ["acmehealth", "acme-health"]
+
+    async def read(system, identifier, client, throttle):
+        if (system, identifier) == ("smartrecruiters", "Visa"):
+            return readers.ReadResult(postings=[post(1, "Analyst")], name="Visa Inc.")
+        if (system, identifier) == ("smartrecruiters", "Delta"):
+            return readers.ReadResult(postings=[post(1, "Analyst")], name="Delta Dental of Massachusetts")  # not the airline
+        raise readers.ReaderError("not found", gone=True)
+
+    async def suggest(industry, city, model):
+        return [{"company": "Visa", "url": None, "city": city}, {"company": "Delta Air Lines", "url": None, "city": city}, {"company": "Delta", "url": None, "city": city}]
+
+    monkeypatch.setattr(finder, "read_employer", read)
+    monkeypatch.setattr(finder, "_suggest", suggest)
+    monkeypatch.setattr(finder, "search_model", lambda: "m")
+    out = asyncio.run(finder.find_employers("Finance", ["Boston, MA"]))
+    assert [(f.name, f.system) for f in out.added] == [("Visa", "smartrecruiters")]
+    assert sorted(out.unreadable) == ["Delta", "Delta Air Lines"]  # "Delta" found Delta Dental's list: a different company, so it is left out

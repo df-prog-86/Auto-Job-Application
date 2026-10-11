@@ -13,7 +13,6 @@
  * It runs only on jobs.smartrecruiters.com.
  */
 
-import { expandLocation } from "@/form-engine/canonical";
 import { deepQueryAll, shadowHost } from "@/form-engine/deep";
 import { setNativeValue } from "@/form-engine/fill";
 import { mark } from "@/form-engine/highlight";
@@ -89,24 +88,6 @@ function typed(el: Box, text: string): void {
   el.focus();
   setNativeValue(el, text);
   el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: text, inputType: "insertText" }));
-}
-
-/**
- * The page renders each suggestion's name several times over (hidden copies for tooltips) and may add a detail after it
- * ("Rollins College Rollins College Rollins College Winter Park, US"). Every way of reading the row as a name.
- */
-function names(text: string): string[] {
-  const t = clean(text);
-  const w = t.split(" ");
-  const out = new Set<string>([t]);
-  for (let k = 2; k <= 6; k++) {
-    for (let len = 1; len * k <= w.length; len++) {
-      let same = true;
-      for (let i = 1; i < k && same; i++) for (let j = 0; j < len; j++) if (w[i * len + j] !== w[j]) same = false;
-      if (same) out.add(w.slice(0, len).join(" "));
-    }
-  }
-  return Array.from(out);
 }
 
 /** The name of a row that comes from the page's own database (its text is repeated), else null. */
@@ -257,61 +238,28 @@ async function pickRow(input: HTMLInputElement, typeText: string, choose: Choose
   return false;
 }
 
-/** Title and Company: the row that is exactly the text typed (a free-text entry, or the same name from the page's list). */
-const exact =
-  (text: string): Chooser =>
-  (rows) => {
-    const want = clean(text).toLowerCase();
-    return rows.find((r) => names(r.text).some((n) => n.toLowerCase() === want))?.el ?? null;
-  };
+/** A suggestion row, as opposed to the "Cannot find your city? Click here to fill in manually" line at the end of a place list. */
+const isSuggestion = (r: Row) => !/cannot find|click here|fill in manually/i.test(r.text);
 
-const SCHOOL_WORDS = new Set(["the", "of", "at", "and", "college", "university", "school", "institute"]);
-const core = (name: string) =>
-  clean(name)
-    .toLowerCase()
-    .replace(/[^a-z0-9 ]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w && !SCHOOL_WORDS.has(w))
-    .sort()
-    .join(" ");
+/** The top suggestion, whatever it is: the person's rule is to type the word and take the first option the page offers. */
+const topRow: Chooser = (rows) => rows.find(isSuggestion)?.el ?? null;
 
 /**
- * Institution: only schools from the page's own list can be chosen. The one with exactly the saved name, else the one
- * school whose name differs only by words like "College" or "University" ("Rollins" and "Rollins College"). Several
- * possible schools means none is picked.
+ * Institution: the top suggestion from the page's own school list. A line that merely repeats what was typed (the page
+ * adds those for text it does not know) is skipped when a real school is listed, because only schools can be saved.
  */
-const school =
-  (saved: string): Chooser =>
-  (rows) => {
-    const db = rows.map((r) => ({ el: r.el, name: databaseName(r.text) })).filter((r): r is { el: HTMLElement; name: string } => !!r.name);
-    const want = clean(saved).toLowerCase();
-    const same = db.find((r) => r.name.toLowerCase() === want);
-    if (same) return same.el;
-    const key = core(saved);
-    if (!key) return null;
-    const near = db.filter((r) => core(r.name) === key);
-    if (near.length === 1) return near[0].el;
-    if (near.length > 1) return null;
-    // Rows whose text is not repeated (the name, then a detail such as "Winter Park, US"): the one row that starts with the saved name.
-    const starts = rows.filter((r) => {
-      const t = clean(r.text).toLowerCase();
-      return t === want || t.startsWith(`${want} `);
-    });
-    return starts.length === 1 ? starts[0].el : null;
-  };
+const topSchool: Chooser = (rows) => {
+  const real = rows.filter(isSuggestion);
+  return (real.find((r) => databaseName(r.text) !== null) ?? real[0])?.el ?? null;
+};
 
 /** "Boston, MA" -> what to type and which rows ("Boston, MA, US") are that city and state. */
 function place(loc: string): { typeText: string; choose: Chooser } {
   const m = /^\s*([^,]+?)\s*,\s*([A-Za-z]{2})\b/.exec(loc);
   const city = (m ? m[1] : loc.split(",")[0]).trim();
-  const variants = (m ? [`${city}, ${m[2]}`, ...(expandLocation(`${city}, ${m[2]}`)?.alternates ?? [])] : [city]).map((v) => v.toLowerCase());
-  const fits = (t: string) => variants.some((v) => t.toLowerCase() === v || t.toLowerCase().startsWith(`${v},`));
   return {
     typeText: m ? `${city}, ${m[2]}` : city,
-    choose: (rows) => {
-      const hits = rows.filter((r) => names(r.text).some(fits));
-      return hits.length === 1 ? hits[0].el : null;
-    },
+    choose: topRow,
   };
 }
 
@@ -384,7 +332,7 @@ async function fillTypeahead(
     const w = place(value);
     done = await pickRow(input, w.typeText, w.choose);
   } else {
-    done = await pickRow(input, value, how === "school" ? school(value) : exact(value));
+    done = await pickRow(input, value, how === "school" ? topSchool : topRow);
   }
   if (done) ok(p, label);
   // Optional boxes that cannot be matched are left empty so the entry can still be saved.

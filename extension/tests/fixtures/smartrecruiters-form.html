@@ -42,7 +42,7 @@
       const root = this.attachShadow({ mode: "open" });
       const required = this.hasAttribute("required");
       // A type-ahead box: like the live form, the real input sits one more shadow root down, inside spl-internal-field.
-      if (this.hasAttribute("combo")) { root.innerHTML = `<spl-internal-field suggest='${this.getAttribute("suggest") || "[]"}' input-id="${this.getAttribute("input-id") || ""}" ${this.hasAttribute("notyped") ? "notyped" : ""}></spl-internal-field>`; return; }
+      if (this.hasAttribute("combo")) { root.innerHTML = `<spl-internal-field suggest='${this.getAttribute("suggest") || "[]"}' input-id="${this.getAttribute("input-id") || ""}" ${this.hasAttribute("notyped") ? "notyped" : ""} ${this.hasAttribute("dbonly") ? "dbonly" : ""}></spl-internal-field>`; return; }
       // Like the real phone box, an inner spl-input may have no label of its own and carry the question as aria-label instead.
       const aria = this.getAttribute("aria");
       root.innerHTML = `${this.hasAttribute("label") ? `<label>${this.getAttribute("label")}</label>` : ""}<input id="${this.getAttribute("input-id") || ""}" type="${this.getAttribute("type") || "text"}" ${aria ? `aria-label="${aria}"` : ""} ${required ? "required" : ""}>`;
@@ -110,7 +110,7 @@
         const db = suggest.map((x) => x.split("|")).filter(([n]) => n.toLowerCase().includes(text.toLowerCase()));
         const exactDb = db.some(([n]) => n.toLowerCase() === text.toLowerCase());
         const rows = [];
-        if (!this.hasAttribute("notyped") && !exactDb) rows.push([text, text]);
+        if (!this.hasAttribute("notyped") && !(this.hasAttribute("dbonly") && exactDb)) rows.push([text, text]); // Title and Company always list the typed text first; the school list only does when it has no school of that name
         const plain = new URLSearchParams(location.search).has("plain"); // plain: no repeated text, and a row is chosen on mouse press only
         for (const [n, d] of db) rows.push([n, plain ? `${n}${d ? " " + d : ""}` : `${n} ${n} ${n}${d ? " " + d : ""}`]);
         for (const [value, shown] of rows) {
@@ -169,7 +169,7 @@
         ? `<spl-input label="Title" combo suggest='["Financial Analyst Intern","Senior Financial Analyst","Financial Analyst"]'></spl-input>
            <spl-input label="Company" combo suggest='["Huron Consulting Group|Professional Services","Advent Health Partners|Ambulatory Health Care Services"]'></spl-input>
            <spl-input label="Office location" combo notyped suggest='["Boston, MA, US|","Orlando, FL, US|"]'></spl-input>`
-        : `<spl-input label="Institution" combo suggest='["Boston College|Chestnut Hill, US","Boston College High School|Boston, US","Babson College|Wellesley, US","Rollins College|Winter Park, US"]'></spl-input>
+        : `<spl-input label="Institution" combo dbonly suggest='["Boston College|Chestnut Hill, US","Boston College High School|Boston, US","Babson College|Wellesley, US","Rollins College|Winter Park, US"]'></spl-input>
            <spl-input label="Major" input-id="edu-major" type="text"></spl-input>
            <spl-input label="Degree" input-id="edu-degree" type="text"></spl-input>
            <spl-input label="School location" combo notyped suggest='[]'></spl-input>`) + `

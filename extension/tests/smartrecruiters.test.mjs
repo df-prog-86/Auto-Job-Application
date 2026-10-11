@@ -118,7 +118,7 @@ test("adds Experience and Education entries from the saved resume, saving each, 
   const [job1, job2, job3, school1, school2, school3] = entries;
 
   assert.equal(job1.Title, "Financial Analyst");
-  assert.equal(job1.Company, "Huron", "the exact text is picked, never a similar-looking suggestion (Huron Consulting Group)");
+  assert.equal(job1.Company, "Huron", "the top suggestion is picked (the typed text comes first)");
   assert.equal(job1["Office location"], "Boston, MA, US", "a place is the one suggestion that is that city and state");
   assert.equal(job1.from, "2019-03-01");
   assert.equal(job1.to, "2021-08-01");
@@ -133,7 +133,7 @@ test("adds Experience and Education entries from the saved resume, saving each, 
   assert.ok(!job3.to, "no end date was written for the current job");
 
   // Schools can only be chosen from the page's own list: the exact name, or the one near match.
-  assert.equal(school1.Institution, "Boston College", "exact name (and not Boston College High School)");
+  assert.equal(school1.Institution, "Boston College", "the top school listed");
   assert.equal(school1.Major, "Finance");
   assert.equal(school1.Degree, "Bachelor of Science");
   assert.equal(school1.from, "2013-09-01");

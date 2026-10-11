@@ -254,3 +254,34 @@ test("the page-world helper does the picking while the extension script only pas
   assert.ok(report.filled.includes("Experience 1: saved"), "the helper's result is passed back into the report");
   await page.close();
 });
+
+test("when the page ignores scripted clicks, the row is picked with a real mouse click sent through the extension", async () => {
+  const helper = (await build({ entryPoints: [resolve(root, "src/content/sr-main.ts")], bundle: true, format: "iife", write: false, tsconfig: resolve(root, "tsconfig.json") })).outputFiles[0].text;
+  const page = await open(FORM_URL + "&trusted=1");
+  const clicks = [];
+  page.on("console", (msg) => {
+    const m = /^CLICK(.*)$/.exec(msg.text());
+    if (m) {
+      const { x, y } = JSON.parse(m[1]);
+      clicks.push(page.mouse.click(x, y)); // what the extension asks Chrome to do
+    }
+  });
+  await page.evaluate(helper);
+  const cdp = await page.context().newCDPSession(page);
+  const { frameTree } = await cdp.send("Page.getFrameTree");
+  const { executionContextId: contextId } = await cdp.send("Page.createIsolatedWorld", { frameId: frameTree.frame.id, worldName: "ext" });
+  const run = async (expression) => {
+    const r = await cdp.send("Runtime.evaluate", { expression, contextId, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400));
+    return r.result.value;
+  };
+  await run(`globalThis.chrome = { runtime: { id: "test", sendMessage: async (m) => { console.log("CLICK" + JSON.stringify(m)); await new Promise((r) => setTimeout(r, 900)); return { ok: true }; } } }`);
+  await run(bundle);
+  const report = await run(`window.__jobAgentFill(${JSON.stringify(withHistory({ experience: [], education: SCHOOLS.slice(1, 2) }))}, null)`);
+  await Promise.all(clicks);
+  const entries = await page.evaluate(() => window.__entries);
+  assert.equal(entries.length, 1, JSON.stringify(report.flagged));
+  assert.equal(entries[0].Institution, "Babson College");
+  assert.ok(clicks.length >= 1, "a real mouse click was requested");
+  await page.close();
+});

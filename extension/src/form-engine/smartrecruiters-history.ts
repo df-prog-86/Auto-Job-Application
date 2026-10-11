@@ -143,7 +143,43 @@ function press(el: HTMLElement): void {
   el.dispatchEvent(new MouseEvent("click", at));
 }
 
-async function pickRow(input: HTMLInputElement, typeText: string, choose: Chooser): Promise<boolean> {
+/**
+ * A real mouse click on an element, sent by the extension through Chrome itself (the browser's own input, which pages cannot
+ * tell from a person's click). Only used when the page ignored the scripted click. Null when no such route exists.
+ */
+type MouseRelay = (x: number, y: number) => Promise<boolean>;
+let relay: MouseRelay | null = null;
+export function setMouseRelay(fn: MouseRelay | null): void {
+  relay = fn;
+}
+function extensionRelay(): MouseRelay | null {
+  try {
+    if (typeof chrome === "undefined" || !chrome.runtime?.id || !chrome.runtime.sendMessage) return null;
+  } catch {
+    return null;
+  }
+  return async (x, y) => {
+    try {
+      const r = (await chrome.runtime.sendMessage({ type: "TRUSTED_CLICK", x, y })) as { ok?: boolean } | undefined;
+      return r?.ok === true;
+    } catch {
+      return false;
+    }
+  };
+}
+async function mouseClick(el: HTMLElement): Promise<boolean> {
+  const send = relay ?? extensionRelay();
+  if (!send) return false;
+  el.scrollIntoView({ block: "nearest" });
+  await sleep(150);
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return false;
+  return send(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+}
+
+type How = "script" | "mouse";
+
+async function pickOnce(input: HTMLInputElement, typeText: string, choose: Chooser, how: How): Promise<boolean> {
   why = "";
   typed(input, typeText.trim());
   const id = input.getAttribute("aria-controls");
@@ -160,24 +196,38 @@ async function pickRow(input: HTMLInputElement, typeText: string, choose: Choose
     pick = choose(read());
   }
   if (pick) {
-    press(pick);
-    await sleep(300);
-    if (clean(input.value) === "") {
-      pick.click(); // the plain click, in case the full press was not enough
+    if (how === "mouse") {
+      if (!(await mouseClick(pick))) why = "the mouse click was not possible";
+    } else {
+      press(pick);
       await sleep(300);
+      if (clean(input.value) === "") pick.click(); // the plain click, in case the full press was not enough
     }
+    await sleep(300);
     if (clean(input.value) !== "") {
       // The page empties a box whose pick did not register once it loses focus, so check again after that.
       input.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
       await sleep(400);
       if (clean(input.value) !== "") return true;
-      why = "the pick did not stay";
+      why = `the ${how} pick did not stay`;
     }
   }
-  const seen = read();
-  why = why || (seen.length === 0 ? "no suggestions appeared" : `saw ${seen.length}: ${seen.slice(0, 3).map((r) => clean(r.text).slice(0, 40)).join(" | ")}`);
+  if (!why) {
+    const seen = read();
+    why = seen.length === 0 ? "no suggestions appeared" : `saw ${seen.length}: ${seen.slice(0, 3).map((r) => clean(r.text).slice(0, 40)).join(" | ")}`;
+  }
   typed(input, "");
   input.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
+  return false;
+}
+
+/** A search box: tries a scripted pick first, then a real mouse click through Chrome. True only when the pick stayed. */
+async function pickRow(input: HTMLInputElement, typeText: string, choose: Chooser): Promise<boolean> {
+  if (await pickOnce(input, typeText, choose, "script")) return true;
+  const first = why;
+  if (!(relay ?? extensionRelay())) return false;
+  if (await pickOnce(input, typeText, choose, "mouse")) return true;
+  why = `${first}; ${why}`;
   return false;
 }
 
@@ -454,7 +504,13 @@ async function viaPageWorld(ctx: ApplyContext): Promise<{ filled: string[]; flag
     const onMessage = (event: MessageEvent) => {
       const d = event.data as { source?: string; type?: string; id?: string; report?: { filled: string[]; flagged: FillReport["flagged"] } } | null;
       if (event.source !== win || !d || d.source !== "job-agent-main" || d.id !== id) return;
-      if (d.type === "SR_ACK") {
+      if (d.type === "SR_CLICK") {
+        const click = d as unknown as { req?: string; x?: number; y?: number };
+        const send = extensionRelay();
+        void (send && typeof click.x === "number" && typeof click.y === "number" ? send(click.x, click.y) : Promise.resolve(false)).then((ok) =>
+          win.postMessage({ source: "job-agent", type: "SR_CLICKED", id, req: click.req, ok }, win.location.origin),
+        );
+      } else if (d.type === "SR_ACK") {
         acked = true;
         clearTimeout(ackTimer);
       } else if (d.type === "SR_DONE") {

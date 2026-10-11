@@ -19,6 +19,8 @@ export type ExtensionMessage =
   | { type: "WORKDAY_WAITING" }
   /** From the page: answers the person typed themselves and agreed to keep. */
   | { type: "LEARN_ANSWERS"; answers: { label: string; value: string }[] }
+  /** From a SmartRecruiters page: a real mouse click at these viewport coordinates (for a suggestion the page would not take from a script). */
+  | { type: "TRUSTED_CLICK"; x: number; y: number }
   | { type: "WORKDAY_DONE"; report: import("@/form-engine/types").FillReport | null; stoppedBecause: string };
 
 export interface PairResult {

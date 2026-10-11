@@ -26,6 +26,7 @@ from app.services.jobcache.text import (
     level_of,
     location_fit,
     parse_location_query,
+    place_ref,
     split_titles,
     words,
 )
@@ -68,7 +69,7 @@ def make_query(title: str, weight: float = 1.0) -> TitleQuery | None:
     return TitleQuery(raw=title, stems=stems, terms=terms, level=level_of(title), weight=weight)
 
 
-def build_plan(criteria: Any, extra_titles: list[str] | None = None) -> Plan:
+def build_plan(criteria: Any, extra_titles: list[str] | None = None, extra_places: list[str] | None = None) -> Plan:
     """`criteria` is a JobSearchIn (read by attribute so tests can pass any object with the same fields)."""
     queries: list[TitleQuery] = []
     seen: set[str] = set()
@@ -87,9 +88,12 @@ def build_plan(criteria: Any, extra_titles: list[str] | None = None) -> Plan:
     if getattr(criteria, "target_salary", None):
         floor = int(criteria.target_salary * 0.95)  # same 5% slack the rest of Job Search uses
     excluded = [e.strip().lower() for e in re.split(r"[,;\n]", getattr(criteria, "exclude_companies", None) or "") if e.strip()][:20]
+    loc = parse_location_query(getattr(criteria, "location", None))
+    if loc.cities:  # nearby places only widen a search that names a city
+        loc.near = [r for r in (place_ref(p) for p in extra_places or []) if r][:15]
     return Plan(
         queries=queries,
-        loc=parse_location_query(getattr(criteria, "location", None)),
+        loc=loc,
         work_type=getattr(criteria, "work_type", "any") or "any",
         keywords=keywords,
         pay_floor=floor,

@@ -106,7 +106,7 @@ function FindEmployersBox() {
       <div>
         <p className="text-sm font-extrabold text-ink-900">Find employers by industry and city</p>
         <p className="text-xs text-ink-500">
-          The AI suggests employers with an office or headquarters in those cities. Each one's real job list is read before it is added, so only employers
+          The AI suggests employers with an office or headquarters in those cities or the greater area around them (Boston includes Cambridge and nearby towns). Each one's real job list is read before it is added, so only employers
           with open jobs join the list. Only the words you type are sent. Each search costs a small amount.
         </p>
       </div>

@@ -573,3 +573,63 @@ def test_find_endpoint(app_and_db, monkeypatch):
     assert body["added"][0]["name"] == "Acme Health" and body["total_employers"] == 1 and body["cities"] == ["Boston, MA", "Austin, TX"]
     assert client.post("/api/v1/job-search/employers/find", json={"industry": "Healthcare", "cities": []}).status_code == 422
     assert client.post("/api/v1/job-search/employers/find", json={"industry": "H", "cities": ["Boston"]}).status_code == 422
+
+
+# ---- the greater area around a city ------------------------------------------------------------------------------
+
+def test_a_nearby_place_is_read_as_city_and_state():
+    assert text.place_ref("Cambridge, MA") == ("cambridge", "MA")
+    assert text.place_ref("Arlington, Virginia") == ("arlington", "VA")
+    assert text.place_ref("Somerville") == ("somerville", None)
+    assert text.place_ref("") is None and text.place_ref("MA") is None
+
+
+def test_nearby_cities_rank_above_the_rest_of_the_state_and_cross_state_lines():
+    boston = text.parse_location_query("Boston, MA")
+    boston.near = [text.place_ref("Cambridge, MA"), text.place_ref("Quincy, MA")]
+    fit = lambda q, loc: text.location_fit(q, loc, None)
+    assert fit(boston, "Boston, MA") == 1.0
+    assert fit(boston, "Cambridge, MA") == 0.95
+    assert fit(boston, "US-MA-Quincy") == 0.95
+    assert fit(boston, "Springfield, MA") == 0.7  # same state, not near
+    assert fit(boston, "Cambridge, United Kingdom") == 0.0  # the other Cambridge
+    assert fit(boston, "Cambridge, OH") == 0.0  # wrong state: not the nearby Cambridge
+
+    dc = text.parse_location_query("Washington, DC")
+    assert fit(dc, "Arlington, VA") == 0.0  # without the area, a different state is left out
+    dc.near = [text.place_ref("Arlington, VA")]
+    assert fit(dc, "Arlington, VA") == 0.95
+
+
+def test_search_with_nearby_places_finds_jobs_around_the_city():
+    cache = JobCache()
+    eid, _ = cache.upsert_employer("greenhouse", "acme", "Acme", "user_link")
+    cache.apply_refresh(eid, [post(1, "Revenue Cycle Manager", "Boston, MA"), post(2, "Revenue Cycle Manager", "Cambridge, MA"),
+                              post(3, "Revenue Cycle Manager", "Springfield, MA"), post(4, "Revenue Cycle Manager", "Austin, TX")], 1_000_000)
+    c = crit(location="Boston, MA")
+    plain = {r.row["location"]: r.fit for r in matcher.rank(matcher.build_plan(c), JobCache().candidates("revenue", [], 50, None))}
+    near = {r.row["location"]: r.fit for r in matcher.rank(matcher.build_plan(c, None, ["Cambridge, MA"]), JobCache().candidates("revenue", [], 50, None))}
+    assert "Austin, TX" not in plain and plain["Cambridge, MA"] == plain["Springfield, MA"]
+    assert near["Cambridge, MA"] > near["Springfield, MA"] and near["Boston, MA"] >= near["Cambridge, MA"]
+
+
+def test_the_area_around_a_place_is_asked_once_and_remembered(monkeypatch):
+    import asyncio
+    from app.config import settings
+    from app.services.llm import client as llm_client
+
+    calls = []
+
+    class FakeLLM:
+        async def chat_completion(self, **kw):
+            calls.append(kw["messages"][-1]["content"])
+            return SimpleNamespace(content='Sure: ["Cambridge, MA", "Somerville, MA", "Quincy, MA", "Boston, MA", "nonsense", "Cambridge, MA"]')
+
+    monkeypatch.setattr(llm_client, "LLMClient", FakeLLM)
+    monkeypatch.setattr(settings, "PRIMARY_FAST_MODEL", "m")
+    first = asyncio.run(service.expand_places("Boston, MA"))
+    again = asyncio.run(service.expand_places("Boston, MA"))
+    assert first == again and first[:3] == ["Cambridge, MA", "Somerville, MA", "Quincy, MA"] and first.count("Cambridge, MA") == 1
+    assert len(calls) == 1
+    assert asyncio.run(service.expand_places("remote")) == []  # no city to expand
+    assert asyncio.run(service.expand_places(None)) == [] and len(calls) == 1

@@ -75,14 +75,14 @@ def slug_guesses(company: str) -> list[str]:
 def build_messages(industry: str, city: str) -> list[dict[str, str]]:
     system = (
         "You find employers with web search and report them as JSON. "
-        "List real companies and organizations that currently hire and have their headquarters or an office in the city asked, "
-        "in the industry asked. Include large and mid-size employers, not only the best known. "
+        "List real companies and organizations that currently hire and have their headquarters or an office in the city asked "
+        "or its greater metro area (the nearby cities and suburbs, for example Cambridge and Quincy for Boston), in the industry asked. Include large and mid-size employers, not only the best known. "
         "For each, give the page of its job list or any one of its job postings on its own careers site or hiring system "
         "(Workday, Greenhouse, Lever, Ashby, or its own site) as careers_url, or null if you did not find one. "
         "Never use a job board, recruiter, staffing agency or news page as careers_url. "
         "Use only companies you found in results; never invent a company or a link. Skip duplicates. "
         "Return fewer items rather than weak ones; if none match, return []. "
-        "Reply with ONLY a JSON array. Item keys: company, careers_url, city (where its office or headquarters is)."
+        "Reply with ONLY a JSON array. Item keys: company, careers_url, city (the town or city where its office or headquarters is)."
     )
     user = f"Find up to {PER_CITY} employers.\n- Industry: {industry}\n- City: {city}"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]

@@ -145,6 +145,7 @@ class LocationQuery:
     states: set[str] = field(default_factory=set)
     remote: bool = False
     empty: bool = True
+    near: list[tuple[str, str | None]] = field(default_factory=list)  # nearby places (city, state) that count as "around there"
 
 
 def parse_location_query(text: str | None) -> LocationQuery:
@@ -175,6 +176,18 @@ def parse_location_query(text: str | None) -> LocationQuery:
     if not q.cities and not q.states and not q.remote:
         q.cities = [re.sub(r"\s+", " ", cleaned)] if cleaned.strip() else []
     return q
+
+
+def place_ref(text_: str | None) -> tuple[str, str | None] | None:
+    """"Cambridge, MA" -> ("cambridge", "MA"); "Cambridge" -> ("cambridge", None). None when there is no usable city."""
+    if not text_ or not text_.strip():
+        return None
+    head, _, tail = text_.strip().rpartition(",")
+    city, state = (head, tail) if head else (text_, "")
+    state = state.strip()
+    abbr = state.upper() if state.upper() in US_STATES else STATE_BY_NAME.get(fold(state))
+    city = fold(city if abbr or not state else text_)
+    return (city, abbr) if len(city) > 2 else None
 
 
 def _states_in(location: str) -> set[str]:
@@ -215,6 +228,9 @@ def location_fit(q: LocationQuery, location: str | None, work_type: str | None) 
         if f" {city} " in folded:
             if not wanted_states or not posting_states or wanted_states & posting_states:
                 return 1.0
+    for near_city, near_state in q.near:  # the greater area: Cambridge and Somerville count for a search in Boston
+        if f" {near_city} " in folded and (near_state is None or not posting_states or near_state in posting_states):
+            return 0.95
     if remote_posting and (q.remote or not q.cities):
         return 0.9
     if remote_posting and q.remote:

@@ -22,7 +22,7 @@ from app.services.jobcache import matcher
 from app.services.jobcache.keys import loose_keys, url_key
 from app.services.jobcache.readers import SYSTEMS, ReaderError, Throttle, employer_ref, make_client, read_employer
 from app.services.jobcache.store import JobCache, now_ts
-from app.services.jobcache.text import fold
+from app.services.jobcache.text import fold, parse_location_query, place_ref
 
 log = logging.getLogger("job_cache")
 
@@ -64,10 +64,10 @@ def to_item(scored: matcher.Scored) -> dict[str, Any]:
     }
 
 
-def search_sync(criteria: Any, known_keys: set[str], extra_titles: list[str] | None, pool: int) -> CacheOutcome:
+def search_sync(criteria: Any, known_keys: set[str], extra_titles: list[str] | None, pool: int, extra_places: list[str] | None = None) -> CacheOutcome:
     cache = JobCache()
     coverage = cache.counts()
-    plan = matcher.build_plan(criteria, extra_titles)
+    plan = matcher.build_plan(criteria, extra_titles, extra_places)
     if coverage["postings"] == 0 or not plan.queries:
         return CacheOutcome(coverage=coverage)
     off = disabled_systems()
@@ -138,14 +138,68 @@ async def expand_titles(titles: str) -> list[str]:
     return out[:8]
 
 
+async def expand_places(location: str | None) -> list[str]:
+    """
+    The cities around a place ("Boston, MA" -> Cambridge, Somerville, Quincy ...), so a search for Boston also finds jobs in
+    greater Boston, including across a state line (Washington, DC and Arlington, VA). One small AI call per new place,
+    remembered afterwards; only the place you typed is sent. Returns [] when the AI is not set up or the answer is unusable.
+    """
+    model = settings.JOB_SEARCH_MODEL or settings.PRIMARY_FAST_MODEL
+    if not model or not location or not location.strip():
+        return []
+    query = parse_location_query(location)
+    if not query.cities:
+        return []
+    cache = JobCache()
+    key = "near:" + fold(location)
+    saved = cache.meta_get(key)
+    if saved is not None:
+        try:
+            return [p for p in json.loads(saved) if isinstance(p, str)]
+        except ValueError:
+            return []
+    try:
+        from app.services.llm.client import LLMClient
+
+        result = await LLMClient().chat_completion(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You list the cities and towns that make up the greater metro area around a place, within about 25 miles "
+                        "or a normal commute, where people who work in that place also live and work. Reply with ONLY a JSON array of up to "
+                        "15 strings, each written as City, ST (US state abbreviation), nearest and largest first. Do not repeat the place given. "
+                        "No explanations."
+                    ),
+                },
+                {"role": "user", "content": location.strip()[:120]},
+            ],
+            temperature=0.0,
+            max_tokens=300,
+            timeout=40.0,
+        )
+        text_ = result.content
+        start, end = text_.find("["), text_.rfind("]")
+        data = json.loads(text_[start : end + 1]) if start != -1 and end > start else []
+    except Exception:  # optional: no answer just means the search stays on the place typed
+        return []
+    out: list[str] = []
+    for p in data if isinstance(data, list) else []:
+        if isinstance(p, str) and 3 <= len(p) <= 60 and place_ref(p) and p.strip() not in out:
+            out.append(p.strip())
+    cache.meta_set(key, json.dumps(out[:15]))
+    return out[:15]
+
+
 async def search_cache(criteria: Any, known_keys: set[str], pool: int) -> CacheOutcome:
     """Searches the saved employer lists. Fast whatever their size; the only AI use is the one optional title lookup."""
     cache = JobCache()
     counts = await asyncio.to_thread(cache.counts)
     if counts["postings"] == 0:
         return CacheOutcome(coverage=counts)
-    extra = await expand_titles(criteria.titles)
-    return await asyncio.to_thread(search_sync, criteria, known_keys, extra, pool)
+    extra, places = await asyncio.gather(expand_titles(criteria.titles), expand_places(getattr(criteria, "location", None)))
+    return await asyncio.to_thread(search_sync, criteria, known_keys, extra, pool, places)
 
 
 def record_hits(employer_ids: list[int]) -> None:

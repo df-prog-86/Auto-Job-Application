@@ -725,3 +725,12 @@ def test_the_finder_tries_smartrecruiters_and_rejects_a_guess_that_is_another_co
     out = asyncio.run(finder.find_employers("Finance", ["Boston, MA"]))
     assert [(f.name, f.system) for f in out.added] == [("Visa", "smartrecruiters")]
     assert sorted(out.unreadable) == ["Delta", "Delta Air Lines"]  # "Delta" found Delta Dental's list: a different company, so it is left out
+
+
+def test_a_smartrecruiters_form_address_names_the_company_of_the_saved_posting():
+    from app.services.apply.questions import smartrecruiters_company as company
+
+    posting = "https://jobs.smartrecruiters.com/BostonMedicalCenter/109741273-senior-financial-analyst"
+    form = "https://jobs.smartrecruiters.com/oneclick-ui/company/BostonMedicalCenter/publication/2c4fbfd7-7bb8-4699-9fa2-ccacc65e17fb?dcr_ci=BostonMedicalCenter"
+    assert company(posting) == company(form) == "bostonmedicalcenter"
+    assert company("https://jobs.lever.co/acme/123") is None and company("https://jobs.smartrecruiters.com/oneclick-ui") is None

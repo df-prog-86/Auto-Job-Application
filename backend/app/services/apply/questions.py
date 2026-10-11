@@ -59,6 +59,19 @@ def workday_req_id(url: str) -> str | None:
     return match.group(1).lower() if match else None
 
 
+def smartrecruiters_company(url: str) -> str | None:
+    """The company in a SmartRecruiters posting (/Company/123-title) or application (/oneclick-ui/company/Company/publication/...) link."""
+    parts = urlsplit(url or "")
+    if parts.netloc.lower() != "jobs.smartrecruiters.com":
+        return None
+    segs = [p for p in parts.path.split("/") if p]
+    if len(segs) >= 3 and segs[0] == "oneclick-ui" and segs[1] == "company":
+        return segs[2].lower()
+    if segs and segs[0] != "oneclick-ui":
+        return segs[0].lower()
+    return None
+
+
 def urls_match(page_url: str, job_url: str) -> bool:
     """Exact (ignoring query, fragment and trailing slash), or the same Greenhouse or Workday job id."""
     if normalize_url(page_url) == normalize_url(job_url):

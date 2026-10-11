@@ -4,6 +4,8 @@
  * values are written here.
  */
 
+import { deepLabel, deepQueryAll, insideHost, shadowHost } from "@/form-engine/deep";
+
 export type FieldKind = "text" | "textarea" | "select" | "combobox" | "radio" | "checkbox" | "file" | "yesno" | "dropdown";
 
 export interface FormField {
@@ -68,7 +70,7 @@ function rawLabel(el: HTMLElement, doc: Document): string {
   // Some forms (Ashby) wrap each question in a field entry whose label is not linked to the box.
   const entryLabel = el.closest("[class*='field-entry'], [class*='fieldEntry']")?.querySelector("label");
   if (entryLabel && clean(labelText(entryLabel))) return labelText(entryLabel);
-  return "";
+  return deepLabel(el); // SmartRecruiters: the label sits on the web component that wraps the box
 }
 
 /** True when the question's own label is styled as required (the star is often CSS, not text). */
@@ -117,7 +119,9 @@ export function discoverFields(doc: Document): FormField[] {
   const fields: FormField[] = [];
   const seenRadioGroups = new Set<string>();
 
-  const controls = Array.from(doc.querySelectorAll<HTMLElement>("input, textarea, select"));
+  // Only SmartRecruiters draws its form inside shadow roots; every other site is read from the page itself, as before.
+  const deep = doc.location?.hostname === "jobs.smartrecruiters.com";
+  const controls = deep ? deepQueryAll<HTMLElement>(doc, "input, textarea, select") : Array.from(doc.querySelectorAll<HTMLElement>("input, textarea, select"));
   for (const el of controls) {
     const tag = el.tagName.toLowerCase();
     const inputType = tag === "input" ? ((el as HTMLInputElement).type || "text").toLowerCase() : tag;
@@ -128,6 +132,13 @@ export function discoverFields(doc: Document): FormField[] {
     if (inputType !== "file" && !isVisible(el)) continue;
     // react-select keeps a hidden "requiredInput" twin next to every combobox.
     if (el.getAttribute("tabindex") === "-1" && el.getAttribute("role") !== "combobox" && inputType !== "file") continue;
+
+    const host = deep ? shadowHost(el) : null;
+    if (host) {
+      // Parts of a web component with no question of their own (the phone's country search box) are not fields, and a
+      // typeahead like City needs a suggestion picked, which is left to the person.
+      if (!deepLabel(el) || insideHost(el, "spl-autocomplete")) continue;
+    }
 
     const autocomplete = (el.getAttribute("autocomplete") ?? "").toLowerCase();
 
@@ -166,7 +177,7 @@ export function discoverFields(doc: Document): FormField[] {
         kind: "checkbox",
         el,
         group: [],
-        outlineEl: el,
+        outlineEl: (host as HTMLElement | null) ?? el,
         label: clean(raw),
         name,
         id: el.id,
@@ -178,7 +189,7 @@ export function discoverFields(doc: Document): FormField[] {
       continue;
     }
 
-    const raw = rawLabel(el, doc) || el.getAttribute("placeholder") || "";
+    const raw = rawLabel(el, doc) || (host ? "" : el.getAttribute("placeholder")) || "";
     let label = clean(raw);
     // A hidden upload input is often unlabeled; its id/name ("resume") still says what it is.
     if (!label && inputType === "file" && el.closest("[data-automation-id*='resume' i]")) label = "Resume";
@@ -206,8 +217,9 @@ export function discoverFields(doc: Document): FormField[] {
         .map((o) => clean(o.textContent));
     } else if (isCombobox) kind = "combobox";
 
-    const wrapper =
-      kind === "file" || kind === "combobox"
+    const wrapper = host
+      ? (host as HTMLElement)
+      : kind === "file" || kind === "combobox"
         ? ((el.closest("[class*='select'], [class*='upload'], [class*='file'], .field, .input-wrapper") as HTMLElement | null) ??
           el.parentElement ??
           el)

@@ -11,7 +11,8 @@ import { isSubmitLike, safeClick } from "@/form-engine/safety";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function fire(el: HTMLElement, types: string[]): void {
-  for (const type of types) el.dispatchEvent(new Event(type, { bubbles: true }));
+  // composed lets the event leave a shadow root (SmartRecruiters); it changes nothing on an ordinary page.
+  for (const type of types) el.dispatchEvent(new Event(type, { bubbles: true, composed: true }));
 }
 
 export function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {

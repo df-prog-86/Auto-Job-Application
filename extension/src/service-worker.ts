@@ -38,7 +38,7 @@ function readJobPostingFromPage(bodyTextLimit: number): CapturedPage {
     // Only links that point at a hiring system's posting, so the saved job applies through the real application page.
     applyLinks: Array.from(document.querySelectorAll("a[href]"))
       .map((a) => (a as HTMLAnchorElement).href)
-      .filter((h) => /^https:\/\/[^/]*(myworkdayjobs\.com|greenhouse\.io|ashbyhq\.com|lever\.co)\//i.test(h))
+      .filter((h) => /^https:\/\/[^/]*(myworkdayjobs\.com|greenhouse\.io|ashbyhq\.com|lever\.co|smartrecruiters\.com)\//i.test(h))
       .slice(0, 20),
   };
 }
@@ -319,18 +319,49 @@ async function completeWorkdayApplication(jobId: number, url: string): Promise<v
   if (now.status === "complete") await startWorkdayWalker(run);
 }
 
+/**
+ * A SmartRecruiters posting shows the job first; its form lives at ".../oneclick-ui/...", behind the "I'm interested" link.
+ * Follows that link (a plain page move, no click on anything that sends an application), then waits for the form page.
+ */
+async function openSmartRecruitersForm(tabId: number): Promise<void> {
+  const tab = await chrome.tabs.get(tabId);
+  if (!tab.url) return;
+  const here = new URL(tab.url);
+  if (here.hostname !== "jobs.smartrecruiters.com" || here.pathname.startsWith("/oneclick-ui/")) return;
+  const [res] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const a = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href*='/oneclick-ui/']")).find((x) => x.hostname === "jobs.smartrecruiters.com");
+      return a ? a.href : null;
+    },
+  });
+  const form = typeof res?.result === "string" ? res.result : null;
+  if (!form) return;
+  await chrome.tabs.update(tabId, { url: form });
+  await waitForTabComplete(tabId, 30000);
+}
+
 async function completeApplication(jobId: number, url: string): Promise<void> {
   if (isWorkdayUrl(url)) return completeWorkdayApplication(jobId, url);
   const tab = await chrome.tabs.create({ url: applicationUrlFor(url), active: true });
   if (tab.id === undefined) return;
   const tabId = tab.id;
   await waitForTabComplete(tabId, 30000);
+  await openSmartRecruitersForm(tabId);
 
   // Application forms often render a moment after the page "loads".
   for (let i = 0; i < 20; i++) {
     const [res] = await chrome.scripting.executeScript({
       target: { tabId },
-      func: () => document.querySelectorAll("input, textarea, select").length > 3,
+      // Counts boxes inside shadow roots too (SmartRecruiters); on any other page this is the same count as before.
+      func: () => {
+        const count = (root: ParentNode): number => {
+          let n = root.querySelectorAll("input, textarea, select").length;
+          for (const el of Array.from(root.querySelectorAll("*"))) if (el.shadowRoot) n += count(el.shadowRoot);
+          return n;
+        };
+        return count(document) > 3;
+      },
     });
     if (res?.result) break;
     await new Promise((r) => setTimeout(r, 500));

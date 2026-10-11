@@ -1,0 +1,90 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Easy apply - Senior Financial Analyst - Boston Medical Center</title></head>
+<body>
+<!--
+  A replica of SmartRecruiters' one-click application form (jobs.smartrecruiters.com/oneclick-ui/...): every question is a
+  custom element whose real input box lives inside an open shadow root. Structure and attribute names follow the live form.
+-->
+<main>
+  <h1>Senior Financial Analyst</h1>
+  <spl-typography-title>Easy Apply</spl-typography-title>
+  <spl-dropzone data-test="apply-with-resume-container"></spl-dropzone>
+  <button type="button">Apply With Indeed</button>
+  <spl-typography-title>Personal information</spl-typography-title>
+  <button type="button" aria-label="Upload profile image"></button>
+  <input type="file" aria-label="Upload profile image" id="profile-image">
+  <spl-input label="First name" input-id="first-name-input" type="text" required></spl-input>
+  <spl-input label="Last name" input-id="last-name-input" type="text" required></spl-input>
+  <spl-input label="Email" input-id="email-input" type="email" required></spl-input>
+  <spl-input label="Confirm your email" input-id="confirm-email-input" type="email" required></spl-input>
+  <spl-autocomplete label="City"></spl-autocomplete>
+  <spl-phone-field label="Phone number"></spl-phone-field>
+  <spl-typography-title>Your Profiles</spl-typography-title>
+  <spl-input label="LinkedIn" input-id="linkedin-input" type="text"></spl-input>
+  <spl-input label="Facebook" input-id="facebook-input" type="text"></spl-input>
+  <spl-input label="X (fka Twitter)" input-id="twitter-input" type="text"></spl-input>
+  <spl-input label="Website" input-id="website-input" type="text"></spl-input>
+  <spl-typography-title>Resume</spl-typography-title>
+  <spl-dropzone data-test="resume-upload"></spl-dropzone>
+  <spl-typography-title>Message to the Hiring Team</spl-typography-title>
+  <spl-textarea label="Let the company know about your interest working there"></spl-textarea>
+  <spl-checkbox>Please be informed that your application to this job offer will trigger some processing of your personal data by the recruiting company, the data controller. For more information, please refer to the recruiting company's privacy notice.</spl-checkbox>
+  <button id="submit" type="submit">Submit</button>
+</main>
+<script>
+  window.__submitClicks = 0;
+  document.getElementById("submit").addEventListener("click", () => { window.__submitClicks++; });
+
+  class SplInput extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({ mode: "open" });
+      const required = this.hasAttribute("required");
+      root.innerHTML = `<label>${this.getAttribute("label")}</label><input id="${this.getAttribute("input-id") || ""}" type="${this.getAttribute("type") || "text"}" ${required ? "required" : ""}>`;
+      const input = root.querySelector("input");
+      // Like the real component, it listens to the input event inside its own shadow root.
+      input.addEventListener("input", () => { this.value = input.value; });
+    }
+  }
+  class SplTextarea extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({ mode: "open" });
+      root.innerHTML = `<label>${this.getAttribute("label")}</label><textarea id="hiring-manager-message-input"></textarea>`;
+    }
+  }
+  class SplCheckbox extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({ mode: "open" });
+      root.innerHTML = `<input type="checkbox" id="noPolicy" required><slot></slot>`;
+    }
+  }
+  class SplDropzone extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({ mode: "open" });
+      root.innerHTML = `<span>Choose a file or drop it here</span><input type="file" id="dz-${this.getAttribute("data-test")}">`;
+    }
+  }
+  class SplAutocomplete extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({ mode: "open" });
+      root.innerHTML = `<spl-input label="${this.getAttribute("label")}" input-id="spl-form-element_10" type="text"></spl-input>`;
+    }
+  }
+  class SplPhoneField extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({ mode: "open" });
+      // The country code picker has its own search box with no question of its own; the national number is a normal spl-input.
+      root.innerHTML = `<spl-select><button type="submit" id="country-code">Country code</button></spl-select>
+        <spl-dropdown-search></spl-dropdown-search>
+        <spl-input label="${this.getAttribute("label")}" input-id="spl-form-element_5" type="tel"></spl-input>`;
+    }
+  }
+  class SplSelect extends HTMLElement {}
+  class SplDropdownSearch extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({ mode: "open" });
+      root.innerHTML = `<input type="text" id="country-search" placeholder="Search">`;
+    }
+  }
+  for (const [n, c] of Object.entries({ "spl-input": SplInput, "spl-textarea": SplTextarea, "spl-checkbox": SplCheckbox, "spl-dropzone": SplDropzone, "spl-autocomplete": SplAutocomplete, "spl-phone-field": SplPhoneField, "spl-select": SplSelect, "spl-dropdown-search": SplDropdownSearch })) customElements.define(n, c);
+</script>
+</body></html>

@@ -32,7 +32,7 @@ from app.schemas.apply import (
     ApplyResume,
     CandidateFacts,
 )
-from app.services.apply.questions import answer_key_for, normalize_question, urls_match
+from app.services.apply.questions import answer_key_for, normalize_question, smartrecruiters_company, urls_match
 from app.services.resume.role_bullets import match_bullets, resume_roles
 from app.services.resume.service import is_safe_document_path
 
@@ -166,6 +166,11 @@ def get_apply_context(payload: ApplyContextIn, db: Session = Depends(get_db)) ->
         job = next((j for j in jobs if j.id == payload.job_id), None)
     if job is None:
         job = next((j for j in jobs if urls_match(payload.url, j.canonical_application_url)), None)
+    if job is None:
+        # A SmartRecruiters form address names the company but not the posting, so it matches only when exactly one saved job is theirs.
+        company = smartrecruiters_company(payload.url)
+        same = [j for j in jobs if company and smartrecruiters_company(j.canonical_application_url) == company]
+        job = same[0] if len(same) == 1 else None
 
     if job is None:
         return ApplyContextOut(

@@ -4,7 +4,7 @@
  * too, so a mismatch fails closed rather than open).
  */
 const SUPPORTED_SUFFIXES = ["greenhouse.io", "myworkdayjobs.com"];
-const SUPPORTED_EXACT = ["jobs.ashbyhq.com", "jobs.lever.co", "jobs.eu.lever.co"];
+const SUPPORTED_EXACT = ["jobs.ashbyhq.com", "jobs.lever.co", "jobs.eu.lever.co", "jobs.smartrecruiters.com"];
 
 export function isSupportedApplicationUrl(raw: string): boolean {
   let url: URL;

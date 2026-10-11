@@ -164,6 +164,21 @@ function key(input: HTMLInputElement, name: string, code: number): void {
 
 type How = "click" | "keys";
 
+/** Waits until the suggestion rows have stopped being redrawn (the same row elements for 1.2 seconds, at most 7 seconds). */
+async function settled(read: () => Row[]): Promise<void> {
+  let last = read().map((r) => r.el);
+  let since = Date.now();
+  const end = Date.now() + 7000;
+  while (Date.now() < end && Date.now() - since < 1200) {
+    await sleep(200);
+    const now = read().map((r) => r.el);
+    if (now.length !== last.length || now.some((el, i) => el !== last[i])) {
+      last = now;
+      since = Date.now();
+    }
+  }
+}
+
 async function pickOnce(input: HTMLInputElement, typeText: string, choose: Chooser, how: How): Promise<boolean> {
   why = "";
   typed(input, typeText.trim());
@@ -174,23 +189,38 @@ async function pickOnce(input: HTMLInputElement, typeText: string, choose: Choos
     return list ? inside(list, "spl-select-option").map((el) => ({ el, text: clean(deepText(el)) })) : [];
   };
   await waitFor(() => (read().length > 0 ? true : null), 32, 125);
-  await sleep(600); // more suggestions can still arrive after the first
+  await settled(read);
   let rows = read();
   let pick = choose(rows);
   if (!pick) {
     await sleep(900);
+    await settled(read);
     rows = read();
     pick = choose(rows);
   }
+  const closed = () => input.getAttribute("aria-expanded") === "false";
   if (pick) {
     if (how === "click") {
-      press(pick);
-      await sleep(300);
-      if (clean(input.value) === "") pick.click(); // the plain click, in case the full press was not enough
+      // The list is redrawn when later suggestions arrive, which makes a row picked earlier a dead one: pick from the
+      // current rows each time, and count it done only when the page closes the list.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) {
+          await settled(read);
+          rows = read();
+          pick = choose(rows);
+          if (!pick) break;
+        }
+        press(pick);
+        await sleep(350);
+        if (closed()) break;
+        pick.click(); // the plain click, in case the full press was not enough
+        await sleep(350);
+        if (closed()) break;
+      }
     } else {
       // The way a person would with the keyboard: arrow down to the row, then Enter.
       input.focus();
-      const at = rows.findIndex((r) => r.el === pick);
+      const at = Math.max(0, rows.findIndex((r) => r.el === pick));
       for (let i = 0; i < at; i++) {
         key(input, "ArrowDown", 40);
         await sleep(80);
@@ -205,8 +235,8 @@ async function pickOnce(input: HTMLInputElement, typeText: string, choose: Choos
       input.dispatchEvent(new FocusEvent("focusout", { bubbles: true, composed: true }));
       await sleep(500);
       const error = boxError(input);
-      if (clean(input.value) !== "" && !error) return true;
-      why = error ? `the ${how} pick was not accepted: ${error}` : `the ${how} pick did not stay`;
+      if (clean(input.value) !== "" && !error && !(input.getAttribute("aria-expanded") === "true")) return true;
+      why = error ? `the ${how} pick was not accepted: ${error}` : input.getAttribute("aria-expanded") === "true" ? `the ${how} pick left the list open` : `the ${how} pick did not stay`;
     }
   }
   if (!why) {

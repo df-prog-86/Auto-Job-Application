@@ -264,3 +264,14 @@ test("when the page ignores clicks and only takes a pick made with the keyboard,
   assert.equal(entries[0].Institution, "Babson College");
   await page.close();
 });
+
+test("a suggestion list that is redrawn after it first appears still gets its top row picked", async () => {
+  const page = await open(FORM_URL + "&slow=1");
+  await page.evaluate(bundle);
+  const report = await page.evaluate(([c, r]) => window.__jobAgentFill(c, r), [withHistory({ experience: JOBS.slice(0, 1), education: SCHOOLS.slice(1, 2) }), resume]);
+  const entries = await page.evaluate(() => window.__entries);
+  assert.equal(entries.length, 2, JSON.stringify(report.flagged));
+  assert.equal(entries[0].Title, "Financial Analyst");
+  assert.equal(entries[1].Institution, "Babson College");
+  await page.close();
+});

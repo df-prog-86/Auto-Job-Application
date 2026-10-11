@@ -121,6 +121,11 @@
         }
         if (this.hasAttribute("notyped")) { const o = document.createElement("spl-select-option"); o.textContent = "Cannot find your city? Click here to fill in manually"; list.append(o); }
         input.setAttribute("aria-expanded", "true");
+        // slow: the list is drawn again a moment later (later suggestions arrive), so rows drawn first become dead.
+        if (new URLSearchParams(location.search).has("slow") && !input.dataset.redrawn) {
+          input.dataset.redrawn = "1";
+          setTimeout(() => { delete input.dataset.redrawn; if (input.getAttribute("aria-expanded") === "true" && input.value.trim() === text) { input.dataset.redrawn = "1"; input.dispatchEvent(new Event("input")); } }, 1700);
+        }
       });
     }
   }

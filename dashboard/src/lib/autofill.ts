@@ -11,6 +11,7 @@ const EXACT: { host: string; name: string }[] = [
   { host: "jobs.ashbyhq.com", name: "Ashby" },
   { host: "jobs.lever.co", name: "Lever" },
   { host: "jobs.eu.lever.co", name: "Lever" },
+  { host: "jobs.smartrecruiters.com", name: "SmartRecruiters" },
 ];
 
 /** The site's name when the extension can fill applications there, otherwise null. */

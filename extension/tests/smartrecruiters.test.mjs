@@ -180,3 +180,25 @@ test("a section that already has an entry is never touched", async () => {
   assert.equal(entries.filter((e) => e.kind === "education").length, 3);
   await page.close();
 });
+
+test("an expired SmartRecruiters job is recognized, and a live page or another site is not", async () => {
+  const out = await build({
+    stdin: { contents: `import { pageIsExpiredSmartRecruiters as f } from "@/form-engine/expired"; window.__expired = f;`, resolveDir: root, loader: "ts" },
+    bundle: true, format: "iife", write: false, tsconfig: resolve(root, "tsconfig.json"),
+  });
+  const code = out.outputFiles[0].text;
+  const check = async (host, path, body, title = "Job") => {
+    const page = await browser.newPage();
+    await page.route(`https://${host}/**`, (route) => route.fulfill({ contentType: "text/html", body: `<!doctype html><title>${title}</title><body>${body}</body>` }));
+    await page.goto(`https://${host}${path}`);
+    await page.evaluate(code);
+    const result = await page.evaluate(() => window.__expired());
+    await page.close();
+    return result;
+  };
+  const posting = "/WynnResorts/744000132299989-financial-analyst";
+  assert.equal(await check("jobs.smartrecruiters.com", posting, "<h1>Financial Analyst</h1><p>Compensation</p><p>This job has expired</p><p>Sorry, this job has expired</p>"), true, "an expired posting page");
+  assert.equal(await check("jobs.smartrecruiters.com", "/oneclick-ui/company/X/publication/1/expired", "<p>Nothing here</p>", "This job ad has expired"), true, "the form address that redirects to /expired");
+  assert.equal(await check("jobs.smartrecruiters.com", posting, "<h1>Financial Analyst</h1><a>I'm interested</a>"), false, "a live posting");
+  assert.equal(await check("example.com", posting, "<p>This job has expired</p>"), false, "another site is never judged");
+});

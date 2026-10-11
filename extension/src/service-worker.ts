@@ -13,6 +13,7 @@
 import { backend, downloadDocumentBase64 } from "@/backend-client";
 import type { ApplyContext, FillReport } from "@/form-engine/types";
 import type { CapturedPage, ExtensionMessage, FillPageResult } from "@/messaging/types";
+import { pageIsExpiredSmartRecruiters } from "@/form-engine/expired";
 import { looksSubmitted } from "@/form-engine/submitted";
 import { isSupportedApplicationUrl } from "@/security/ats-hosts";
 import { getStoredToken, setStoredToken } from "@/security/token-store";
@@ -341,6 +342,16 @@ async function openSmartRecruitersForm(tabId: number): Promise<void> {
   await waitForTabComplete(tabId, 30000);
 }
 
+/** True when the tab is a SmartRecruiters page saying the job has expired. Any problem reading the page counts as "no". */
+async function smartRecruitersExpired(tabId: number): Promise<boolean> {
+  try {
+    const [res] = await chrome.scripting.executeScript({ target: { tabId }, func: pageIsExpiredSmartRecruiters });
+    return res?.result === true;
+  } catch {
+    return false;
+  }
+}
+
 async function completeApplication(jobId: number, url: string): Promise<void> {
   if (isWorkdayUrl(url)) return completeWorkdayApplication(jobId, url);
   const tab = await chrome.tabs.create({ url: applicationUrlFor(url), active: true });
@@ -348,6 +359,10 @@ async function completeApplication(jobId: number, url: string): Promise<void> {
   const tabId = tab.id;
   await waitForTabComplete(tabId, 30000);
   await openSmartRecruitersForm(tabId);
+  if (await smartRecruitersExpired(tabId)) {
+    notify("This job has expired", "SmartRecruiters has closed this posting, so there is no application to fill. You can remove it from your list.");
+    return;
+  }
 
   // Application forms often render a moment after the page "loads".
   for (let i = 0; i < 20; i++) {

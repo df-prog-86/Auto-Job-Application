@@ -45,6 +45,18 @@ export function showBanner(doc: Document, filled: number, needYou: number): void
   close.type = "button";
   close.textContent = "Clear highlights";
   close.addEventListener("click", () => clearMarks(doc));
+  const build = doc.createElement("div");
+  let version = "";
+  try {
+    version = chrome.runtime.getManifest().version;
+  } catch {
+    /* not running inside the extension (tests) */
+  }
+  if (version) {
+    build.textContent = `Job Agent extension ${version}`;
+    build.style.cssText = "margin-top:6px;font-size:11px;opacity:.55";
+  }
   banner.append(title, body, close);
+  if (version) banner.append(build);
   doc.body.appendChild(banner);
 }

@@ -101,8 +101,6 @@
       const input = root.querySelector("input");
       const list = root.querySelector("div");
       const suggest = JSON.parse(this.getAttribute("suggest") || "[]");
-      // Like the live page, in the strict modes: leaving the box with text that was never picked empties it again.
-      input.addEventListener("blur", () => { if (new URLSearchParams(location.search).has("trusted") && input.dataset.picked !== input.value) input.value = ""; });
       input.addEventListener("input", () => {
         const text = input.value.trim();
         list.innerHTML = "";
@@ -118,7 +116,7 @@
         for (const [value, shown] of rows) {
           const o = document.createElement("spl-select-option");
           o.textContent = shown;
-          o.addEventListener(new URLSearchParams(location.search).has("plain") ? "mousedown" : "click", (e) => { if (new URLSearchParams(location.search).has("trusted") && !e.isTrusted) return; input.value = value; input.dataset.picked = value; list.innerHTML = ""; input.setAttribute("aria-expanded", "false"); });
+          o.addEventListener(new URLSearchParams(location.search).has("plain") ? "mousedown" : "click", () => { input.value = value; list.innerHTML = ""; input.setAttribute("aria-expanded", "false"); });
           list.append(o);
         }
         if (this.hasAttribute("notyped")) { const o = document.createElement("spl-select-option"); o.textContent = "Cannot find your city? Click here to fill in manually"; list.append(o); }

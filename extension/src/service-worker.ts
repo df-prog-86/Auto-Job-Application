@@ -426,32 +426,6 @@ function extensionOrigin(): string {
   return `chrome-extension://${chrome.runtime.id}`;
 }
 
-/** Presses and releases the left mouse button at a point of the tab, through Chrome's own input (the same route Playwright uses). */
-async function clickWithMouse(tabId: number, x: number, y: number): Promise<boolean> {
-  const target = { tabId };
-  try {
-    await chrome.debugger.attach(target, "1.3");
-  } catch {
-    return false;
-  }
-  try {
-    const mouse = (type: string, extra: Record<string, unknown> = {}) =>
-      chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type, x, y, button: "left", ...extra });
-    await mouse("mouseMoved", { button: "none" });
-    await mouse("mousePressed", { buttons: 1, clickCount: 1 });
-    await mouse("mouseReleased", { buttons: 0, clickCount: 1 });
-    return true;
-  } catch {
-    return false;
-  } finally {
-    try {
-      await chrome.debugger.detach(target);
-    } catch {
-      /* already detached */
-    }
-  }
-}
-
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendResponse) => {
   switch (message.type) {
     case "COMPLETE_APPLICATION": {
@@ -486,24 +460,6 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
           .catch(() => notify("Couldn't save the answers", "Make sure the app is running, then try again."));
       }
       return false;
-
-    case "TRUSTED_CLICK": {
-      // One real mouse click, only on a SmartRecruiters tab, only from this extension's own page script.
-      let host = "";
-      try {
-        host = new URL(sender.tab?.url ?? "").hostname;
-      } catch {
-        /* no usable address */
-      }
-      const tabId = sender.tab?.id;
-      const { x, y } = message;
-      if (sender.id !== chrome.runtime.id || tabId === undefined || host !== "jobs.smartrecruiters.com" || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 20000 || y > 20000) {
-        sendResponse({ ok: false });
-        return false;
-      }
-      void clickWithMouse(tabId, x, y).then((ok) => sendResponse({ ok }));
-      return true;
-    }
 
     case "WORKDAY_WAITING":
       if (sender.id === chrome.runtime.id && sender.tab) {

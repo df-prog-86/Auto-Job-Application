@@ -39,7 +39,9 @@
     connectedCallback() {
       const root = this.attachShadow({ mode: "open" });
       const required = this.hasAttribute("required");
-      root.innerHTML = `<label>${this.getAttribute("label")}</label><input id="${this.getAttribute("input-id") || ""}" type="${this.getAttribute("type") || "text"}" ${required ? "required" : ""}>`;
+      // Like the real phone box, an inner spl-input may have no label of its own and carry the question as aria-label instead.
+      const aria = this.getAttribute("aria");
+      root.innerHTML = `${this.hasAttribute("label") ? `<label>${this.getAttribute("label")}</label>` : ""}<input id="${this.getAttribute("input-id") || ""}" type="${this.getAttribute("type") || "text"}" ${aria ? `aria-label="${aria}"` : ""} ${required ? "required" : ""}>`;
       const input = root.querySelector("input");
       // Like the real component, it listens to the input event inside its own shadow root.
       input.addEventListener("input", () => { this.value = input.value; });
@@ -75,14 +77,14 @@
       // The country code picker has its own search box with no question of its own; the national number is a normal spl-input.
       root.innerHTML = `<spl-select><button type="submit" id="country-code">Country code</button></spl-select>
         <spl-dropdown-search></spl-dropdown-search>
-        <spl-input label="${this.getAttribute("label")}" input-id="spl-form-element_5" type="tel"></spl-input>`;
+        <spl-input aria="${this.getAttribute("label")}" input-id="spl-form-element_5" type="tel"></spl-input>`;
     }
   }
   class SplSelect extends HTMLElement {}
   class SplDropdownSearch extends HTMLElement {
     connectedCallback() {
       const root = this.attachShadow({ mode: "open" });
-      root.innerHTML = `<input type="text" id="country-search" placeholder="Search">`;
+      root.innerHTML = `<input type="text" id="country-search" placeholder="Search by country/region or code" aria-label="Search by country/region or code">`;
     }
   }
   for (const [n, c] of Object.entries({ "spl-input": SplInput, "spl-textarea": SplTextarea, "spl-checkbox": SplCheckbox, "spl-dropzone": SplDropzone, "spl-autocomplete": SplAutocomplete, "spl-phone-field": SplPhoneField, "spl-select": SplSelect, "spl-dropdown-search": SplDropdownSearch })) customElements.define(n, c);

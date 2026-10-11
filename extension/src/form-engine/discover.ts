@@ -137,7 +137,9 @@ export function discoverFields(doc: Document): FormField[] {
     if (host) {
       // Parts of a web component with no question of their own (the phone's country search box) are not fields, and a
       // typeahead like City needs a suggestion picked, which is left to the person.
-      if (!deepLabel(el) || insideHost(el, "spl-autocomplete")) continue;
+      // The phone's number box has no label on its own wrapper but carries the question as its aria-label.
+      if (insideHost(el, "spl-autocomplete") || insideHost(el, "spl-dropdown-search")) continue;
+      if (!deepLabel(el) && !(el.getAttribute("aria-label") ?? "").trim()) continue;
     }
 
     const autocomplete = (el.getAttribute("autocomplete") ?? "").toLowerCase();

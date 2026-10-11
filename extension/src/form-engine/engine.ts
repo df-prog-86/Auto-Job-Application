@@ -17,6 +17,7 @@ import { base64ToFile, currentValue, fillCheckbox, fillField, fillFile, readComb
 import { clearMarks, mark, showBanner } from "@/form-engine/highlight";
 import { trackFlagged } from "@/form-engine/learn";
 import { flagUncovered } from "@/form-engine/uncovered";
+import { fillSmartRecruitersHistory } from "@/form-engine/smartrecruiters-history";
 import { fillHistory, isDateInput } from "@/form-engine/workday-history";
 import type { ApplyContext, FillReport } from "@/form-engine/types";
 
@@ -38,6 +39,7 @@ export async function fillPage(
 
   // Work Experience / Education rows are filled as a set first; the general pass then leaves them alone.
   const history = await fillHistory(doc, ctx, report);
+  await fillSmartRecruitersHistory(doc, ctx, report); // only does anything on jobs.smartrecruiters.com
   const fields = discoverFields(doc);
   // The federal disability form (CC-305) is signed by the person: its name and date are never filled.
   const disabilityForm = /self-identification of disability/i.test(doc.body?.innerText ?? "");

@@ -95,3 +95,72 @@ test("an application link is only filled on the real SmartRecruiters host, and n
   assert.equal(await deepValue(page, "email-input"), "");
   await page.close();
 });
+
+const withHistory = (extra) => ({ ...ctx(), ...extra });
+const JOBS = [
+  { title: "Financial Analyst", employer: "Huron", location: "Boston, MA", start_date: "2019-03", end_date: "2021-08", current: false, description: "- Built models\n- Led the close" },
+  { title: "Senior Associate", employer: "Chartis", location: null, start_date: "2021-09", end_date: null, current: true, description: "Advised health systems" },
+];
+const SCHOOLS = [{ institution: "Boston College", degree: "Bachelor of Science", field: "Finance", start_date: "2013-09", end_date: "2017" }];
+
+test("adds Experience and Education entries from the saved resume, saving each, and never submits", async () => {
+  const page = await open();
+  await page.evaluate(bundle);
+  const report = await page.evaluate(([c, r]) => window.__jobAgentFill(c, r), [withHistory({ experience: JOBS, education: SCHOOLS }), resume]);
+  const entries = await page.evaluate(() => window.__entries);
+
+  assert.equal(entries.length, 3, "two jobs and one school were saved");
+  const [job1, job2, school] = entries;
+  assert.equal(job1.Title, "Financial Analyst");
+  assert.equal(job1.Company, "Huron", "the exact text is picked, never a similar-looking suggestion (Huron Consulting Group)");
+  assert.equal(job1["Office location"], "Boston, MA");
+  assert.equal(job1.from, "2019-03-01");
+  assert.equal(job1.to, "2021-08-01");
+  assert.match(job1.description, /Built models/);
+  assert.equal(job2.Title, "Senior Associate");
+  assert.equal(job2.current, true, "a current job is ticked instead of given an end date");
+  assert.ok(!job2.to, "no end date was written for the current job");
+  assert.equal(school.Institution, "Boston College");
+  assert.equal(school.Major, "Finance");
+  assert.equal(school.Degree, "Bachelor of Science");
+  assert.equal(school.from, "2013-09-01");
+  assert.ok(!school.to, "a graduation year with no month is not turned into an invented month");
+
+  assert.ok(report.filled.includes("Experience 1: saved") && report.filled.includes("Education 1: saved"));
+  assert.equal(await page.evaluate(() => window.__saveClicks), 3, "only each entry's own Save was pressed");
+  assert.equal(await page.evaluate(() => window.__submitClicks), 0);
+  // The general pass leaves the (now closed) entry forms alone and still does the rest of the page.
+  assert.equal(await deepValue(page, "first-name-input"), "Jane");
+  await page.close();
+});
+
+test("a required date that is not on the resume stops that section: the form is left open and flagged, nothing is guessed", async () => {
+  const page = await open();
+  await page.evaluate(bundle);
+  const jobs = [{ ...JOBS[0], end_date: null }, JOBS[1]];
+  const report = await page.evaluate(([c, r]) => window.__jobAgentFill(c, r), [withHistory({ experience: jobs, education: SCHOOLS }), resume]);
+  const entries = await page.evaluate(() => window.__entries);
+
+  assert.equal(entries.filter((e) => e.kind === "experience").length, 0, "the incomplete job was not saved, and the next job was not started");
+  assert.ok(report.flagged.some((f) => /Experience 1: To/.test(f.label)), "the missing end date is flagged");
+  const forms = await page.evaluate(() => document.querySelector("oc-experience").shadowRoot.querySelectorAll("oc-experience-edit-form").length);
+  assert.equal(forms, 1, "the form stays open for the person to finish");
+  assert.equal(entries.filter((e) => e.kind === "education").length, 1, "the other section still fills");
+  assert.equal(await page.evaluate(() => window.__submitClicks), 0);
+  await page.close();
+});
+
+test("a section that already has an entry is never touched", async () => {
+  const page = await open();
+  await page.evaluate(() => {
+    const card = document.createElement("div");
+    card.textContent = "Analyst at Somewhere";
+    document.querySelector("oc-experience").shadowRoot.querySelector(".cards").append(card);
+  });
+  await page.evaluate(bundle);
+  await page.evaluate(([c, r]) => window.__jobAgentFill(c, r), [withHistory({ experience: JOBS, education: SCHOOLS }), resume]);
+  const entries = await page.evaluate(() => window.__entries);
+  assert.equal(entries.filter((e) => e.kind === "experience").length, 0);
+  assert.equal(entries.filter((e) => e.kind === "education").length, 1);
+  await page.close();
+});

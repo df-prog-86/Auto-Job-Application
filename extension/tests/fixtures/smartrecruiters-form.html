@@ -19,6 +19,8 @@
   <spl-input label="Confirm your email" input-id="confirm-email-input" type="email" required></spl-input>
   <spl-autocomplete label="City"></spl-autocomplete>
   <spl-phone-field label="Phone number"></spl-phone-field>
+  <oc-experience></oc-experience>
+  <oc-education></oc-education>
   <spl-typography-title>Your Profiles</spl-typography-title>
   <spl-input label="LinkedIn" input-id="linkedin-input" type="text"></spl-input>
   <spl-input label="Facebook" input-id="facebook-input" type="text"></spl-input>
@@ -39,6 +41,8 @@
     connectedCallback() {
       const root = this.attachShadow({ mode: "open" });
       const required = this.hasAttribute("required");
+      // A type-ahead box: like the live form, the real input sits one more shadow root down, inside spl-internal-field.
+      if (this.hasAttribute("combo")) { root.innerHTML = `<spl-internal-field suggest='${this.getAttribute("suggest") || "[]"}'></spl-internal-field>`; return; }
       // Like the real phone box, an inner spl-input may have no label of its own and carry the question as aria-label instead.
       const aria = this.getAttribute("aria");
       root.innerHTML = `${this.hasAttribute("label") ? `<label>${this.getAttribute("label")}</label>` : ""}<input id="${this.getAttribute("input-id") || ""}" type="${this.getAttribute("type") || "text"}" ${aria ? `aria-label="${aria}"` : ""} ${required ? "required" : ""}>`;
@@ -50,7 +54,7 @@
   class SplTextarea extends HTMLElement {
     connectedCallback() {
       const root = this.attachShadow({ mode: "open" });
-      root.innerHTML = `<label>${this.getAttribute("label")}</label><textarea id="hiring-manager-message-input"></textarea>`;
+      root.innerHTML = `<label>${this.getAttribute("label")}</label><textarea id="${this.getAttribute("input-id") || "hiring-manager-message-input"}"></textarea>`;
     }
   }
   class SplCheckbox extends HTMLElement {
@@ -87,6 +91,106 @@
       root.innerHTML = `<input type="text" id="country-search" placeholder="Search by country/region or code" aria-label="Search by country/region or code">`;
     }
   }
+  let comboN = 0;
+  // The input of a type-ahead box. Typing opens a list whose first row is the typed text itself, then any suggestions.
+  class SplInternalField extends HTMLElement {
+    connectedCallback() {
+      const id = "lb-" + (++comboN);
+      const root = this.attachShadow({ mode: "open" });
+      root.innerHTML = `<input type="text" role="combobox" aria-expanded="false" aria-controls="${id}"><div role="listbox" id="${id}"></div>`;
+      const input = root.querySelector("input");
+      const list = root.querySelector("div");
+      const suggest = JSON.parse(this.getAttribute("suggest") || "[]");
+      input.addEventListener("input", () => {
+        const text = input.value.trim();
+        list.innerHTML = "";
+        if (!text) { input.setAttribute("aria-expanded", "false"); return; }
+        const rows = [text, ...suggest.filter((x) => x.toLowerCase().includes(text.toLowerCase()))];
+        for (const r of rows) {
+          const o = document.createElement("spl-select-option");
+          o.textContent = r;
+          o.addEventListener("click", () => { input.value = r; list.innerHTML = ""; input.setAttribute("aria-expanded", "false"); });
+          list.append(o);
+        }
+        input.setAttribute("aria-expanded", "true");
+      });
+    }
+  }
+  class SplButton extends HTMLElement { connectedCallback() { this.attachShadow({ mode: "open" }).innerHTML = `<button type="button">${this.getAttribute("label") || ""}</button>`; } }
+  class OcButton extends HTMLElement { connectedCallback() { this.attachShadow({ mode: "open" }).innerHTML = `<spl-button label="${this.getAttribute("label") || ""}"></spl-button>`; } }
+  class OcCheckbox extends HTMLElement { connectedCallback() { this.attachShadow({ mode: "open" }).innerHTML = `<input type="checkbox">`; } }
+  // Month-and-year picker: typing "MM/YYYY" sets .value to a date, anything else clears it. A "Year" spinner sits beside it.
+  class SplDatePicker extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({ mode: "open" });
+      root.innerHTML = `<input type="text" placeholder="Pick a date" aria-label="${this.getAttribute("arialabel")}"><input type="number" aria-label="Year">`;
+      const input = root.querySelector("input[type=text]");
+      const parse = () => { const m = /^(\d{2})\/(\d{4})$/.exec(input.value.trim()); this.value = m && +m[1] >= 1 && +m[1] <= 12 ? `${m[2]}-${m[1]}-01` : null; };
+      for (const ev of ["input", "change", "blur"]) input.addEventListener(ev, parse);
+    }
+  }
+  const deepInput = (host) => {
+    const r = host.shadowRoot; if (!r) return null;
+    return r.querySelector("input,textarea") || (r.querySelector("spl-internal-field") && r.querySelector("spl-internal-field").shadowRoot.querySelector("input"));
+  };
+  window.__entries = [];
+  window.__saveClicks = 0;
+  class OcSection extends HTMLElement {
+    connectedCallback() {
+      const kind = this.kind;
+      const root = this.attachShadow({ mode: "open" });
+      root.innerHTML = `<div data-test="${kind}"><h3>${kind === "experience" ? "Experience" : "Education"}</h3><div class="cards"></div><oc-button data-test="add-${kind}" label="Add"></oc-button><div class="slot"></div></div>`;
+      root.querySelector("oc-button").addEventListener("click", () => {
+        const slot = root.querySelector(".slot");
+        if (slot.firstChild) return;
+        slot.append(document.createElement(`oc-${kind}-edit-form`));
+      });
+    }
+  }
+  class OcEditForm extends HTMLElement {
+    connectedCallback() {
+      const kind = this.kind;
+      const work = kind === "experience";
+      const root = this.attachShadow({ mode: "open" });
+      root.innerHTML = `<div data-test="${kind}-edit-form">` + (work
+        ? `<spl-input label="Title" combo suggest='["Financial Analyst Intern","Senior Financial Analyst"]'></spl-input>
+           <spl-input label="Company" combo suggest='["Huron Consulting Group"]'></spl-input>
+           <spl-input label="Office location" combo suggest='["Boston, MA, United States"]'></spl-input>`
+        : `<spl-input label="Institution" combo suggest='["Boston College High School"]'></spl-input>
+           <spl-input label="Major" input-id="edu-major" type="text"></spl-input>
+           <spl-input label="Degree" input-id="edu-degree" type="text"></spl-input>
+           <spl-input label="School location" combo suggest='[]'></spl-input>`) + `
+        <spl-textarea label="Description" input-id="${kind}-desc"></spl-textarea>
+        <spl-date-picker arialabel="From"></spl-date-picker>
+        <spl-date-picker arialabel="To"></spl-date-picker>
+        <oc-checkbox data-test="${kind}-current"></oc-checkbox>
+        <oc-button data-test="${kind}-cancel" label="Cancel"></oc-button>
+        <oc-button data-test="${kind}-save" label="Save"></oc-button><p class="err"></p></div>`;
+      const q = (label) => deepInput(root.querySelector(`spl-input[label="${label}"]`));
+      const date = (label) => root.querySelector(`spl-date-picker[arialabel="${label}"]`);
+      const cur = root.querySelector("oc-checkbox").shadowRoot.querySelector("input");
+      cur.addEventListener("change", () => { date("To").shadowRoot.querySelector("input[type=text]").disabled = cur.checked; });
+      root.querySelector(`oc-button[data-test="${kind}-cancel"]`).addEventListener("click", () => this.remove());
+      root.querySelector(`oc-button[data-test="${kind}-save"]`).addEventListener("click", () => {
+        window.__saveClicks++;
+        const need = work ? q("Title").value.trim() : q("Institution").value.trim();
+        const bad = !need || (work && (!date("From").value || (!cur.checked && !date("To").value)));
+        if (bad) { root.querySelector(".err").textContent = "Please complete the required fields."; return; }
+        const entry = { kind, from: date("From").value, to: date("To").value, current: cur.checked, description: root.querySelector("spl-textarea").shadowRoot.querySelector("textarea").value };
+        for (const l of ["Title", "Company", "Office location", "Institution", "Major", "Degree"]) { const el = root.querySelector(`spl-input[label="${l}"]`); if (el) entry[l] = deepInput(el).value; }
+        window.__entries.push(entry);
+        const card = document.createElement("div");
+        card.textContent = `${entry.Title || entry.Institution}`;
+        this.getRootNode().querySelector(".cards").append(card);
+        this.remove();
+      });
+    }
+  }
+  class OcExperience extends OcSection { get kind() { return "experience"; } }
+  class OcEducation extends OcSection { get kind() { return "education"; } }
+  class OcExperienceEditForm extends OcEditForm { get kind() { return "experience"; } }
+  class OcEducationEditForm extends OcEditForm { get kind() { return "education"; } }
+  for (const [n, c] of Object.entries({ "spl-internal-field": SplInternalField, "spl-button": SplButton, "oc-button": OcButton, "oc-checkbox": OcCheckbox, "spl-date-picker": SplDatePicker, "oc-experience": OcExperience, "oc-education": OcEducation, "oc-experience-edit-form": OcExperienceEditForm, "oc-education-edit-form": OcEducationEditForm })) customElements.define(n, c);
   for (const [n, c] of Object.entries({ "spl-input": SplInput, "spl-textarea": SplTextarea, "spl-checkbox": SplCheckbox, "spl-dropzone": SplDropzone, "spl-autocomplete": SplAutocomplete, "spl-phone-field": SplPhoneField, "spl-select": SplSelect, "spl-dropdown-search": SplDropdownSearch })) customElements.define(n, c);
 </script>
 </body></html>

@@ -139,6 +139,8 @@ export function discoverFields(doc: Document): FormField[] {
       // typeahead like City needs a suggestion picked, which is left to the person.
       // The phone's number box has no label on its own wrapper but carries the question as its aria-label.
       if (insideHost(el, "spl-autocomplete") || insideHost(el, "spl-dropdown-search")) continue;
+      // The Experience and Education entry forms are filled as a set by smartrecruiters-history.ts.
+      if (insideHost(el, "oc-experience-edit-form") || insideHost(el, "oc-education-edit-form")) continue;
       if (!deepLabel(el) && !(el.getAttribute("aria-label") ?? "").trim()) continue;
     }
 

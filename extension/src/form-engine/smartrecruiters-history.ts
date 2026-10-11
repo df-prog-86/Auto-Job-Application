@@ -130,7 +130,10 @@ type Chooser = (rows: Row[]) => HTMLElement | null;
  * A search box: types the text, waits for the suggestions, and clicks the one `choose` approves. True only when a row was
  * clicked and the box now holds something. When nothing qualifies the box is emptied again, never left half typed.
  */
+let why = "";
+
 async function pickRow(input: HTMLInputElement, typeText: string, choose: Chooser): Promise<boolean> {
+  why = "";
   typed(input, typeText.trim());
   const id = input.getAttribute("aria-controls");
   const read = (): Row[] => {
@@ -150,6 +153,8 @@ async function pickRow(input: HTMLInputElement, typeText: string, choose: Choose
     await sleep(300);
     if (clean(input.value) !== "") return true;
   }
+  const seen = read();
+  why = seen.length === 0 ? "no suggestions appeared" : `saw ${seen.length}: ${seen.slice(0, 3).map((r) => clean(r.text).slice(0, 40)).join(" | ")}`;
   typed(input, "");
   input.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
   return false;
@@ -277,7 +282,7 @@ async function fillTypeahead(
   }
   if (done) ok(p, label);
   // Optional boxes that cannot be matched are left empty so the entry can still be saved.
-  else if (required) p.needs.push(`${label} (pick it from the list)`);
+  else if (required) p.needs.push(`${label} (pick it from the list; ${why})`);
 }
 
 async function fillDate(p: Progress, el: HTMLInputElement | null, label: string, value: string | null | undefined, required: boolean): Promise<void> {

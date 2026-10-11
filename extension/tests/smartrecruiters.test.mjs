@@ -232,3 +232,25 @@ test("a suggestion list with plain row text, chosen only by a real mouse press, 
   assert.equal(entries[0].Institution, "Babson College");
   await page.close();
 });
+
+test("the page-world helper does the picking while the extension script only passes the work along", async () => {
+  const helper = (await build({ entryPoints: [resolve(root, "src/content/sr-main.ts")], bundle: true, format: "iife", write: false, tsconfig: resolve(root, "tsconfig.json") })).outputFiles[0].text;
+  const page = await open();
+  await page.evaluate(helper); // the page's own world
+  const cdp = await page.context().newCDPSession(page);
+  const { frameTree } = await cdp.send("Page.getFrameTree");
+  const { executionContextId: contextId } = await cdp.send("Page.createIsolatedWorld", { frameId: frameTree.frame.id, worldName: "ext" });
+  const run = async (expression) => {
+    const r = await cdp.send("Runtime.evaluate", { expression, contextId, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400));
+    return r.result.value;
+  };
+  await run(bundle);
+  const report = await run(`window.__jobAgentFill(${JSON.stringify(withHistory({ experience: JOBS.slice(0, 1), education: SCHOOLS.slice(2) }))}, null)`);
+  const entries = await page.evaluate(() => window.__entries);
+  assert.equal(entries.length, 2, JSON.stringify(report.flagged));
+  assert.equal(entries[0].Company, "Huron");
+  assert.equal(entries[1].Institution, "Rollins College");
+  assert.ok(report.filled.includes("Experience 1: saved"), "the helper's result is passed back into the report");
+  await page.close();
+});

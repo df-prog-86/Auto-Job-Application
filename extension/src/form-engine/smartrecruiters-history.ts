@@ -166,10 +166,16 @@ async function pickRow(input: HTMLInputElement, typeText: string, choose: Choose
       pick.click(); // the plain click, in case the full press was not enough
       await sleep(300);
     }
-    if (clean(input.value) !== "") return true;
+    if (clean(input.value) !== "") {
+      // The page empties a box whose pick did not register once it loses focus, so check again after that.
+      input.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
+      await sleep(400);
+      if (clean(input.value) !== "") return true;
+      why = "the pick did not stay";
+    }
   }
   const seen = read();
-  why = seen.length === 0 ? "no suggestions appeared" : `saw ${seen.length}: ${seen.slice(0, 3).map((r) => clean(r.text).slice(0, 40)).join(" | ")}`;
+  why = why || (seen.length === 0 ? "no suggestions appeared" : `saw ${seen.length}: ${seen.slice(0, 3).map((r) => clean(r.text).slice(0, 40)).join(" | ")}`);
   typed(input, "");
   input.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
   return false;
@@ -421,9 +427,64 @@ async function fillCity(doc: Document, ctx: ApplyContext, report: FillReport): P
   }
 }
 
-export async function fillSmartRecruitersHistory(doc: Document, ctx: ApplyContext, report: FillReport): Promise<void> {
-  if (doc.location?.hostname !== "jobs.smartrecruiters.com") return;
+/** The actual work: City, then Experience, then Education. Runs in whichever JavaScript world it is given. */
+export async function runSmartRecruitersHistory(doc: Document, ctx: ApplyContext, report: FillReport): Promise<void> {
   await fillCity(doc, ctx, report);
   await fillSection(doc, "experience", (ctx.experience ?? []).slice(0, MAX_JOBS), report);
   await fillSection(doc, "education", (ctx.education ?? []).slice(0, MAX_SCHOOLS), report);
+}
+
+/**
+ * Chrome runs an extension's scripts in a separate JavaScript world from the page's own. SmartRecruiters' search boxes
+ * only take a picked suggestion when the click comes from the page's own world, so on that site the work is handed to a
+ * small helper that runs there (content/sr-main.js, declared in the manifest) and the result is handed back. Only the
+ * saved places and schools travel with the message. If the helper is not there, the work is done here instead.
+ */
+async function viaPageWorld(ctx: ApplyContext): Promise<{ filled: string[]; flagged: FillReport["flagged"] } | null> {
+  const win = window;
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve) => {
+    let acked = false;
+    const finish = (value: { filled: string[]; flagged: FillReport["flagged"] } | null) => {
+      win.removeEventListener("message", onMessage);
+      clearTimeout(ackTimer);
+      clearTimeout(doneTimer);
+      resolve(value);
+    };
+    const onMessage = (event: MessageEvent) => {
+      const d = event.data as { source?: string; type?: string; id?: string; report?: { filled: string[]; flagged: FillReport["flagged"] } } | null;
+      if (event.source !== win || !d || d.source !== "job-agent-main" || d.id !== id) return;
+      if (d.type === "SR_ACK") {
+        acked = true;
+        clearTimeout(ackTimer);
+      } else if (d.type === "SR_DONE") {
+        finish(d.report ?? null);
+      }
+    };
+    win.addEventListener("message", onMessage);
+    const ackTimer = setTimeout(() => {
+      if (!acked) finish(null);
+    }, 1200);
+    const doneTimer = setTimeout(() => finish(null), 300_000);
+    win.postMessage(
+      {
+        source: "job-agent",
+        type: "SR_HISTORY",
+        id,
+        ctx: { candidate: { location: ctx.candidate.location }, experience: ctx.experience ?? [], education: ctx.education ?? [] },
+      },
+      win.location.origin,
+    );
+  });
+}
+
+export async function fillSmartRecruitersHistory(doc: Document, ctx: ApplyContext, report: FillReport): Promise<void> {
+  if (doc.location?.hostname !== "jobs.smartrecruiters.com") return;
+  const away = doc.defaultView === window ? await viaPageWorld(ctx) : null;
+  if (away) {
+    report.filled.push(...away.filled);
+    report.flagged.push(...away.flagged);
+    return;
+  }
+  await runSmartRecruitersHistory(doc, ctx, report);
 }

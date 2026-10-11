@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Job Agent",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Browser execution layer for the Job Agent automated application platform.",
   "minimum_chrome_version": "116",
 
@@ -22,6 +22,12 @@
       "matches": ["http://127.0.0.1:8765/app/*", "http://127.0.0.1:8765/app"],
       "js": ["content/dashboard-bridge.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://jobs.smartrecruiters.com/*"],
+      "js": ["content/sr-main.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
     }
   ],
 

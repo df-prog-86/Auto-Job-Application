@@ -92,41 +92,61 @@ function typed(el: Box, text: string): void {
 }
 
 /**
- * The page renders each suggestion's text several times over (hidden copies for tooltips), so a row reads like
- * "Financial Analyst Financial Analyst Financial Analyst". Every way of reading that as one repeated phrase.
+ * The page renders each suggestion's name several times over (hidden copies for tooltips) and may add a detail after it
+ * ("Rollins College Rollins College Rollins College Winter Park, US"). Every way of reading the row as a name.
  */
-function unrepeat(text: string): string[] {
+function names(text: string): string[] {
   const t = clean(text);
-  const words = t.split(" ");
-  const out: string[] = [];
-  for (let k = 1; k <= 6; k++) {
-    if (words.length % k !== 0) continue;
-    const chunk = words.slice(0, words.length / k).join(" ");
-    if (Array(k).fill(chunk).join(" ") === t) out.push(chunk);
+  const w = t.split(" ");
+  const out = new Set<string>([t]);
+  for (let k = 2; k <= 6; k++) {
+    for (let len = 1; len * k <= w.length; len++) {
+      let same = true;
+      for (let i = 1; i < k && same; i++) for (let j = 0; j < len; j++) if (w[i * len + j] !== w[j]) same = false;
+      if (same) out.add(w.slice(0, len).join(" "));
+    }
   }
-  return out.length > 0 ? out : [t];
+  return Array.from(out);
 }
 
+/** The name of a row that comes from the page's own database (its text is repeated), else null. */
+function databaseName(text: string): string | null {
+  const w = clean(text).split(" ");
+  for (let len = Math.floor(w.length / 2); len >= 1; len--) {
+    let same = true;
+    for (let j = 0; j < len; j++) if (w[len + j] !== w[j]) same = false;
+    if (same) return w.slice(0, len).join(" ");
+  }
+  return null;
+}
+
+interface Row {
+  el: HTMLElement;
+  text: string;
+}
+type Chooser = (rows: Row[]) => HTMLElement | null;
+
 /**
- * A type-ahead box: types the text and clicks the suggestion `accept` approves (only when `unique` is set, only if exactly
- * one row qualifies). True only when a row was clicked and the box now holds something. On failure the box is emptied again.
+ * A search box: types the text, waits for the suggestions, and clicks the one `choose` approves. True only when a row was
+ * clicked and the box now holds something. When nothing qualifies the box is emptied again, never left half typed.
  */
-async function pickRow(input: HTMLInputElement, typeText: string, accept: (candidates: string[]) => boolean, unique = false): Promise<boolean> {
+async function pickRow(input: HTMLInputElement, typeText: string, choose: Chooser): Promise<boolean> {
   typed(input, typeText.trim());
   const id = input.getAttribute("aria-controls");
-  const rowsNow = (): HTMLElement[] => {
+  const read = (): Row[] => {
     if (!id) return [];
     const list = deepQueryAll<HTMLElement>(input.ownerDocument, `#${CSS.escape(id)}`)[0];
-    if (!list) return [];
-    return inside(list, "spl-select-option").filter((r) => accept(unrepeat(deepText(r))));
+    return list ? inside(list, "spl-select-option").map((el) => ({ el, text: clean(deepText(el)) })) : [];
   };
-  let rows = (await waitFor(() => (rowsNow().length > 0 ? rowsNow() : null), 32, 125)) ?? [];
-  if (unique && rows.length > 0) {
-    await sleep(500); // let any further suggestions arrive before deciding there is exactly one
-    rows = rowsNow();
+  await waitFor(() => (read().length > 0 ? true : null), 32, 125);
+  await sleep(600); // more suggestions can still arrive after the first
+  let pick = choose(read());
+  if (!pick) {
+    await sleep(900);
+    pick = choose(read());
   }
-  if (rows.length > 0 && (!unique || rows.length === 1)) {
-    rows[0].click();
+  if (pick) {
+    pick.click();
     await sleep(300);
     if (clean(input.value) !== "") return true;
   }
@@ -135,10 +155,55 @@ async function pickRow(input: HTMLInputElement, typeText: string, accept: (candi
   return false;
 }
 
-/** The row that is exactly the text typed (the list always offers it first). */
-async function pickTyped(input: HTMLInputElement, text: string): Promise<boolean> {
-  const want = clean(text).toLowerCase();
-  return pickRow(input, text, (c) => c.some((x) => x.toLowerCase() === want));
+/** Title and Company: the row that is exactly the text typed (a free-text entry, or the same name from the page's list). */
+const exact =
+  (text: string): Chooser =>
+  (rows) => {
+    const want = clean(text).toLowerCase();
+    return rows.find((r) => names(r.text).some((n) => n.toLowerCase() === want))?.el ?? null;
+  };
+
+const SCHOOL_WORDS = new Set(["the", "of", "at", "and", "college", "university", "school", "institute"]);
+const core = (name: string) =>
+  clean(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w && !SCHOOL_WORDS.has(w))
+    .sort()
+    .join(" ");
+
+/**
+ * Institution: only schools from the page's own list can be chosen. The one with exactly the saved name, else the one
+ * school whose name differs only by words like "College" or "University" ("Rollins" and "Rollins College"). Several
+ * possible schools means none is picked.
+ */
+const school =
+  (saved: string): Chooser =>
+  (rows) => {
+    const db = rows.map((r) => ({ el: r.el, name: databaseName(r.text) })).filter((r): r is { el: HTMLElement; name: string } => !!r.name);
+    const want = clean(saved).toLowerCase();
+    const same = db.find((r) => r.name.toLowerCase() === want);
+    if (same) return same.el;
+    const key = core(saved);
+    if (!key) return null;
+    const near = db.filter((r) => core(r.name) === key);
+    return near.length === 1 ? near[0].el : null;
+  };
+
+/** "Boston, MA" -> what to type and which rows ("Boston, MA, US") are that city and state. */
+function place(loc: string): { typeText: string; choose: Chooser } {
+  const m = /^\s*([^,]+?)\s*,\s*([A-Za-z]{2})\b/.exec(loc);
+  const city = (m ? m[1] : loc.split(",")[0]).trim();
+  const variants = (m ? [`${city}, ${m[2]}`, ...(expandLocation(`${city}, ${m[2]}`)?.alternates ?? [])] : [city]).map((v) => v.toLowerCase());
+  const fits = (t: string) => variants.some((v) => t.toLowerCase() === v || t.toLowerCase().startsWith(`${v},`));
+  return {
+    typeText: m ? `${city}, ${m[2]}` : city,
+    choose: (rows) => {
+      const hits = rows.filter((r) => names(r.text).some(fits));
+      return hits.length === 1 ? hits[0].el : null;
+    },
+  };
 }
 
 /** Writes "MM/YYYY" into a month-and-year box and checks the page's date picker understood it. */
@@ -190,17 +255,29 @@ async function fillText(p: Progress, el: Box | null, label: string, value: strin
   if (el.value.trim() !== "") ok(p, label);
 }
 
-async function fillTypeahead(p: Progress, el: Box | null, label: string, value: string | null | undefined, required: boolean): Promise<void> {
-  if (!el) {
+async function fillTypeahead(
+  p: Progress,
+  el: Box | null,
+  label: string,
+  value: string | null | undefined,
+  required: boolean,
+  how: "exact" | "school" | "place" = "exact",
+): Promise<void> {
+  if (!el || !value?.trim()) {
     if (required) p.needs.push(label);
     return;
   }
-  if (!value?.trim()) {
-    if (required) p.needs.push(label);
-    return;
+  const input = el as HTMLInputElement;
+  let done: boolean;
+  if (how === "place") {
+    const w = place(value);
+    done = await pickRow(input, w.typeText, w.choose);
+  } else {
+    done = await pickRow(input, value, how === "school" ? school(value) : exact(value));
   }
-  if (await pickTyped(el as HTMLInputElement, value)) ok(p, label);
-  else p.needs.push(`${label} (pick it from the list)`);
+  if (done) ok(p, label);
+  // Optional boxes that cannot be matched are left empty so the entry can still be saved.
+  else if (required) p.needs.push(`${label} (pick it from the list)`);
 }
 
 async function fillDate(p: Progress, el: HTMLInputElement | null, label: string, value: string | null | undefined, required: boolean): Promise<void> {
@@ -212,7 +289,7 @@ async function fillDate(p: Progress, el: HTMLInputElement | null, label: string,
 async function fillJob(form: Element, job: ApplyExperience, p: Progress): Promise<void> {
   await fillTypeahead(p, box(form, "Title"), "Title", job.title, true);
   await fillTypeahead(p, box(form, "Company"), "Company", job.employer, false);
-  await fillTypeahead(p, box(form, "Office location"), "Office location", job.location, false);
+  await fillTypeahead(p, box(form, "Office location"), "Office location", job.location, false, "place");
   await fillText(p, box(form, "Description"), "Description", job.description);
   await fillDate(p, dateBox(form, "From"), "From", job.start_date, true);
   const current = currentBox(form, "experience");
@@ -229,7 +306,8 @@ async function fillJob(form: Element, job: ApplyExperience, p: Progress): Promis
 }
 
 async function fillSchool(form: Element, school: ApplyEducation, p: Progress): Promise<void> {
-  await fillTypeahead(p, box(form, "Institution"), "Institution", school.institution, true);
+  await fillTypeahead(p, box(form, "Institution"), "Institution", school.institution, true, "school");
+  await fillTypeahead(p, box(form, "School location"), "School location", (school as ApplyEducation & { location?: string | null }).location, false, "place");
   await fillText(p, box(form, "Major"), "Major", school.field);
   await fillText(p, box(form, "Degree"), "Degree", school.degree ?? school.degree_short);
   // The page asks for a month and a year. A saved year alone is not enough to write, and these boxes are optional.
@@ -303,12 +381,9 @@ async function fillCity(doc: Document, ctx: ApplyContext, report: FillReport): P
     (e) => e.type === "text" && e.getAttribute("role") === "combobox" && labelOf(e).toLowerCase() === "city",
   );
   if (!input || input.value.trim() !== "") return;
-  const m = /^\s*([^,]+?)\s*,\s*([A-Za-z]{2})\b/.exec(loc);
-  const city = (m ? m[1] : loc.split(",")[0]).trim();
-  const variants = (m ? [`${city}, ${m[2]}`, ...(expandLocation(`${city}, ${m[2]}`)?.alternates ?? [])] : [city]).map((v) => v.toLowerCase());
-  const accept = (c: string[]) => c.some((x) => variants.some((v) => x.toLowerCase() === v || x.toLowerCase().startsWith(`${v},`)));
   const host = deepQueryAll<HTMLElement>(doc, "spl-autocomplete").find((h) => (h.getAttribute("label") ?? "").toLowerCase() === "city");
-  if (await pickRow(input, m ? `${city}, ${m[2]}` : city, accept, true)) {
+  const w = place(loc);
+  if (await pickRow(input, w.typeText, w.choose)) {
     report.filled.push("City");
     if (host) mark(host, "filled");
   } else {

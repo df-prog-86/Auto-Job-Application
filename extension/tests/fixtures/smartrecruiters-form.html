@@ -72,7 +72,7 @@
   class SplAutocomplete extends HTMLElement {
     connectedCallback() {
       const root = this.attachShadow({ mode: "open" });
-      root.innerHTML = `<spl-input label="${this.getAttribute("label")}" input-id="spl-form-element_10" combo notyped suggest='["Boston, MA, US","Boston, GA, US","Cambridge, MA, US"]'></spl-input>`;
+      root.innerHTML = `<spl-input label="${this.getAttribute("label")}" input-id="spl-form-element_10" combo notyped suggest='["Boston, MA, US|","Boston, GA, US|","Cambridge, MA, US|"]'></spl-input>`;
     }
   }
   class SplPhoneField extends HTMLElement {
@@ -105,13 +105,17 @@
         const text = input.value.trim();
         list.innerHTML = "";
         if (!text) { input.setAttribute("aria-expanded", "false"); return; }
-        // The live list has no typed-text row for City; it ends with a "Cannot find your city?" row instead.
-        const rows = [...(this.hasAttribute("notyped") ? [] : [text]), ...suggest.filter((x) => x.toLowerCase().includes(text.toLowerCase()))];
-        for (const r of rows) {
+        // Like the live list: the typed text is offered as its own row unless the page's list has exactly that name; list rows
+        // read "Name Name Name Detail" (hidden copies for tooltips); city boxes have no typed row and end with "Cannot find".
+        const db = suggest.map((x) => x.split("|")).filter(([n]) => n.toLowerCase().includes(text.toLowerCase()));
+        const exactDb = db.some(([n]) => n.toLowerCase() === text.toLowerCase());
+        const rows = [];
+        if (!this.hasAttribute("notyped") && !exactDb) rows.push([text, text]);
+        for (const [n, d] of db) rows.push([n, `${n} ${n} ${n}${d ? " " + d : ""}`]);
+        for (const [value, shown] of rows) {
           const o = document.createElement("spl-select-option");
-          // Like the live page, a row's text is rendered several times over (hidden copies for tooltips).
-          o.textContent = `${r} ${r} ${r}`;
-          o.addEventListener("click", () => { input.value = r; list.innerHTML = ""; input.setAttribute("aria-expanded", "false"); });
+          o.textContent = shown;
+          o.addEventListener("click", () => { input.value = value; list.innerHTML = ""; input.setAttribute("aria-expanded", "false"); });
           list.append(o);
         }
         if (this.hasAttribute("notyped")) { const o = document.createElement("spl-select-option"); o.textContent = "Cannot find your city? Click here to fill in manually"; list.append(o); }
@@ -156,13 +160,13 @@
       const work = kind === "experience";
       const root = this.attachShadow({ mode: "open" });
       root.innerHTML = `<div data-test="${kind}-edit-form">` + (work
-        ? `<spl-input label="Title" combo suggest='["Financial Analyst Intern","Senior Financial Analyst"]'></spl-input>
-           <spl-input label="Company" combo suggest='["Huron Consulting Group"]'></spl-input>
-           <spl-input label="Office location" combo suggest='["Boston, MA, United States"]'></spl-input>`
-        : `<spl-input label="Institution" combo suggest='["Boston College High School"]'></spl-input>
+        ? `<spl-input label="Title" combo suggest='["Financial Analyst Intern","Senior Financial Analyst","Financial Analyst"]'></spl-input>
+           <spl-input label="Company" combo suggest='["Huron Consulting Group|Professional Services","Advent Health Partners|Ambulatory Health Care Services"]'></spl-input>
+           <spl-input label="Office location" combo notyped suggest='["Boston, MA, US|","Orlando, FL, US|"]'></spl-input>`
+        : `<spl-input label="Institution" combo suggest='["Boston College|Chestnut Hill, US","Boston College High School|Boston, US","Babson College|Wellesley, US","Rollins College|Winter Park, US"]'></spl-input>
            <spl-input label="Major" input-id="edu-major" type="text"></spl-input>
            <spl-input label="Degree" input-id="edu-degree" type="text"></spl-input>
-           <spl-input label="School location" combo suggest='[]'></spl-input>`) + `
+           <spl-input label="School location" combo notyped suggest='[]'></spl-input>`) + `
         <spl-textarea label="Description" input-id="${kind}-desc"></spl-textarea>
         <spl-date-picker arialabel="From"></spl-date-picker>
         <spl-date-picker arialabel="To"></spl-date-picker>

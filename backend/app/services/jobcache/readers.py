@@ -793,6 +793,10 @@ def parse_successfactors(page: Any, host: str) -> tuple[list[PostingIn], int | N
         if not loc:
             st = re.search(r'class="jobState[^"]*"[^>]*>(.*?)</span>', block, re.S)
             loc = _plain(st.group(1)) if st else None
+        if loc:
+            loc = re.sub(r"\s*\+\d+ more\S*", "", loc)  # "+73 more..." when a job lists many places
+            loc = re.sub(r",\s*\d{5}(?:-\d{4})?\b", "", loc)
+            loc = re.sub(r",\s*US\b", "", loc).strip(" ,") or None
         date_m = re.search(r'class="[^"]*colDate[^"]*"[^>]*>(.*?)</td>', block, re.S)
         posted = _sf_date(_plain(date_m.group(1))) if date_m else None
         out.append(

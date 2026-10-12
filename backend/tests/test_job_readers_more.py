@@ -249,14 +249,15 @@ EY_PAGE = (
     ' <a href="/ey/job/San-Francisco-Business-Consulting-Finance-R2R-&amp;-FP&amp;A-Manager-San-Francisco-Bay-CA-94105-2907/1441599833/" class="jobTitle-link">Business Consulting - Finance - R2R &amp; FP&amp;A Manager - San Francisco Bay</a>'
     ' </span></td> <td class="colLocation hidden-phone"> <span class="jobLocation"> San Francisco, CA, US </span> </td> <td class="colDate hidden-phone"> Oct 9, 2026 </td></tr>'
     '<tr class="data-row"> <td class="colTitle"> <span class="jobTitle hidden-phone"> <a href="/ey/job/Chicago-Mobility-Manager-IL-60606/1443008233/" class="jobTitle-link">Mobility Manager</a></span></td>'
-    ' <td class="colLocation"> <span class="jobLocation">Chicago, IL, US</span></td></tr></tbody></table>'
+    ' <td class="colLocation"> <span class="jobLocation">New York, NY, US, 10001-8604 +73 more…</span></td></tr></tbody></table>'
 )
 
 
 def test_successfactors_page_is_parsed_and_paged():
     posts, total = readers.parse_successfactors(EY_PAGE, "careers.ey.com")
     assert total == 263 and len(posts) == 2
-    assert posts[0].ext_id == "1441599833" and posts[0].title.endswith("San Francisco Bay") and posts[0].location == "San Francisco, CA, US"
+    assert posts[0].ext_id == "1441599833" and posts[0].title.endswith("San Francisco Bay") and posts[0].location == "San Francisco, CA"
+    assert posts[1].location == "New York, NY"
     assert posts[0].posted_at == dt.date(2026, 10, 9) and posts[0].url.startswith("https://careers.ey.com/ey/job/San-Francisco")
     assert readers.employer_ref("https://careers.ey.com/ey/job/Chicago-Mobility-Manager-IL-60606/1443008233/") == ("successfactors", "careers.ey.com|ey")
 

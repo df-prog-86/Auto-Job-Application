@@ -21,6 +21,7 @@ import datetime as dt
 import json
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -193,6 +194,9 @@ async def run(args: argparse.Namespace) -> int:
                     items = await finish(raw, criteria)
                 except Exception as exc:  # one failed run should not lose the others
                     raw_n, err = 0, f"{type(exc).__name__}: {exc}"[:120]
+                    where = traceback.format_exc().strip().splitlines()[-5:-1]
+                    print("    where it failed:", " | ".join(w.strip() for w in where))
+                    err += " @ " + where[0].strip()[:160] if where else ""
                 cost = meter.cost(model, start)
                 spent += cost
                 calls = meter.calls[start:]

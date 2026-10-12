@@ -204,7 +204,6 @@ async def run(args: argparse.Namespace) -> int:
         return 1
     rows: list[dict[str, Any]] = []
     seen: dict[tuple[int, str], set[str]] = {}
-    ws.MAX_RESOLVE = 8
     for si, criteria in enumerate(searches):
         for model in models:
             ws.search_model = lambda m=model: m  # type: ignore[assignment]

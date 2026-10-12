@@ -64,6 +64,13 @@ CREATE INDEX IF NOT EXISTS idx_postings_open ON postings (closed_at, employer_id
 CREATE INDEX IF NOT EXISTS idx_postings_posted ON postings (posted_at);
 
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+
+-- Answers from paid "find this board job on the employer's own site" lookups, so the same lookup is not paid for twice in a day.
+CREATE TABLE IF NOT EXISTS lookups (
+    board_key TEXT PRIMARY KEY,
+    found_url TEXT,
+    checked_at INTEGER NOT NULL
+);
 """
 
 FTS_SCHEMA = (
@@ -361,6 +368,33 @@ class JobCache:
                     f"WHERE ({like}) AND p.closed_at IS NULL AND e.enabled = 1" + date_clause + " LIMIT ?"
                 )
                 rows = db.execute(sql, [*[f"%{t}%" for t in terms], *params, limit]).fetchall()
+        return [dict(r) for r in rows]
+
+    def lookup_get(self, board_key: str, max_age_seconds: int) -> tuple[bool, str | None]:
+        """(remembered, found link). `remembered` is False when nothing was stored in the last `max_age_seconds`."""
+        with self.session() as db:
+            row = db.execute("SELECT found_url, checked_at FROM lookups WHERE board_key = ?", (board_key,)).fetchone()
+        if not row or now_ts() - row["checked_at"] > max_age_seconds:
+            return False, None
+        return True, row["found_url"]
+
+    def lookup_put(self, board_key: str, found_url: str | None) -> None:
+        with self.session() as db:
+            db.execute(
+                "INSERT INTO lookups (board_key, found_url, checked_at) VALUES (?, ?, ?) "
+                "ON CONFLICT (board_key) DO UPDATE SET found_url = excluded.found_url, checked_at = excluded.checked_at",
+                (board_key, found_url, now_ts()),
+            )
+            db.execute("DELETE FROM lookups WHERE checked_at < ?", (now_ts() - 7 * 86400,))  # old answers are never read again
+
+    def open_postings_titled(self, title: str, limit: int = 30) -> list[dict[str, Any]]:
+        """Open saved postings with exactly this title (any capitalisation), with their employer's name."""
+        with self.session() as db:
+            rows = db.execute(
+                "SELECT p.url, p.title, p.location, e.name AS company FROM postings p JOIN employers e ON e.id = p.employer_id "
+                "WHERE p.closed_at IS NULL AND e.enabled = 1 AND lower(p.title) = lower(?) LIMIT ?",
+                (title.strip(), limit),
+            ).fetchall()
         return [dict(r) for r in rows]
 
     def locations_sample(self, limit: int = 4000) -> list[str]:

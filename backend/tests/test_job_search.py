@@ -785,3 +785,84 @@ def test_model_reply_text_is_always_a_string():
     assert reply_text("[1]") == "[1]"
     assert reply_text([{"type": "text", "text": "[1]"}, {"type": "text", "text": "[2]"}]) == "[1][2]"
     assert reply_text([{"type": "other"}, "x"]) == "x"
+
+
+def _save_posting(company, title, location, url):
+    import time
+    from app.services.jobcache.store import JobCache
+
+    cache = JobCache()
+    emp_id, _ = cache.upsert_employer("workday", f"{company}-id", company, "test")
+    with cache.session() as db:
+        db.execute(
+            "INSERT INTO postings (employer_id, ext_id, title, location, url, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (emp_id, url[-8:], title, location, url, int(time.time()), int(time.time())),
+        )
+
+
+def _counting_resolver(monkeypatch, answers):
+    ws = _resolver(monkeypatch, answers)
+    calls = []
+    real = ws.LLMClient.chat_completion
+
+    async def counted(self, **kwargs):
+        calls.append(kwargs)
+        return await real(self, **kwargs)
+
+    monkeypatch.setattr(ws.LLMClient, "chat_completion", counted)
+    return ws, calls
+
+
+def test_board_result_found_in_the_saved_lists_costs_no_lookup(monkeypatch):
+    import asyncio
+
+    ws, calls = _counting_resolver(monkeypatch, {})
+    _save_posting("Acme Health", "Revenue Cycle Analyst", "Boston, MA", "https://acme.wd5.myworkdayjobs.com/en-US/careers/job/R1")
+    out, dropped = asyncio.run(ws.resolve_original_sources(_board_items()))
+    by_title = {i["title"]: i for i in out}
+    assert by_title["Revenue Cycle Analyst"]["url"] == "https://acme.wd5.myworkdayjobs.com/en-US/careers/job/R1"
+    assert len(calls) == 1  # only "Revenue Cycle Billing Analyst" was looked up; the other came from the saved lists
+    assert dropped == 1
+
+
+def test_saved_list_match_needs_one_clear_posting(monkeypatch):
+    ws, calls = _counting_resolver(monkeypatch, {})
+    _save_posting("Acme Health", "Revenue Cycle Analyst", "Boston, MA", "https://acme.wd5.myworkdayjobs.com/job/R1aaaa")
+    _save_posting("Acme Health", "Revenue Cycle Analyst", "Denver, CO", "https://acme.wd5.myworkdayjobs.com/job/R2bbbb")
+    item = {**_board_items()[0], "location": "Denver, CO"}
+    assert ws.saved_original(item) == "https://acme.wd5.myworkdayjobs.com/job/R2bbbb"
+    assert ws.saved_original({**item, "location": None}) is None  # two places, none named: not guessed
+    assert ws.saved_original({**item, "company": "Other Corp"}) is None
+
+
+def test_a_lookup_answer_is_remembered_for_a_day(monkeypatch):
+    import asyncio
+
+    ws, calls = _counting_resolver(monkeypatch, {"Revenue Cycle Analyst": "https://acme.example.com/jobs/1"})
+    first, _ = asyncio.run(ws.resolve_original_sources(_board_items()))
+    paid = len(calls)
+    second, _ = asyncio.run(ws.resolve_original_sources(_board_items()))
+    assert len(calls) == paid  # the second search paid for nothing: found and not-found answers were both remembered
+    assert [i["url"] for i in first] == [i["url"] for i in second]
+
+
+def test_an_old_remembered_answer_is_not_used(monkeypatch):
+    from app.services.jobcache.store import JobCache
+
+    cache = JobCache()
+    cache.lookup_put("linkedin.com/jobs/view/1", "https://acme.example.com/jobs/1")
+    assert cache.lookup_get("linkedin.com/jobs/view/1", 3600) == (True, "https://acme.example.com/jobs/1")
+    assert cache.lookup_get("linkedin.com/jobs/view/1", -1) == (False, None)
+    assert cache.lookup_get("indeed.com/nothing", 3600) == (False, None)
+
+
+def test_paid_lookups_go_to_the_best_fits_first(monkeypatch):
+    import asyncio
+
+    ws, calls = _counting_resolver(monkeypatch, {})
+    base = _board_items()[0]
+    many = [{**base, "title": f"Role {n}", "fit": n / 10, "url": f"https://www.linkedin.com/jobs/view/{n}", "url_key": f"linkedin.com/jobs/view/{n}"}
+            for n in range(5)]
+    asyncio.run(ws.resolve_original_sources(many))
+    asked = " ".join(json.dumps(c["messages"]) for c in calls)
+    assert len(calls) == ws.MAX_RESOLVE == 2 and "Role 4" in asked and "Role 3" in asked and "Role 0" not in asked

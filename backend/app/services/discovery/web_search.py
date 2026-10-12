@@ -182,7 +182,8 @@ AGGREGATOR_DOMAINS = frozenset(
         "jobilize.com", "jobtome.com", "hiring.cafe", "jobrapido.com", "jobsbucket.com", "jobgether.com", "careerjet.com",
     }
 )
-MAX_RESOLVE = 5  # job-board results looked up per search, to keep the cost and wait predictable
+MAX_RESOLVE = 2  # paid job-board lookups per search (a lookup is a web search; most find nothing)
+LOOKUP_MEMORY_SECONDS = 24 * 3600  # an answer, found or not, is reused for a day
 
 
 def is_aggregator(url: str) -> bool:
@@ -303,17 +304,74 @@ async def _original_is_acceptable(item: dict[str, Any], url: str, grounded: bool
     return grounded
 
 
+def saved_original(item: dict[str, Any]) -> str | None:
+    """
+    The employer's own link for a job-board result, taken from the saved employer lists: same employer, same title
+    (and the same place when several match). Free: no web search, no AI. None when there is no single clear match.
+    """
+    from app.services.jobcache.store import JobCache
+    from app.services.jobcache.text import _squash, clean_company
+
+    wanted = _squash(clean_company(item.get("company")))
+    if len(wanted) < 4 or not item.get("title"):
+        return None
+    rows = []
+    for row in JobCache().open_postings_titled(item["title"]):
+        have = _squash(clean_company(row["company"]))
+        if have == wanted or (min(len(have), len(wanted)) >= 8 and (have in wanted or wanted in have)):
+            rows.append(row)
+    if len(rows) > 1 and item.get("location"):
+        city = item["location"].split(",")[0].strip().lower()
+        rows = [r for r in rows if city and city in (r.get("location") or "").lower()] or rows
+    return rows[0]["url"] if len(rows) == 1 else None
+
+
 async def resolve_original_sources(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
     """
-    For results found on job boards, looks up the same job on the employer's own site and swaps the link.
-    A board result with no verified original is dropped: those links usually cannot be read, scored or filled.
-    Returns the items and how many were dropped.
+    For results found on job boards, finds the same job on the employer's own site and swaps the link. In order of cost:
+    the saved employer lists (free), answers remembered from the last day (free), then a paid web lookup for at most
+    MAX_RESOLVE results, the best fits first. A board result with no verified original is dropped: those links usually
+    cannot be read, scored or filled. Returns the items and how many were dropped.
     """
     todo = [i for i in items if is_board_result(i)]
     if not todo:
         return items, 0
+    from app.services.jobcache.store import JobCache
+
+    replacement: dict[int, dict[str, Any] | None] = {}
+    paid: list[dict[str, Any]] = []
+    from_saved = from_memory = 0
+    for item in sorted(todo, key=lambda i: -(i.get("fit") or 0.0)):
+        try:
+            link = await asyncio.to_thread(saved_original, item)
+        except Exception:  # the saved lists are a bonus: if they cannot be read, fall through to the paid lookup
+            log.exception("job search: could not check the saved employer lists for an original")
+            link = None
+        if link:
+            replacement[id(item)] = {**item, "url": link, "url_key": url_key(link), "grounded": True}
+            from_saved += 1
+            continue
+        try:
+            remembered, found = await asyncio.to_thread(JobCache().lookup_get, item["url_key"], LOOKUP_MEMORY_SECONDS)
+        except Exception:
+            remembered, found = False, None
+        if remembered:
+            from_memory += 1
+            if found and await _original_is_acceptable(item, found, True):
+                replacement[id(item)] = {**item, "url": found, "url_key": url_key(found), "grounded": True}
+            else:
+                replacement[id(item)] = None
+            continue
+        paid.append(item)
+
     model = search_model()
     gate = asyncio.Semaphore(3)
+
+    async def remember(item: dict[str, Any], found: str | None) -> None:
+        try:
+            await asyncio.to_thread(JobCache().lookup_put, item["url_key"], found)
+        except Exception:
+            log.exception("job search: could not remember a lookup")
 
     async def one(item: dict[str, Any]) -> dict[str, Any] | None:
         async with gate:
@@ -326,27 +384,35 @@ async def resolve_original_sources(items: list[dict[str, Any]]) -> tuple[list[di
                     extra={"plugins": [web_plugin(5)]},
                     timeout=90.0,
                 )
-            except Exception:  # a failed lookup just means no original found
+            except Exception:  # a failed call is not remembered: it may work next time
                 return None
             found = parse_object(result.content).get("url")
             link = _clean(found, 1000)
             if not link or not is_http_url(link):
+                await remember(item, None)
                 return None
             link = strip_tracking_params(link)
             grounded = url_key(link) in cited_urls(result.raw)
             if not await _original_is_acceptable(item, link, grounded):
+                await remember(item, None)
                 return None
+            await remember(item, link)
             return {**item, "url": link, "url_key": url_key(link), "grounded": grounded}
 
-    attempt = todo[:MAX_RESOLVE]
+    attempt = paid[:MAX_RESOLVE]
     resolved = await asyncio.gather(*(one(i) for i in attempt))
     for item, found in zip(attempt, resolved):
+        replacement[id(item)] = found
         log.warning(
             "job search: not on an employer site: %s | %s -> %s", item.get("company"), item["url"], found["url"] if found else "no employer posting found"
         )
-    for item in todo[MAX_RESOLVE:]:
+    for item in paid[MAX_RESOLVE:]:
+        replacement[id(item)] = None
         log.warning("job search: not on an employer site (not looked up, over the limit): %s | %s", item.get("company"), item["url"])
-    replacement = {id(i): r for i, r in zip(attempt, resolved)}
+    log.warning(
+        "job search: %d board results: %d matched in the saved lists, %d answered from the last day, %d paid lookups (%d found), %d skipped over the limit",
+        len(todo), from_saved, from_memory, len(attempt), sum(1 for r in resolved if r), max(len(paid) - MAX_RESOLVE, 0),
+    )
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     dropped = 0

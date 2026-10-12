@@ -26,6 +26,7 @@ from app.services.jobcache.text import (
     level_of,
     location_fit,
     parse_location_query,
+    pay_midpoint,
     place_ref,
     split_titles,
     words,
@@ -53,6 +54,7 @@ class Plan:
     loc: LocationQuery
     work_type: str = "any"
     keywords: list[str] = field(default_factory=list)  # stems
+    keyword_phrases: list[list[str]] = field(default_factory=list)  # one list of stems per keyword the person typed
     pay_floor: int | None = None
     window_days: int = 0
     excluded: list[str] = field(default_factory=list)
@@ -80,10 +82,13 @@ def build_plan(criteria: Any, extra_titles: list[str] | None = None, extra_place
             queries.append(q)
     for title in extra_titles or []:
         q = make_query(title, EXPANDED_WEIGHT)
+        if q and len(q.stems) < 2:
+            continue  # a one-word alternative ("Specialist", "Analyst") would match almost any job in the field
         if q and fold(title) not in seen:
             seen.add(fold(title))
             queries.append(q)
     keywords = [s for s in content_stems(criteria.keywords) if s] if getattr(criteria, "keywords", None) else []
+    phrases = [ph for ph in (content_stems(k) for k in re.split(r"[,;\n]", getattr(criteria, "keywords", None) or "")) if ph]
     floor = None
     if getattr(criteria, "target_salary", None):
         floor = int(criteria.target_salary * 0.95)  # same 5% slack the rest of Job Search uses
@@ -96,6 +101,7 @@ def build_plan(criteria: Any, extra_titles: list[str] | None = None, extra_place
         loc=loc,
         work_type=getattr(criteria, "work_type", "any") or "any",
         keywords=keywords,
+        keyword_phrases=phrases,
         pay_floor=floor,
         window_days=int(getattr(criteria, "posted_within_days", 0) or 0),
         excluded=excluded,
@@ -203,17 +209,30 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
     if lf <= 0.0:
         return None
     mid = row.get("pay_mid")
+    if mid is None and row.get("pay_text"):
+        mid = pay_midpoint(row["pay_text"])  # saved before the pay could be read: read it now
     if plan.pay_floor and mid is not None and mid < plan.pay_floor:
         return None
     posted = _date(row.get("posted_at"))
     if plan.window_days and posted and (today - posted).days > plan.window_days:
         return None
     kw = 0.0
-    if plan.keywords:
-        hay = set(all_stems(f"{row['title']} {row.get('company') or ''} {row.get('location') or ''}"))
-        kw = 1.0 if any(k in hay for k in plan.keywords) else 0.0
+    if plan.keyword_phrases:
+        # Keywords are required: every word of at least one keyword must be in the title, employer or place
+        # (saved postings carry no description). A posting that has none of them is left out.
+        if not keyword_match(plan, f"{row['title']} {row.get('company') or ''} {row.get('location') or ''}"):
+            return None
+        kw = 1.0
     fit = W_TITLE * tf + W_PLACE * lf + W_RECENT * _recency(posted, today) + W_PAY * (1.0 if mid is not None else 0.0) + W_KEYWORD * kw
     return Scored(row=row, fit=round(fit, 4), title_fit=tf, place_fit=lf)
+
+
+def keyword_match(plan: Plan, text: str) -> bool:
+    """True when no keywords were asked for, or the text holds every word of at least one of them."""
+    if not plan.keyword_phrases:
+        return True
+    have = set(all_stems(text))
+    return any(all(k in have for k in phrase) for phrase in plan.keyword_phrases)
 
 
 def fit_for_item(plan: Plan, title: str, location: str | None, work_type: str | None, posted: dt.date | None) -> float:

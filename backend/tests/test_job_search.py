@@ -185,7 +185,7 @@ def test_salary_minimum_is_a_floor_on_the_pay_midpoint_with_five_percent_slack(s
     assert salary_floor(100000) == 95000
     assert salary_midpoint("$80,000 - $100,000") == 90000
     assert salary_midpoint("$85k") == 85000
-    assert salary_midpoint("$45 - $60 per hour") is None and salary_midpoint("Competitive") is None
+    assert salary_midpoint("$45 - $60 per hour") == 52.5 * 2080 and salary_midpoint("Competitive") is None
 
     client, _ = search
     low = client.post("/api/v1/job-search/run", json={"titles": "analyst", "target_salary": 100000}).json()
@@ -866,3 +866,56 @@ def test_paid_lookups_go_to_the_best_fits_first(monkeypatch):
     asyncio.run(ws.resolve_original_sources(many))
     asked = " ".join(json.dumps(c["messages"]) for c in calls)
     assert len(calls) == ws.MAX_RESOLVE == 2 and "Role 4" in asked and "Role 3" in asked and "Role 0" not in asked
+
+
+def test_pay_with_cents_and_hourly_pay_are_checked_against_the_salary_minimum():
+    from app.services.discovery.web_search import salary_midpoint, salary_floor
+
+    floor = salary_floor(80000)
+    for text in ("$43,800.00 - $51,100.00", "$17.71 - $24.28", "$50,070.00 - $60,730.00"):
+        assert salary_midpoint(text) < floor, text
+    for text in ("$75,275.20 - $109,553.60", "$76,300.00 - $92,100.00", "$39.00 - $49.63"):  # the last is hourly: about $92,000 a year
+        assert salary_midpoint(text) >= floor, text
+
+
+def _plan(**kw):
+    from types import SimpleNamespace
+    from app.services.jobcache import matcher
+
+    base = dict(titles="consultant", location="Boston, MA", work_type="any", keywords="revenue cycle", target_salary=80000,
+                require_salary=True, posted_within_days=7, exclude_companies=None)
+    extra = kw.pop("extra", None)
+    base.update(kw)
+    return matcher.build_plan(SimpleNamespace(**base), extra)
+
+
+def _row(title, pay_text=None, pay_mid=None, company="Acme Health", location="Boston, MA"):
+    return {"title": title, "company": company, "location": location, "work_type": None, "pay_text": pay_text, "pay_mid": pay_mid, "posted_at": None}
+
+
+def test_a_keyword_is_required_and_a_job_without_it_is_left_out():
+    from app.services.jobcache import matcher
+
+    plan = _plan(extra=None)
+    assert matcher.score_row(plan, _row("Revenue Cycle Consultant")) is not None
+    assert matcher.score_row(plan, _row("Epic Consultant")) is None  # no "revenue cycle" anywhere
+    assert matcher.score_row(plan, _row("Cycle Consultant")) is None  # both words of the keyword are needed
+    assert matcher.score_row(_plan(keywords=None), _row("Epic Consultant")) is not None  # no keyword asked: nothing required
+
+
+def test_one_word_alternative_titles_are_not_used():
+    from app.services.jobcache import matcher
+
+    plan = _plan(keywords=None, target_salary=None, extra=["Specialist", "Analyst", "Revenue Cycle Advisor"])
+    assert matcher.score_row(plan, _row("Registration Specialist")) is None
+    assert matcher.score_row(plan, _row("Revenue Cycle Advisor")) is not None  # a two-word alternative still counts
+
+
+def test_saved_pay_text_is_read_when_the_saved_number_is_missing():
+    from app.services.jobcache import matcher
+
+    plan = _plan(keywords=None, extra=None)
+    assert matcher.score_row(plan, _row("Consultant", pay_text="$43,800.00 - $51,100.00")) is None
+    assert matcher.score_row(plan, _row("Consultant", pay_text="$17.71 - $24.28")) is None
+    assert matcher.score_row(plan, _row("Consultant", pay_text="$90,000.00 - $110,000.00")) is not None
+    assert matcher.score_row(plan, _row("Consultant", pay_text=None)) is not None  # no pay stated: kept here, removed by "pay must be listed"

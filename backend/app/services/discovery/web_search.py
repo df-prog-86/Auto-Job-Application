@@ -57,20 +57,11 @@ def salary_floor(target: int) -> int:
     return int(target * 0.95)
 
 
-_MONEY = re.compile(r"\$?\s*(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*([kK])?")
-
-
 def salary_midpoint(text: str | None) -> float | None:
-    """Midpoint of a yearly pay range written in the posting ("$80,000 - $100,000", "85k"). None if unclear or hourly."""
-    if not text:
-        return None
-    values: list[float] = []
-    for number, k in _MONEY.findall(text)[:2]:
-        value = float(number.replace(",", ""))
-        values.append(value * 1000 if k else value)
-    if not values or min(values) < 1000:
-        return None  # hourly or not a yearly figure: cannot tell
-    return sum(values) / len(values)
+    """Midpoint of a pay range written in the posting, as a yearly figure (hourly ranges are annualised). None if unclear."""
+    from app.services.jobcache.text import pay_midpoint
+
+    return pay_midpoint(text)
 
 
 def excluded_companies(criteria: JobSearchIn) -> list[str]:
@@ -891,6 +882,11 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
     if off_topic:
         log.warning("job search: %d web results left out as off topic", len(off_topic))
         web_items = [i for i in web_items if i not in off_topic]
+    # Keywords are required here too: the title, employer or one-line summary must hold every word of at least one of them.
+    no_keyword = [i for i in web_items if not matcher.keyword_match(plan, f"{i['title']} {i['company']} {i.get('summary') or ''}")]
+    if no_keyword:
+        log.warning("job search: %d web results left out for not mentioning a keyword", len(no_keyword))
+        web_items = [i for i in web_items if i not in no_keyword]
     for item in web_items:  # the same measure of fit for every result, so they sort together
         item["fit"] = matcher.fit_for_item(plan, item["title"], item.get("location"), item.get("work_type"), item.get("posted_at"))
     if web_items:  # employers on the four systems that the web search found join the saved lists

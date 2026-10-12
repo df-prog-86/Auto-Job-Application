@@ -80,20 +80,28 @@ def split_titles(text: str) -> list[str]:
 
 # ---- pay --------------------------------------------------------------------------------------------------------
 
-_MONEY = re.compile(r"\$?\s*(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*([kK])?")
+_MONEY = re.compile(r"\$?\s*(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*([kK])?")
+HOURS_PER_YEAR = 2080
 
 
 def pay_midpoint(text: str | None) -> float | None:
-    """Midpoint of a yearly pay range written as text ("$80,000 - $100,000", "85k"). None when unclear or hourly."""
+    """
+    Midpoint of a pay range written as text, as a yearly figure: "$80,000 - $100,000", "$43,800.00 - $51,100.00", "85k".
+    An hourly range ("$17.71 - $24.28") is turned into a yearly one (2,080 hours). None when unclear.
+    """
     if not text:
         return None
     values: list[float] = []
     for number, k in _MONEY.findall(text)[:2]:
         value = float(number.replace(",", ""))
         values.append(value * 1000 if k else value)
-    if not values or min(values) < 1000:
+    if not values:
         return None
-    return sum(values) / len(values)
+    if min(values) >= 1000:
+        return sum(values) / len(values)
+    if 8 <= min(values) and max(values) <= 250:  # small numbers read as an hourly rate
+        return sum(values) / len(values) * HOURS_PER_YEAR
+    return None
 
 
 # ---- work type --------------------------------------------------------------------------------------------------

@@ -169,7 +169,8 @@ def test_places():
 
 def test_pay_and_levels_and_dates():
     assert text.pay_midpoint("$80,000 - $100,000") == 90000 and text.pay_midpoint("85k") == 85000
-    assert text.pay_midpoint("$45 - $60 per hour") is None
+    assert text.pay_midpoint("$45 - $60 per hour") == 52.5 * 2080  # hourly pay is read as a yearly figure (2,080 hours)
+    assert text.pay_midpoint("$43,800.00 - $51,100.00") == 47450  # cents do not break it
     assert text.level_of("Senior Revenue Cycle Manager") == 3 and text.level_of("Director of Finance") == 5
     assert text.level_of("Revenue Cycle") is None
     assert text.workday_posted("Posted 30+ Days Ago", TODAY) == TODAY - dt.timedelta(days=30)

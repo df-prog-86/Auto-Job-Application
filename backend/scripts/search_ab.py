@@ -38,6 +38,7 @@ PRICES = {
     "openai/gpt-4o-mini": (0.15, 0.60),
     "deepseek/deepseek-chat": (0.32, 0.89),
     "z-ai/glm-5.3-flash": (0.15, 0.50),
+    "openai/gpt-6-luna": (0.10, 0.50),
 }
 BOARDS = ["linkedin.com", "indeed.com", "ziprecruiter.com", "glassdoor.com", "simplyhired.com", "monster.com", "careerbuilder.com", "dice.com"]
 MODES = ["A", "B", "C"]

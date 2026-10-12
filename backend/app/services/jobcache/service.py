@@ -27,7 +27,7 @@ from app.services.jobcache.text import fold, parse_location_query, place_ref
 log = logging.getLogger("job_cache")
 
 SYSTEM_LABELS = {"workday": "Workday", "greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "smartrecruiters": "SmartRecruiters",
-    "breezy": "Breezy HR", "workable": "Workable", "bamboohr": "BambooHR", "pinpoint": "Pinpoint", "jazzhr": "JazzHR", "jobvite": "Jobvite", "oracle": "Oracle Cloud", "icims": "iCIMS", "taleo": "Taleo", "phenom": "Phenom", "successfactors": "SuccessFactors",
+    "breezy": "Breezy HR", "workable": "Workable", "bamboohr": "BambooHR", "pinpoint": "Pinpoint", "jazzhr": "JazzHR", "jobvite": "Jobvite", "oracle": "Oracle Cloud", "icims": "iCIMS", "taleo": "Taleo", "phenom": "Phenom", "successfactors": "SuccessFactors", "dayforce": "Dayforce", "kpmg": "KPMG careers site",
 }
 CONCURRENT_EMPLOYERS = 4
 PRIORITY_HOURS, REGULAR_HOURS = 6.0, 24.0
@@ -246,7 +246,7 @@ class AddEmployerError(Exception):
 async def add_employer(url: str, company: str | None = None) -> dict[str, Any]:
     ref = employer_ref(url)
     if ref is None:
-        raise AddEmployerError("That link isn't from a hiring system we can read yet (Workday, Greenhouse, Lever, Ashby, SmartRecruiters, Breezy, Workable, BambooHR, Pinpoint, JazzHR, Jobvite, Oracle Cloud, iCIMS, Taleo, Phenom or SuccessFactors). Paste a link to one of its job postings or its job list.")
+        raise AddEmployerError("That link isn't from a hiring system we can read yet (Workday, Greenhouse, Lever, Ashby, SmartRecruiters, Breezy, Workable, BambooHR, Pinpoint, JazzHR, Jobvite, Oracle Cloud, iCIMS, Taleo, Phenom, SuccessFactors, Dayforce or the KPMG careers site). Paste a link to one of its job postings or its job list.")
     system, identifier = ref
     if system in disabled_systems():
         raise AddEmployerError(f"Reading {SYSTEM_LABELS[system]} is switched off.")

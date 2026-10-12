@@ -26,14 +26,14 @@ from app.services.jobcache.text import pay_midpoint, work_type_from, workday_pos
 USER_AGENT = "JobAgent/1.0 (personal job search tool; reads public job lists)"
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
-SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle", "icims", "taleo", "phenom", "successfactors")
+SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle", "icims", "taleo", "phenom", "successfactors", "dayforce", "kpmg")
 WORKDAY_PAGE = 20  # Workday returns at most 20 jobs per request
 WORKDAY_MAX_JOBS = 4000  # a very large employer is read up to this many jobs, newest first as Workday lists them (IQVIA hit the old 1,500 limit)
 SMARTRECRUITERS_PAGE = 100  # postings per request from the public Posting API
 SMARTRECRUITERS_MAX_JOBS = 2000
 _MIN_GAP = {
     "workday": 0.6, "greenhouse": 0.3, "lever": 0.3, "ashby": 0.3, "smartrecruiters": 0.4,
-    "breezy": 0.5, "workable": 0.5, "bamboohr": 0.5, "pinpoint": 0.5, "jazzhr": 0.8, "jobvite": 0.8, "oracle": 0.6, "icims": 1.0, "taleo": 1.0, "phenom": 0.6, "successfactors": 1.0,
+    "breezy": 0.5, "workable": 0.5, "bamboohr": 0.5, "pinpoint": 0.5, "jazzhr": 0.8, "jobvite": 0.8, "oracle": 0.6, "icims": 1.0, "taleo": 1.0, "phenom": 0.6, "successfactors": 1.0, "dayforce": 0.6, "kpmg": 1.0,
 }  # seconds between requests to one site
 PHENOM_SITES = {"careers.bcg.com"}  # Phenom career sites differ in their settings, so each one is added by hand once it has been checked
 SUCCESSFACTORS_SITES = {"careers.ey.com"}  # EY lists the whole world; only its US jobs are read (see SUCCESSFACTORS_COUNTRY)
@@ -131,6 +131,10 @@ def employer_ref(url: str) -> tuple[str, str] | None:
         return "phenom", host
     if host in SUCCESSFACTORS_SITES and segs and segs[0] == "ey":
         return "successfactors", f"{host}|{segs[0]}"
+    if host == "jobs.dayforcehcm.com" and len(segs) >= 3 and _LANG.fullmatch(segs[0]):
+        return "dayforce", f"{segs[1]}|{segs[2]}|{segs[0]}"
+    if host in ("www.kpmguscareers.com", "kpmguscareers.com") and segs and segs[0] in ("job-search", "jobdetail"):
+        return "kpmg", "www.kpmguscareers.com"
     if host.endswith(".icims.com") and sub not in ("www", "app", "api", "login", "careers", "jobs"):
         return "icims", host
     if host.endswith(".oraclecloud.com") and ".fa." in host and "sites" in segs[:-1]:
@@ -834,12 +838,124 @@ async def _read_successfactors(identifier: str, client: httpx.AsyncClient, throt
     return ReadResult(postings, complete=complete, notes=notes)
 
 
+# ---- Dayforce (job list answer, needs the site's own security token first) ----------------------------------------
+
+DAYFORCE_MAX_JOBS = 3000
+
+
+def parse_dayforce(data: Any, ns: str, board: str, culture: str) -> tuple[list[PostingIn], int | None]:
+    """Dayforce's search answer: {"jobPostings": [{jobPostingId, jobTitle, postingStartTimestampUTC, hasVirtualLocation, postingLocations}], "maxCount": n}."""
+    total = data.get("maxCount") if isinstance(data, dict) and isinstance(data.get("maxCount"), int) else None
+    out: list[PostingIn] = []
+    for j in (data.get("jobPostings") if isinstance(data, dict) else None) or []:
+        if not isinstance(j, dict) or j.get("jobPostingId") is None or not j.get("jobTitle"):
+            continue
+        title = re.sub(r"^\d{3,}\s*-\s*", "", str(j["jobTitle"]).strip()) or str(j["jobTitle"]).strip()  # the title starts with an internal job number
+        places: list[str] = []
+        for loc in j.get("postingLocations") or []:
+            if not isinstance(loc, dict):
+                continue
+            city, state = str(loc.get("city") or "").strip(), str(loc.get("stateCode") or "").strip()
+            text = ", ".join(x for x in (city, state) if x) or str(loc.get("formattedAddress") or "").strip()
+            if text and text not in places:
+                places.append(text)
+        has_city = any("," in p for p in places)
+        if not places and j.get("hasVirtualLocation") is True:
+            places = ["Remote"]
+        loc_text = "; ".join(places) or None
+        declared = "remote" if j.get("hasVirtualLocation") is True and not has_city else None
+        out.append(
+            PostingIn(
+                ext_id=str(j["jobPostingId"]), title=title, url=f"https://jobs.dayforcehcm.com/{culture}/{ns}/{board}/jobs/{j['jobPostingId']}",
+                location=loc_text, work_type=work_type_from(declared, loc_text, title), posted_at=_date(j.get("postingStartTimestampUTC")),
+            )
+        )
+    return out, total
+
+
+async def _read_dayforce(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    try:
+        ns, board, culture = identifier.split("|")
+    except ValueError as exc:
+        raise ReaderError("that Dayforce address is incomplete", gone=True) from exc
+    base = "https://jobs.dayforcehcm.com"
+    token = await _request(client, throttle, "dayforce", "GET", f"{base}/api/auth/csrf")  # the site hands out a token and a cookie, as it does to any visitor
+    csrf = token.get("csrfToken") if isinstance(token, dict) else None
+    if not isinstance(csrf, str) or not csrf:
+        raise ReaderError("the site's answer was not what we expected")
+    headers = {"Content-Type": "application/json", "Accept": "application/json", "x-csrf-token": csrf, "Origin": base, "Referer": f"{base}/{culture}/{ns}/{board}"}
+    postings: list[PostingIn] = []
+    total: int | None = None
+    complete = False
+    start = 0
+    while start < DAYFORCE_MAX_JOBS:
+        body = {"clientNamespace": ns, "jobBoardCode": board, "cultureCode": culture, "distanceUnit": 0, "paginationStart": start}
+        data = await _request(client, throttle, "dayforce", "POST", f"{base}/api/geo/{ns}/jobposting/search", json=body, headers=headers)
+        if not isinstance(data, dict) or not isinstance(data.get("jobPostings"), list):
+            raise ReaderError("the site's answer was not what we expected")
+        page, count = parse_dayforce(data, ns, board, culture)
+        total = count if count is not None else total
+        postings.extend(p for p in page if p.ext_id not in {q.ext_id for q in postings})
+        start += len(data["jobPostings"])
+        if not data["jobPostings"] or (total is not None and start >= total):
+            complete = True
+            break
+    notes = [] if complete else [f"read the first {len(postings)} of {total or 'many'} jobs"]
+    return ReadResult(postings, complete=complete, notes=notes)
+
+
+# ---- KPMG US careers site (page reading) --------------------------------------------------------------------------
+
+KPMG_MAX_PAGES = 120
+_KPMG_HOST = "www.kpmguscareers.com"
+
+
+def parse_kpmg(page: Any) -> list[PostingIn]:
+    """KPMG's job search page (https://www.kpmguscareers.com/job-search/?spage=N): 12 cards, each with a link to /jobdetail/?jobId=<n>, a title and "Group | Place; Place"."""
+    out: list[PostingIn] = []
+    seen: set[str] = set()
+    for block in re.split(r'<div class="search--item', page if isinstance(page, str) else "")[1:]:
+        link = re.search(r'href="(/jobdetail/\?jobId=(\d+))"', block)
+        if not link or link.group(2) in seen:
+            continue
+        lv = block[block.find("list-view"):] if "list-view" in block else block
+        title_m = re.search(r'<div class="h5[^"]*">(.*?)</div>', lv, re.S)
+        title = _plain(title_m.group(1)) if title_m else ""
+        if not title:
+            continue
+        seen.add(link.group(2))
+        meta_m = re.search(r'<div class="text-xs[^"]*">(.*?)</div>', lv, re.S)
+        meta = _plain(meta_m.group(1)) if meta_m else ""
+        loc = meta.split("|", 1)[1].strip() if "|" in meta else None
+        out.append(PostingIn(ext_id=link.group(2), title=title, url=f"https://{_KPMG_HOST}{link.group(1)}", location=loc or None, work_type=work_type_from(None, loc, title)))
+    return out
+
+
+async def _read_kpmg(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    postings: list[PostingIn] = []
+    complete = False
+    for n in range(1, KPMG_MAX_PAGES + 1):
+        url = f"https://{_KPMG_HOST}/job-search/" + (f"?spage={n}" if n > 1 else "")
+        page = await _request(client, throttle, "kpmg", "GET", url, text=True, headers={"Accept": "text/html"})
+        found = parse_kpmg(page)
+        if n == 1 and not found:
+            raise ReaderError("we couldn't make sense of that careers page")
+        new = [p for p in found if p.ext_id not in {q.ext_id for q in postings}]
+        postings.extend(new)
+        if not new:
+            complete = True
+            break
+    notes = [] if complete else [f"read the first {len(postings)} jobs"]
+    return ReadResult(postings, complete=complete, notes=notes)
+
+
 # ---- entry point --------------------------------------------------------------------------------------------------
 
 _READERS = {"greenhouse": _read_greenhouse, "lever": _read_lever, "ashby": _read_ashby, "workday": _read_workday, "smartrecruiters": _read_smartrecruiters,
     "breezy": _read_breezy, "workable": _read_workable, "bamboohr": _read_bamboohr, "pinpoint": _read_pinpoint,
     "jazzhr": _read_jazzhr, "jobvite": _read_jobvite, "oracle": _read_oracle, "icims": _read_icims,
     "taleo": _read_taleo, "phenom": _read_phenom, "successfactors": _read_successfactors,
+    "dayforce": _read_dayforce, "kpmg": _read_kpmg,
 }
 
 

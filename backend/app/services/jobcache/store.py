@@ -483,6 +483,8 @@ OTHER_NAMES = {
     ("taleo", "phh.tbe.taleo.net|phh01|thebridg12|40"): "The Bridgespan Group",
     ("phenom", "careers.bcg.com"): "Boston Consulting Group",
     ("successfactors", "careers.ey.com|ey"): "EY",
+    ("dayforce", "finthrive|candidateportal|en-us"): "FinThrive",
+    ("kpmg", "www.kpmguscareers.com"): "KPMG",
 }
 
 

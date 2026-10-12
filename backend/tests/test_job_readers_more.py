@@ -276,3 +276,77 @@ def test_successfactors_page_is_parsed_and_paged():
             async def request(self, method, url, **kw):
                 return _Resp(None, "<html>new layout</html>")
         asyncio.run(readers.read_employer("successfactors", "careers.ey.com|ey", Bad(), _NoWait()))
+
+
+DAYFORCE_ANSWER = {
+    "maxCount": 3, "offset": 0, "count": 3,
+    "jobPostings": [
+        {"jobPostingId": 8358, "jobTitle": "32791-VP, Product Management", "hasVirtualLocation": True, "postingStartTimestampUTC": "2026-10-05T05:00:00+00:00", "postingLocations": None},
+        {"jobPostingId": 8344, "jobTitle": "10732-Senior Project Coordinator", "hasVirtualLocation": True, "postingStartTimestampUTC": "2026-09-30T04:00:00+00:00",
+         "postingLocations": [{"formattedAddress": "United States", "locationType": 2, "isoCountryCode": "US", "stateCode": None, "city": None}]},
+        {"jobPostingId": 8001, "jobTitle": "Revenue Cycle Analyst", "hasVirtualLocation": False, "postingStartTimestampUTC": "2026-09-01T04:00:00+00:00",
+         "postingLocations": [{"formattedAddress": "Boston, MA, US", "isoCountryCode": "US", "stateCode": "MA", "city": "Boston"}]},
+    ],
+}
+
+
+def test_dayforce_answer_is_parsed():
+    assert readers.employer_ref("https://jobs.dayforcehcm.com/en-US/finthrive/CANDIDATEPORTAL/jobs/8354") == ("dayforce", "finthrive|CANDIDATEPORTAL|en-US")
+    assert readers.employer_ref("https://jobs.dayforcehcm.com/") is None
+    posts, total = readers.parse_dayforce(DAYFORCE_ANSWER, "finthrive", "CANDIDATEPORTAL", "en-US")
+    assert total == 3 and [p.title for p in posts] == ["VP, Product Management", "Senior Project Coordinator", "Revenue Cycle Analyst"]
+    assert posts[0].location == "Remote" and posts[0].work_type == "remote" and posts[1].work_type == "remote" and posts[2].location == "Boston, MA" and posts[2].work_type is None
+    assert posts[0].url == "https://jobs.dayforcehcm.com/en-US/finthrive/CANDIDATEPORTAL/jobs/8358" and posts[0].posted_at == dt.date(2026, 10, 5)
+
+
+def test_dayforce_reader_fetches_the_token_first_and_sends_it_back():
+    calls = []
+
+    class Client:
+        async def request(self, method, url, **kw):
+            calls.append((method, url, (kw.get("headers") or {}).get("x-csrf-token"), (kw.get("json") or {}).get("paginationStart")))
+            return _Resp({"csrfToken": "tok123"} if method == "GET" else DAYFORCE_ANSWER)
+
+    res = asyncio.run(readers.read_employer("dayforce", "finthrive|CANDIDATEPORTAL|en-US", Client(), _NoWait()))
+    assert len(res.postings) == 3 and res.complete
+    assert calls[0][:2] == ("GET", "https://jobs.dayforcehcm.com/api/auth/csrf")
+    assert calls[1] == ("POST", "https://jobs.dayforcehcm.com/api/geo/finthrive/jobposting/search", "tok123", 0)
+    assert known_name("dayforce", "finthrive|CANDIDATEPORTAL|en-US") == "FinThrive"
+
+    class NoToken:
+        async def request(self, method, url, **kw):
+            return _Resp({"nope": 1})
+
+    with pytest.raises(readers.ReaderError):
+        asyncio.run(readers.read_employer("dayforce", "finthrive|CANDIDATEPORTAL|en-US", NoToken(), _NoWait()))
+
+
+KPMG_CARD = (
+    '<div class="holder--postings" data-value="list"> <div class="search--item mb-2 mb-md-3 search--experienced "> <a href="/jobdetail/?jobId=135758" data-id="1" class="box-shadow d-block">'
+    ' <div class="grid-view"> <div class="px-3 py-1 eyebrow">Experienced</div> <div class="p-3"><div class="h4 mb-4">Experienced Associate - Global Trade - Data Analytics</div>'
+    ' <div class="text-xs text-dark-grey">17 Locations</div></div></div> <div class="list-view d-flex justify-content-between"> <div class="p-2 ps-4">'
+    ' <div class="h5 text-dark-grey">Experienced Associate - Global Trade - Data Analytics</div>'
+    ' <div class="text-xs text-dark-grey">Tax | Atlanta, GA; Boston, MA; Chicago, IL</div> </div></div> </a></div>'
+    ' <div class="search--item mb-2 "> <a href="/jobdetail/?jobId=139052" class="box-shadow d-block"> <div class="list-view"> <div class="p-2">'
+    ' <div class="h5 text-dark-grey">Associate Director - Corporate Card Programs</div> <div class="text-xs text-dark-grey">Business Support Services | Montvale, NJ</div> </div></div></a></div>'
+)
+
+
+def test_kpmg_cards_are_parsed_and_paged():
+    assert readers.employer_ref("https://www.kpmguscareers.com/job-search/?spage=2") == ("kpmg", "www.kpmguscareers.com")
+    assert readers.employer_ref("https://www.kpmguscareers.com/about") is None
+    a, b = readers.parse_kpmg(KPMG_CARD)
+    assert a.ext_id == "135758" and a.title == "Experienced Associate - Global Trade - Data Analytics" and a.location == "Atlanta, GA; Boston, MA; Chicago, IL"
+    assert b.location == "Montvale, NJ" and b.url == "https://www.kpmguscareers.com/jobdetail/?jobId=139052"
+
+    urls = []
+
+    class Client:
+        async def request(self, method, url, **kw):
+            urls.append(url)
+            n = len(urls)
+            return _Resp(None, KPMG_CARD.replace("135758", str(n * 10 + 1)).replace("139052", str(n * 10 + 2)) if n <= 2 else "<html>no more</html>")
+
+    res = asyncio.run(readers.read_employer("kpmg", "www.kpmguscareers.com", Client(), _NoWait()))
+    assert len(res.postings) == 4 and res.complete and urls[1].endswith("?spage=2") and "spage" not in urls[0]
+    assert known_name("kpmg", "www.kpmguscareers.com") == "KPMG"

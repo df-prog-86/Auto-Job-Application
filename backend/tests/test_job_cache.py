@@ -735,3 +735,24 @@ def test_a_smartrecruiters_form_address_names_the_company_of_the_saved_posting()
     form = "https://jobs.smartrecruiters.com/oneclick-ui/company/BostonMedicalCenter/publication/2c4fbfd7-7bb8-4699-9fa2-ccacc65e17fb?dcr_ci=BostonMedicalCenter"
     assert company(posting) == company(form) == "bostonmedicalcenter"
     assert company("https://jobs.lever.co/acme/123") is None and company("https://jobs.smartrecruiters.com/oneclick-ui") is None
+
+
+def test_employers_known_by_address_get_their_proper_name(tmp_path):
+    from app.services.jobcache import store
+    from app.services.jobcache.store import JobCache, guess_name, known_name
+
+    wd = "roberthalf.wd1.myworkdayjobs.com|roberthalf|ProtivitiExperiencedCareers"
+    assert known_name("workday", wd) == "Protiviti"
+    assert known_name("workday", "roberthalf.wd1.myworkdayjobs.com|roberthalf|RobertHalfCareers") is None  # another site on that account
+    assert guess_name("workday", "premierinc.wd1.myworkdayjobs.com|premierinc|External_Professional") == "Premier Inc."
+    assert guess_name("workday", "unknown.wd1.myworkdayjobs.com|unknown|Jobs") == "Unknown"
+    assert known_name("lever", "pmaconsultants") == "PMA Consultants"
+
+    path = str(tmp_path / "names.db")
+    cache = JobCache(path)
+    with cache.session() as db:  # saved before the proper name was known
+        db.execute("INSERT INTO employers (ats, identifier, name, source, added_at) VALUES ('workday', ?, 'Roberthalf', 'user_link', 0)", (wd,))
+    store._INITIALISED.pop(path)
+    JobCache(path)  # opening the copy again fixes the name
+    with cache.session() as db:
+        assert db.execute("SELECT name FROM employers").fetchone()["name"] == "Protiviti"

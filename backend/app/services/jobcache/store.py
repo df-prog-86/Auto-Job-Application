@@ -128,6 +128,10 @@ class JobCache:
                     fts = True
                 except sqlite3.OperationalError:
                     fts = False  # this Python's SQLite has no full-text search: searches fall back to a plain scan
+                for row in conn.execute("SELECT id, ats, identifier, name FROM employers").fetchall():
+                    proper = known_name(row["ats"], row["identifier"])
+                    if proper and row["name"] != proper:  # fixes names saved before the proper one was known
+                        conn.execute("UPDATE employers SET name = ? WHERE id = ?", (proper, row["id"]))
                 conn.commit()
             finally:
                 conn.close()
@@ -440,8 +444,45 @@ class JobCache:
         }
 
 
+# Names for employers whose list address gives a run-together or shortened name ("premierinc"), shown the way people write
+# them. Keyed by a Workday address's "tenant" or, where one tenant hosts several companies, "tenant|site" (lower case).
+WORKDAY_NAMES = {
+    "huron": "Huron Consulting Group",
+    "guidehouse": "Guidehouse",
+    "premierinc": "Premier Inc.",
+    "nordic": "Nordic Global",
+    "tegria": "Tegria",
+    "bakertilly": "Baker Tilly",
+    "plantemoran": "Plante Moran",
+    "crowe": "Crowe",
+    "pcg": "Public Consulting Group",
+    "alirahealth": "Alira Health",
+    "ensemblehp": "Ensemble Health Partners",
+    "r1rcm": "R1 RCM",
+    "iqvia": "IQVIA",
+    "rsm": "RSM",
+    "fticonsulting": "FTI Consulting",
+    "alvarezandmarsal": "Alvarez & Marsal",
+    "cornerstone|cornerstoneresearch_careers": "Cornerstone Research",
+    "roberthalf|protivitiexperiencedcareers": "Protiviti",  # Protiviti's careers site runs on Robert Half's Workday account
+}
+OTHER_NAMES = {("lever", "pmaconsultants"): "PMA Consultants"}
+
+
+def known_name(ats: str, identifier: str) -> str | None:
+    """The proper name for an employer the app knows by address, or None."""
+    ident = identifier.lower()
+    if ats == "workday" and ident.count("|") == 2:
+        _, tenant, site = ident.split("|")
+        return WORKDAY_NAMES.get(f"{tenant}|{site}") or WORKDAY_NAMES.get(tenant)
+    return OTHER_NAMES.get((ats, ident))
+
+
 def guess_name(ats: str, identifier: str) -> str:
     """A readable name from an employer's address, used until a real name is known."""
+    known = known_name(ats, identifier)
+    if known:
+        return known
     slug = identifier.split("|")[1] if ats == "workday" and "|" in identifier else identifier
     slug = slug.removeprefix("eu:")
     return " ".join(w.capitalize() for w in slug.replace("_", "-").split("-") if w) or identifier

@@ -20,6 +20,9 @@ RAW = {
     "pinpoint": lambda i: f"https://{i}.pinpointhq.com/postings.json",
     "jazzhr": lambda i: f"https://{i}.applytojob.com/apply",
     "jobvite": lambda i: f"https://jobs.jobvite.com/{i}/jobs",
+    "icims": lambda i: f"https://{i}/jobs/search?ss=1&in_iframe=1",
+    "taleo": lambda i: "https://%s/%s/ats/careers/v2/searchResults?org=%s&cws=%s" % tuple(i.split("|")),
+    "successfactors": lambda i: "https://%s/%s/search/?q=&optionsFacetsDD_country=US&startrow=0" % tuple(i.split("|")),
     "oracle": lambda i: "https://%s/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList&finder=findReqs;siteNumber=%s,limit=2" % tuple(i.split("|")),
 }
 

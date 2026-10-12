@@ -16,7 +16,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
@@ -26,15 +26,22 @@ from app.services.jobcache.text import pay_midpoint, work_type_from, workday_pos
 USER_AGENT = "JobAgent/1.0 (personal job search tool; reads public job lists)"
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
-SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle", "icims")
+SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle", "icims", "taleo", "phenom", "successfactors")
 WORKDAY_PAGE = 20  # Workday returns at most 20 jobs per request
 WORKDAY_MAX_JOBS = 4000  # a very large employer is read up to this many jobs, newest first as Workday lists them (IQVIA hit the old 1,500 limit)
 SMARTRECRUITERS_PAGE = 100  # postings per request from the public Posting API
 SMARTRECRUITERS_MAX_JOBS = 2000
 _MIN_GAP = {
     "workday": 0.6, "greenhouse": 0.3, "lever": 0.3, "ashby": 0.3, "smartrecruiters": 0.4,
-    "breezy": 0.5, "workable": 0.5, "bamboohr": 0.5, "pinpoint": 0.5, "jazzhr": 0.8, "jobvite": 0.8, "oracle": 0.6, "icims": 1.0,
+    "breezy": 0.5, "workable": 0.5, "bamboohr": 0.5, "pinpoint": 0.5, "jazzhr": 0.8, "jobvite": 0.8, "oracle": 0.6, "icims": 1.0, "taleo": 1.0, "phenom": 0.6, "successfactors": 1.0,
 }  # seconds between requests to one site
+PHENOM_SITES = {"careers.bcg.com"}  # Phenom career sites differ in their settings, so each one is added by hand once it has been checked
+SUCCESSFACTORS_SITES = {"careers.ey.com"}  # EY lists the whole world; only its US jobs are read (see SUCCESSFACTORS_COUNTRY)
+SUCCESSFACTORS_COUNTRY = {"careers.ey.com": "US"}
+SUCCESSFACTORS_PAGE = 25
+SUCCESSFACTORS_MAX_JOBS = 4000
+PHENOM_PAGE = 50
+PHENOM_MAX_JOBS = 3000
 _LANG = re.compile(r"[a-z]{2}-[A-Za-z]{2}")
 
 
@@ -116,6 +123,14 @@ def employer_ref(url: str) -> tuple[str, str] | None:
         return "jazzhr", sub
     if host == "jobs.jobvite.com" and segs and segs[0].lower() not in ("careers", "search", "job", "jobs", "api"):
         return "jobvite", segs[0]
+    if host.endswith(".taleo.net") and segs:
+        q = parse_qs(parts.query or "")
+        org, cws = (q.get("org") or [""])[0], (q.get("cws") or [""])[0]
+        return ("taleo", f"{host}|{segs[0]}|{org}|{cws}") if org and cws else None
+    if host in PHENOM_SITES:
+        return "phenom", host
+    if host in SUCCESSFACTORS_SITES and segs and segs[0] == "ey":
+        return "successfactors", f"{host}|{segs[0]}"
     if host.endswith(".icims.com") and sub not in ("www", "app", "api", "login", "careers", "jobs"):
         return "icims", host
     if host.endswith(".oraclecloud.com") and ".fa." in host and "sites" in segs[:-1]:
@@ -668,11 +683,163 @@ async def _read_icims(identifier: str, client: httpx.AsyncClient, throttle: Thro
     return ReadResult(postings, complete=complete, notes=notes)
 
 
+# ---- Taleo (page reading) -----------------------------------------------------------------------------------------
+
+def parse_taleo(page: Any) -> list[PostingIn]:
+    """Taleo's career-site list (.../ats/careers/v2/searchResults?org=..&cws=..): each opening is a title link to viewRequisition?rid=<n> followed by its place."""
+    import html as _html
+
+    html = page if isinstance(page, str) else ""
+    out: list[PostingIn] = []
+    seen: set[str] = set()
+    for m in re.finditer(r'<h4[^>]*head-title[^>]*>\s*<a[^>]+href="([^"]*rid=(\d+)[^"]*)"[^>]*>(.*?)</a>\s*</h4>\s*(?:<div[^>]*>(.*?)</div>)?', html, re.S):
+        rid, title = m.group(2), _plain(m.group(3))
+        if rid in seen or not title:
+            continue
+        seen.add(rid)
+        loc = _plain(m.group(4) or "") or None
+        out.append(PostingIn(ext_id=rid, title=title, url=_html.unescape(m.group(1)), location=loc, work_type=work_type_from(None, loc, title)))
+    return out
+
+
+async def _read_taleo(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    try:
+        host, inst, org, cws = identifier.split("|")
+    except ValueError as exc:
+        raise ReaderError("that Taleo address is incomplete", gone=True) from exc
+    page = await _request(client, throttle, "taleo", "GET", f"https://{host}/{inst}/ats/careers/v2/searchResults?org={org}&cws={cws}", text=True, headers={"Accept": "text/html"})
+    postings = parse_taleo(page)
+    if not postings and not _NO_JOBS.search(_plain(page)):
+        raise ReaderError("we couldn't make sense of that careers page")
+    more = bool(re.search(r"(?i)next\s*page|pagination", page)) and len(postings) >= 25
+    return ReadResult(postings, complete=not more, notes=[f"read the first {len(postings)} jobs"] if more else [])
+
+
+# ---- Phenom (job list answer) -------------------------------------------------------------------------------------
+
+def parse_phenom(data: Any) -> tuple[list[PostingIn], int | None]:
+    """Phenom's search answer: {"refineSearch": {"totalHits": n, "data": {"jobs": [{title, jobId, location, postedDate, applyUrl}]}}}."""
+    import html as _html
+
+    block = data.get("refineSearch") if isinstance(data, dict) else None
+    total = block.get("totalHits") if isinstance(block, dict) and isinstance(block.get("totalHits"), int) else None
+    jobs = ((block or {}).get("data") or {}).get("jobs") if isinstance(block, dict) else None
+    out: list[PostingIn] = []
+    for j in jobs or []:
+        if not isinstance(j, dict) or not j.get("title") or not (j.get("jobId") or j.get("reqId")):
+            continue
+        loc = j.get("location") if isinstance(j.get("location"), str) and j["location"].strip() else None
+        title = str(j["title"]).strip()
+        code = str(j.get("jobId") or j.get("reqId"))
+        url = _html.unescape(str(j.get("applyUrl") or ""))
+        if not url.startswith("http"):
+            continue
+        out.append(PostingIn(ext_id=code, title=title, url=url, location=loc, work_type=work_type_from(None, loc, title), posted_at=_date(j.get("postedDate"))))
+    return out, total
+
+
+async def _read_phenom(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    postings: list[PostingIn] = []
+    total: int | None = None
+    complete = False
+    start = 0
+    while start < PHENOM_MAX_JOBS:
+        body = {
+            "lang": "en_global", "deviceType": "desktop", "country": "global", "pageName": "search-results", "ddoKey": "refineSearch",
+            "sortBy": "", "subsearch": "", "from": start, "jobs": True, "counts": True, "all_fields": ["category", "country", "state", "city", "type"],
+            "size": PHENOM_PAGE, "clearAll": False, "jdsource": "facets", "isSliderEnable": False, "pageId": "page14", "siteType": "external",
+            "keywords": "", "global": True, "selected_fields": {}, "sort": {"order": "desc", "field": "postedDate"}, "locationData": {},
+        }
+        data = await _request(client, throttle, "phenom", "POST", f"https://{identifier}/widgets", json=body, headers={"Content-Type": "application/json", "Accept": "application/json"})
+        if not isinstance(data, dict) or not isinstance(data.get("refineSearch"), dict):
+            raise ReaderError("the site's answer was not what we expected")
+        page, count = parse_phenom(data)
+        total = count if count is not None else total
+        postings.extend(p for p in page if p.ext_id not in {q.ext_id for q in postings[-PHENOM_PAGE * 2:]})
+        start += PHENOM_PAGE
+        if len(page) == 0 or (total is not None and start >= total):
+            complete = True
+            break
+    notes = [] if complete else [f"read the first {len(postings)} of {total or 'many'} jobs"]
+    return ReadResult(postings, complete=complete, notes=notes)
+
+
+# ---- SAP SuccessFactors career sites (page reading) ---------------------------------------------------------------
+
+def parse_successfactors(page: Any, host: str) -> tuple[list[PostingIn], int | None]:
+    """A SuccessFactors search page (https://<host>/<site>/search/): rows of tr.data-row with a jobTitle-link and a place, and "Results 1 to 25 of N"."""
+    import html as _html
+
+    html = page if isinstance(page, str) else ""
+    total_m = re.search(r"Results\s+\d+\s+\S+\s+\d+\s+of\s+([\d,]+)", html)
+    total = int(total_m.group(1).replace(",", "")) if total_m else None
+    out: list[PostingIn] = []
+    seen: set[str] = set()
+    for block in re.split(r'<tr[^>]*class="[^"]*data-row', html)[1:]:
+        link = re.search(r'<a[^>]+href="(/[^"]*?/job/[^"]*?/(\d+)/?)"[^>]*class="jobTitle-link"[^>]*>(.*?)</a>', block, re.S) or re.search(
+            r'<a[^>]+class="jobTitle-link"[^>]+href="(/[^"]*?/job/[^"]*?/(\d+)/?)"[^>]*>(.*?)</a>', block, re.S)
+        if not link or link.group(2) in seen:
+            continue
+        title = _plain(link.group(3))
+        if not title:
+            continue
+        seen.add(link.group(2))
+        loc_m = re.search(r'class="[^"]*colLocation[^"]*"[^>]*>(.*?)</td>', block, re.S)
+        loc = _plain(loc_m.group(1)) if loc_m else None
+        if not loc:
+            st = re.search(r'class="jobState[^"]*"[^>]*>(.*?)</span>', block, re.S)
+            loc = _plain(st.group(1)) if st else None
+        date_m = re.search(r'class="[^"]*colDate[^"]*"[^>]*>(.*?)</td>', block, re.S)
+        posted = _sf_date(_plain(date_m.group(1))) if date_m else None
+        out.append(
+            PostingIn(ext_id=link.group(2), title=title, url=f"https://{host}{_html.unescape(link.group(1))}", location=loc or None,
+                      work_type=work_type_from(None, loc, title), posted_at=posted)
+        )
+    return out, total
+
+
+def _sf_date(text: str) -> dt.date | None:
+    for fmt in ("%b %d, %Y", "%B %d, %Y", "%m/%d/%y", "%m/%d/%Y", "%d %b %Y", "%Y-%m-%d"):
+        try:
+            day = dt.datetime.strptime(text.strip(), fmt).date()
+        except ValueError:
+            continue
+        return day if day <= dt.date.today() else None
+    return None
+
+
+async def _read_successfactors(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    try:
+        host, site = identifier.split("|")
+    except ValueError as exc:
+        raise ReaderError("that careers address is incomplete", gone=True) from exc
+    country = SUCCESSFACTORS_COUNTRY.get(host)
+    postings: list[PostingIn] = []
+    total: int | None = None
+    complete = False
+    row = 0
+    while row < SUCCESSFACTORS_MAX_JOBS:
+        facet = f"&optionsFacetsDD_country={country}" if country else ""
+        page = await _request(client, throttle, "successfactors", "GET", f"https://{host}/{site}/search/?q={facet}&startrow={row}", text=True, headers={"Accept": "text/html"})
+        found, count = parse_successfactors(page, host)
+        if row == 0 and not found and not _NO_JOBS.search(_plain(page)):
+            raise ReaderError("we couldn't make sense of that careers page")
+        total = count if count is not None else total
+        postings.extend(p for p in found if p.ext_id not in {q.ext_id for q in postings[-SUCCESSFACTORS_PAGE * 2:]})
+        row += SUCCESSFACTORS_PAGE
+        if not found or (total is not None and row >= total):
+            complete = True
+            break
+    notes = [] if complete else [f"read the first {len(postings)} of {total or 'many'} jobs"]
+    return ReadResult(postings, complete=complete, notes=notes)
+
+
 # ---- entry point --------------------------------------------------------------------------------------------------
 
 _READERS = {"greenhouse": _read_greenhouse, "lever": _read_lever, "ashby": _read_ashby, "workday": _read_workday, "smartrecruiters": _read_smartrecruiters,
     "breezy": _read_breezy, "workable": _read_workable, "bamboohr": _read_bamboohr, "pinpoint": _read_pinpoint,
     "jazzhr": _read_jazzhr, "jobvite": _read_jobvite, "oracle": _read_oracle, "icims": _read_icims,
+    "taleo": _read_taleo, "phenom": _read_phenom, "successfactors": _read_successfactors,
 }
 
 

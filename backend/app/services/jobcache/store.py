@@ -480,6 +480,9 @@ OTHER_NAMES = {
     ("jazzhr", "kaufmanhall"): "Kaufman Hall",
     ("jobvite", "medullan"): "Medullan",
     ("icims", "careers-berrydunn.icims.com"): "BerryDunn",
+    ("taleo", "phh.tbe.taleo.net|phh01|thebridg12|40"): "The Bridgespan Group",
+    ("phenom", "careers.bcg.com"): "Boston Consulting Group",
+    ("successfactors", "careers.ey.com|ey"): "EY",
 }
 
 

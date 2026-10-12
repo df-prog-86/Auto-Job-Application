@@ -38,7 +38,7 @@ def test_employer_from_links_on_all_four_systems():
     assert ref("https://jobs.eu.lever.co/acme/abc") == ("lever", "eu:acme")
     assert ref("https://jobs.ashbyhq.com/acme/9f0b3a52-0000-0000-0000-000000000000/application") == ("ashby", "acme")
     assert ref("https://www.linkedin.com/jobs/view/1") is None
-    assert ref("https://careers.ey.com/ey/job/x/1") is None
+    assert ref("https://careers.example-corp.com/ey/job/x/1") is None
     assert ref("not a url") is None
 
 

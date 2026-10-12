@@ -204,3 +204,75 @@ def test_workday_reads_a_list_longer_than_the_old_limit_in_full():
 
     res = asyncio.run(readers.read_employer("workday", "big.wd1.myworkdayjobs.com|big|Careers", Client(), _NoWait()))
     assert len(res.postings) == 2300 and res.complete
+
+
+TALEO_PAGE = (
+    '<div class="oracletaleocwsv2-accordion-head-info"> <h4 class="oracletaleocwsv2-head-title"><a href="https://phh.tbe.taleo.net/phh01/ats/careers/v2/viewRequisition?org=THEBRIDG12&cws=40&rid=530" class="viewJobLink">'
+    'Experienced Associate Consultant BOS/DC - Q3 2026 or Q1 2027 Start Date</a></h4> <div tabindex="0" >Boston or Washington D.C.</div> </div>'
+    '<div class="oracletaleocwsv2-accordion-head-info"> <h4 class="oracletaleocwsv2-head-title"><a href="https://phh.tbe.taleo.net/phh01/ats/careers/v2/viewRequisition?org=THEBRIDG12&cws=40&rid=536" class="viewJobLink">'
+    'Office Operations Manager</a></h4> <div tabindex="0" >Boston</div> </div>'
+)
+
+
+def test_taleo_links_and_page():
+    assert readers.employer_ref("https://phh.tbe.taleo.net/phh01/ats/careers/v2/searchResults?org=THEBRIDG12&cws=40") == ("taleo", "phh.tbe.taleo.net|phh01|THEBRIDG12|40")
+    assert readers.employer_ref("https://phh.tbe.taleo.net/phh01/ats/careers/v2/viewRequisition?org=THEBRIDG12&cws=40&rid=530") == ("taleo", "phh.tbe.taleo.net|phh01|THEBRIDG12|40")
+    assert readers.employer_ref("https://phh.tbe.taleo.net/phh01/") is None
+    a, b = readers.parse_taleo(TALEO_PAGE)
+    assert a.ext_id == "530" and a.location == "Boston or Washington D.C." and "rid=530" in a.url and b.title == "Office Operations Manager"
+    assert known_name("taleo", "phh.tbe.taleo.net|phh01|THEBRIDG12|40") == "The Bridgespan Group"
+
+
+def test_phenom_answer_is_parsed_and_paged():
+    job = {"title": "Global Cybersecurity Senior Manager", "jobId": "60176", "location": "Gurgaon, Haryana, India", "postedDate": "2026-10-12T00:00:00.000+0000",
+           "applyUrl": "https://experiencedtalent.bcg.com/careerhub/explore/jobs/790318893600?post_onboarding_pid=790318893600&amp;show_apply=1"}
+    posts, total = readers.parse_phenom({"refineSearch": {"totalHits": 904, "data": {"jobs": [job, {"title": "No link", "jobId": "1"}]}}})
+    assert total == 904 and len(posts) == 1 and posts[0].posted_at == dt.date(2026, 10, 12) and "&show_apply=1" in posts[0].url
+
+    calls = []
+
+    class Client:
+        async def request(self, method, url, **kw):
+            start = kw["json"]["from"]
+            calls.append(start)
+            n = max(0, min(50, 120 - start))
+            return _Resp({"refineSearch": {"totalHits": 120, "data": {"jobs": [{**job, "jobId": str(start + i)} for i in range(n)]}}})
+
+    res = asyncio.run(readers.read_employer("phenom", "careers.bcg.com", Client(), _NoWait()))
+    assert len(res.postings) == 120 and res.complete and calls == [0, 50, 100]
+    assert readers.employer_ref("https://careers.bcg.com/global/en/search-results") == ("phenom", "careers.bcg.com")
+    assert readers.employer_ref("https://example.com/widgets") is None
+
+
+EY_PAGE = (
+    '<div>Results 1 to 25 of 263</div><table><tbody><tr class="data-row"> <td class="colTitle" headers="hdrTitle"> <span class="jobTitle hidden-phone">'
+    ' <a href="/ey/job/San-Francisco-Business-Consulting-Finance-R2R-&amp;-FP&amp;A-Manager-San-Francisco-Bay-CA-94105-2907/1441599833/" class="jobTitle-link">Business Consulting - Finance - R2R &amp; FP&amp;A Manager - San Francisco Bay</a>'
+    ' </span></td> <td class="colLocation hidden-phone"> <span class="jobLocation"> San Francisco, CA, US </span> </td> <td class="colDate hidden-phone"> Oct 9, 2026 </td></tr>'
+    '<tr class="data-row"> <td class="colTitle"> <span class="jobTitle hidden-phone"> <a href="/ey/job/Chicago-Mobility-Manager-IL-60606/1443008233/" class="jobTitle-link">Mobility Manager</a></span></td>'
+    ' <td class="colLocation"> <span class="jobLocation">Chicago, IL, US</span></td></tr></tbody></table>'
+)
+
+
+def test_successfactors_page_is_parsed_and_paged():
+    posts, total = readers.parse_successfactors(EY_PAGE, "careers.ey.com")
+    assert total == 263 and len(posts) == 2
+    assert posts[0].ext_id == "1441599833" and posts[0].title.endswith("San Francisco Bay") and posts[0].location == "San Francisco, CA, US"
+    assert posts[0].posted_at == dt.date(2026, 10, 9) and posts[0].url.startswith("https://careers.ey.com/ey/job/San-Francisco")
+    assert readers.employer_ref("https://careers.ey.com/ey/job/Chicago-Mobility-Manager-IL-60606/1443008233/") == ("successfactors", "careers.ey.com|ey")
+
+    urls = []
+
+    class Client:
+        async def request(self, method, url, **kw):
+            urls.append(url)
+            row = int(url.split("startrow=")[1])
+            page = EY_PAGE.replace("1441599833", str(1000 + row)).replace("1443008233", str(2000 + row)).replace("of 263", "of 60")
+            return _Resp(None, page if row < 60 else "")
+
+    res = asyncio.run(readers.read_employer("successfactors", "careers.ey.com|ey", Client(), _NoWait()))
+    assert len(res.postings) == 6 and res.complete and "optionsFacetsDD_country=US" in urls[0] and len(urls) == 3
+    with pytest.raises(readers.ReaderError):
+        class Bad:
+            async def request(self, method, url, **kw):
+                return _Resp(None, "<html>new layout</html>")
+        asyncio.run(readers.read_employer("successfactors", "careers.ey.com|ey", Bad(), _NoWait()))

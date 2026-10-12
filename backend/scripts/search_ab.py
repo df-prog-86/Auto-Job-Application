@@ -254,7 +254,7 @@ async def run(args: argparse.Namespace) -> int:
     for r in rows:
         lines += ["", f"## {r['search']} | {r['model']} | mode {r['mode']}"] + [f"- {t} at {c}: {u}" for t, c, u in r["_urls"]]
     (out / f"search_ab-{stamp}{'-noreason' if NO_REASONING else ''}.md").write_text("\n".join(lines))
-    print(f"\nEstimated total ${spent:.2f}. Report: {out / f'search_ab-{stamp}.md'}")
+    print(f"\nEstimated total ${spent:.2f}. Report: {out / f'search_ab-{stamp}{chr(45)}noreason.md' if NO_REASONING else out / f'search_ab-{stamp}.md'}")
     return 0
 
 

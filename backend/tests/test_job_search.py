@@ -768,3 +768,10 @@ def test_suggest_endpoint(search):
     kw = client.get("/api/v1/job-search/suggest", params={"kind": "keyword", "q": "pm"}).json()
     assert {"label": "PMP"} in kw
     assert isinstance(client.get("/api/v1/job-search/suggest", params={"kind": "title", "q": "proj"}).json(), list)
+
+
+def test_empty_model_reply_does_not_crash_the_parsers():
+    from app.services.discovery import web_search as ws
+
+    assert ws.parse_items("") == []
+    assert ws.parse_object("") == {}

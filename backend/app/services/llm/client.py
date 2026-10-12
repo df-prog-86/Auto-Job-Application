@@ -83,7 +83,8 @@ class LLMClient:
             resp.raise_for_status()
             data = resp.json()
 
-        choice = data["choices"][0]["message"]["content"]
+        # Some models answer with nothing (an empty reply, or only a tool call); callers expect text, so that is an empty string.
+        choice = data["choices"][0]["message"].get("content") or ""
         usage = data.get("usage", {})
         return ChatCompletionResult(
             content=choice,

@@ -70,6 +70,8 @@ class Meter:
                     "out": result.output_tokens,
                     "web": 1 if any(p.get("id") == "web" for p in plugins) else 0,
                     "secs": round(time.time() - t0, 1),
+                    "empty": 0 if (result.content or "").strip() else 1,
+                    "stop": ((result.raw.get("choices") or [{}])[0].get("finish_reason")) if isinstance(result.raw, dict) else None,
                 }
             )
             return result
@@ -210,6 +212,8 @@ async def run(args: argparse.Namespace) -> int:
                     "web_searches": sum(c["web"] for c in calls),
                     "tokens_in": sum(c["in"] for c in calls),
                     "tokens_out": sum(c["out"] for c in calls),
+                    "empty_replies": sum(c["empty"] for c in calls),
+                    "stop_reasons": "/".join(sorted({str(c["stop"]) for c in calls})),
                     "est_cost_usd": round(cost, 4),
                     "seconds": round(time.time() - t0, 1),
                     "error": err,

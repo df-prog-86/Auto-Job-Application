@@ -28,7 +28,7 @@ TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle", "icims")
 WORKDAY_PAGE = 20  # Workday returns at most 20 jobs per request
-WORKDAY_MAX_JOBS = 1500  # a very large employer is read up to this many jobs, newest first as Workday lists them
+WORKDAY_MAX_JOBS = 4000  # a very large employer is read up to this many jobs, newest first as Workday lists them (IQVIA hit the old 1,500 limit)
 SMARTRECRUITERS_PAGE = 100  # postings per request from the public Posting API
 SMARTRECRUITERS_MAX_JOBS = 2000
 _MIN_GAP = {

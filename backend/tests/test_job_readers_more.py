@@ -193,3 +193,14 @@ def test_icims_reader_follows_the_pages_and_refuses_a_page_it_cannot_read():
         asyncio.run(readers.read_employer("icims", "x.icims.com", Client(["<html>new layout</html>"]), _NoWait()))
     assert guess_name("icims", "careers-cotiviti.icims.com") == "Cotiviti"
     assert guess_name("icims", "careers-berrydunn.icims.com") == "BerryDunn"
+
+
+def test_workday_reads_a_list_longer_than_the_old_limit_in_full():
+    class Client:
+        async def request(self, method, url, **kw):
+            off = kw["json"]["offset"]
+            n = max(0, min(20, 2300 - off))
+            return _Resp({"total": 2300, "jobPostings": [{"title": f"Job {off + i}", "externalPath": f"/job/x/{off + i}", "locationsText": "Boston, MA"} for i in range(n)]})
+
+    res = asyncio.run(readers.read_employer("workday", "big.wd1.myworkdayjobs.com|big|Careers", Client(), _NoWait()))
+    assert len(res.postings) == 2300 and res.complete

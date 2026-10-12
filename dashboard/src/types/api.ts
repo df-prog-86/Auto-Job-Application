@@ -366,6 +366,9 @@ export interface JobSearchResultOut {
   match_summary?: string | null;
   match_gaps?: string[] | null;
   match_from_page?: boolean | null;
+  /** How closely the posting fits the search (title, place, recency), 0 to 1. Not the resume match. */
+  fit_score?: number | null;
+  fit_note?: string | null;
   posted_at?: string | null;
   title: string;
   company: string;

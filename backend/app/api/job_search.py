@@ -71,6 +71,22 @@ def suggest_places(q: str = "") -> list[dict[str, str]]:
     return places.suggest(q[:60], known)
 
 
+@router.get("/suggest")
+def suggest_words(kind: str = "title", q: str = "") -> list[dict[str, str]]:
+    """Suggestions while typing a job title or a keyword."""
+    from app.services.jobcache import suggest
+    from app.services.jobcache.store import JobCache
+
+    q = q[:60]
+    if kind == "keyword":
+        return suggest.keywords(q)
+    try:
+        rows = JobCache().titles_sample(q)
+    except Exception:  # the saved lists are a bonus: typing still works without them
+        rows = []
+    return suggest.titles(q, rows)
+
+
 @router.get("/results", response_model=JobSearchRunOut)
 def list_results(db: Session = Depends(get_db)) -> JobSearchRunOut:
     return _run_out(db, 0, 0)

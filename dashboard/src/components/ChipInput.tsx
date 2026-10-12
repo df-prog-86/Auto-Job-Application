@@ -1,4 +1,9 @@
+import { useId, useState } from "react";
 import type { KeyboardEvent } from "react";
+
+import { SuggestList } from "@/components/Suggest";
+import { useListKeys, useSuggestions } from "@/lib/useSuggest";
+import type { SuggestKind } from "@/lib/useSuggest";
 
 /**
  * A list of short words shown as removable chips, with a box to add more. Press
@@ -14,6 +19,7 @@ export function ChipInput({
   label,
   variant = "box",
   maxLength = 80,
+  suggest,
 }: {
   values: string[];
   onChange: (next: string[]) => void;
@@ -23,7 +29,13 @@ export function ChipInput({
   label: string;
   variant?: "title" | "box";
   maxLength?: number;
+  /** Offer completions while typing: job titles or keywords. */
+  suggest?: SuggestKind;
 }) {
+  const listId = useId();
+  const [focused, setFocused] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const items = useSuggestions(suggest, draft, focused && !dismissed);
   const add = (text: string) => {
     const parts = text
       .split(",")
@@ -37,7 +49,15 @@ export function ChipInput({
     onChange(next);
   };
 
+  const pick = (text: string) => {
+    add(text);
+    onDraft("");
+    setDismissed(false);
+  };
+  const keys = useListKeys(items, pick, () => setDismissed(true));
+
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (keys.onKeyDown(e)) return;
     if (e.key === "Enter" || e.key === ",") {
       if (draft.trim()) {
         e.preventDefault();
@@ -53,8 +73,8 @@ export function ChipInput({
 
   const wrap =
     variant === "title"
-      ? "flex min-w-0 flex-1 flex-wrap items-center gap-2"
-      : "flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-[14px] border border-[#8f88bb] bg-white px-2.5 py-1 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-200";
+      ? "relative flex min-w-0 flex-1 flex-wrap items-center gap-2"
+      : "relative flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-[14px] border border-[#8f88bb] bg-white px-2.5 py-1 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-200";
 
   return (
     <div className={wrap}>
@@ -76,10 +96,16 @@ export function ChipInput({
       ))}
       <input
         aria-label={label}
+        role={suggest ? "combobox" : undefined}
+        aria-expanded={suggest ? items.length > 0 : undefined}
+        aria-controls={suggest ? listId : undefined}
+        aria-autocomplete={suggest ? "list" : undefined}
+        autoComplete="off"
         value={draft}
         maxLength={maxLength}
         onChange={(e) => {
           const t = e.target.value;
+          setDismissed(false);
           if (t.includes(",")) {
             add(t);
             onDraft("");
@@ -88,7 +114,9 @@ export function ChipInput({
           }
         }}
         onKeyDown={onKeyDown}
+        onFocus={() => setFocused(true)}
         onBlur={() => {
+          setFocused(false);
           if (draft.trim()) {
             add(draft);
             onDraft("");
@@ -99,6 +127,7 @@ export function ChipInput({
           variant === "title" ? "min-h-[40px] text-[15px]" : "py-1.5 text-[13px]"
         }`}
       />
+      {suggest && <SuggestList id={listId} items={items} index={keys.index} onHover={keys.setIndex} onPick={pick} label="Suggestions" />}
     </div>
   );
 }

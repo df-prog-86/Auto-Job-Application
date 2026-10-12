@@ -172,6 +172,13 @@ export const api = {
   listAnswers: () => request<AnswerOut[]>("/profile/answers"),
   saveAnswer: (key: string, payload: AnswerUpsert) =>
     request<AnswerOut>(`/profile/answers/${key}`, { method: "PUT", body: JSON.stringify(payload) }),
+  /** Words that complete what is being typed in Job Search: cities, job titles or keywords. */
+  suggestWords: (kind: "place" | "title" | "keyword", q: string) =>
+    request<{ label: string }[]>(
+      kind === "place"
+        ? `/job-search/places?q=${encodeURIComponent(q)}`
+        : `/job-search/suggest?kind=${kind}&q=${encodeURIComponent(q)}`,
+    ).then((rows) => rows.map((r) => r.label)),
   listSearchResults: () =>
     request<JobSearchRunOut>("/job-search/results").then((r) => r.results as JobSearchResultOut[]),
   runJobSearch: (criteria: JobSearchCriteria) =>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 /** The "..." button and its small popup list, shared by the Jobs and Job Search cards. */
-export function MoreMenu({ children }: { children: ReactNode }) {
+export function MoreMenu({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -39,7 +39,7 @@ export function MoreMenu({ children }: { children: ReactNode }) {
       </button>
       {open && (
         <div
-          className="absolute right-0 z-30 mt-1 w-52 animate-rise rounded-2xl bg-white p-1.5 shadow-lift"
+          className={`absolute right-0 z-30 mt-1 ${wide ? "w-72" : "w-52"} animate-rise rounded-2xl bg-white p-1.5 shadow-lift`}
           onClick={() => setOpen(false)}
         >
           {children}

@@ -373,6 +373,19 @@ class JobCache:
             ).fetchall()
         return [r["location"] for r in rows]
 
+    def titles_sample(self, query: str, limit: int = 400) -> list[tuple[str, int]]:
+        """Open job titles that contain what was typed, with how many postings use each, for title suggestions."""
+        q = "".join(c for c in query.lower() if c.isalnum() or c in " .'&")[:40].strip()
+        if len(q) < 2:
+            return []
+        with self.session() as db:
+            rows = db.execute(
+                "SELECT title, COUNT(*) AS n FROM postings WHERE closed_at IS NULL AND lower(title) LIKE ? "
+                "GROUP BY lower(title) ORDER BY n DESC LIMIT ?",
+                (f"%{q}%", limit),
+            ).fetchall()
+        return [(r["title"], r["n"]) for r in rows]
+
     def counts(self) -> dict[str, Any]:
         """How much is saved: employers and open postings, overall and for each hiring system. Reads one small table, so it stays instant."""
         with self.session() as db:

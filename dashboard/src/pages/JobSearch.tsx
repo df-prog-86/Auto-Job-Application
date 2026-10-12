@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "@/api/client";
 import { ChipInput } from "@/components/ChipInput";
 import { MenuItem, MoreMenu } from "@/components/MoreMenu";
+import { SuggestInput } from "@/components/Suggest";
 import { PageHeader } from "@/components/PageHeader";
 import { CoverageCard, EmployersPanel } from "@/components/JobSources";
 import { FitPill, MatchPanel, scoreColor } from "@/components/match";
@@ -50,7 +51,7 @@ function withDraft(values: string[], draft: string): string[] {
   return out;
 }
 
-type SortBy = "newest" | "fit";
+type SortBy = "search" | "resume" | "newest";
 
 /** Time of the posting date, or null when it is missing or unreadable. */
 function postedTime(r: JobSearchResultOut): number | null {
@@ -59,7 +60,7 @@ function postedTime(r: JobSearchResultOut): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
-/** Newest posting first, or best match first. Jobs missing the value always go last. */
+/** Best search match, best resume match, or newest posted. Jobs missing the value always go last. */
 function sortResults(list: JobSearchResultOut[], by: SortBy): JobSearchResultOut[] {
   const missingLast = (a: number | null, b: number | null) => {
     if (a === null && b === null) return 0;
@@ -68,8 +69,11 @@ function sortResults(list: JobSearchResultOut[], by: SortBy): JobSearchResultOut
     return b - a;
   };
   return [...list].sort((a, b) => {
-    if (by === "fit") {
+    if (by === "resume") {
       const c = missingLast(a.match_score ?? null, b.match_score ?? null);
+      if (c !== 0) return c;
+    } else if (by === "search") {
+      const c = missingLast(a.fit_score ?? null, b.fit_score ?? null);
       if (c !== 0) return c;
     }
     return missingLast(postedTime(a), postedTime(b));
@@ -97,7 +101,7 @@ export function JobSearch() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [autofillOnly, setAutofillOnly] = useState(false);
-  const [sortBy, setSortBy] = useState<SortBy>("newest");
+  const [sortBy, setSortBy] = useState<SortBy>("search");
   const [savedList, setSavedList] = useState<SavedSearch[]>(loadSavedSearches);
   const [scoringAll, setScoringAll] = useState<{ done: number; total: number } | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
@@ -306,7 +310,68 @@ export function JobSearch() {
     storeSavedSearches(next);
   };
 
+  /** What is narrowing the search right now, each with a way to clear it. */
+  const filterChips: { key: string; text: string; clear: () => void }[] = [];
+  if (location.trim()) filterChips.push({ key: "loc", text: location.trim(), clear: () => setLocation("") });
+  if (workType !== "any") {
+    const names = { remote: "Remote", hybrid: "Hybrid", onsite: "On site" } as const;
+    filterChips.push({ key: "wt", text: names[workType as keyof typeof names] ?? String(workType), clear: () => setWorkType("any") });
+  }
+  if (within) filterChips.push({ key: "within", text: `Last ${within} days`, clear: () => setWithin(0) });
+  const salaryNumber = parseInt(targetSalary.replace(/[^0-9]/g, ""), 10);
+  if (Number.isFinite(salaryNumber) && salaryNumber > 0) {
+    filterChips.push({
+      key: "pay",
+      text: `Pay $${salaryNumber.toLocaleString("en-US")} or more`,
+      clear: () => setTargetSalary(""),
+    });
+  }
+  if (requireSalary) filterChips.push({ key: "reqpay", text: "Pay must be listed", clear: () => setRequireSalary(false) });
+  for (const k of keywords) filterChips.push({ key: `kw-${k}`, text: `Keyword: ${k}`, clear: () => setKeywords(keywords.filter((x) => x !== k)) });
+  for (const x of exclude) filterChips.push({ key: `ex-${x}`, text: `Leaving out ${x}`, clear: () => setExclude(exclude.filter((y) => y !== x)) });
+  const clearFilters = () => {
+    setLocation("");
+    setWorkType("any");
+    setWithin(0);
+    setTargetSalary("");
+    setRequireSalary(false);
+    setKeywords([]);
+    setExclude([]);
+  };
+
+  /** Not interested: hide these results now. Hiding a company also adds it to the companies to leave out, so it stays gone. */
+  const hideMany = useMutation({
+    mutationFn: async (ids: number[]) => {
+      for (const id of ids) await api.removeSearchResult(id);
+      return ids.length;
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["job-search-results"] }),
+  });
+  const hideCompany = (r: JobSearchResultOut) => {
+    const name = r.company.trim();
+    if (!name) return;
+    const ids = items.filter((x) => x.company.trim().toLowerCase() === name.toLowerCase()).map((x) => x.id);
+    const next = exclude.some((x) => x.toLowerCase() === name.toLowerCase()) ? exclude : [...exclude, name];
+    setExclude(next);
+    try {
+      const raw = window.localStorage.getItem(SAVED_KEY);
+      const base = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+      window.localStorage.setItem(SAVED_KEY, JSON.stringify({ ...base, exclude: next.join(", ") }));
+    } catch {
+      // remembering the list is a convenience only
+    }
+    setNotice({ kind: "info", text: `Hid ${ids.length} ${ids.length === 1 ? "job" : "jobs"} from ${name}. Future searches leave them out.` });
+    hideMany.mutate(ids);
+  };
+  const hideTitle = (r: JobSearchResultOut) => {
+    const t = r.title.trim().toLowerCase();
+    const ids = items.filter((x) => x.title.trim().toLowerCase() === t).map((x) => x.id);
+    setNotice({ kind: "info", text: `Hid ${ids.length} ${ids.length === 1 ? "job" : "jobs"} titled "${r.title}".` });
+    hideMany.mutate(ids);
+  };
+
   const busyId = add.isPending ? add.variables : remove.isPending ? remove.variables : score.isPending ? score.variables : null;
+  const hiding = hideMany.isPending;
   const canSearch = withDraft(titles, titleDraft).join(", ").length >= 2 && !search.isPending;
   const canSave = withDraft(titles, titleDraft).length > 0 && !activeSaved;
 
@@ -410,6 +475,7 @@ export function JobSearch() {
                 onDraft={setTitleDraft}
                 placeholder="Job titles, like project manager"
                 maxLength={100}
+                suggest="title"
               />
             </div>
             <Button type="submit" variant="primary" className={`px-6 py-3 ${search.isPending ? "ai-working" : ""}`} disabled={!canSearch}>
@@ -434,10 +500,11 @@ export function JobSearch() {
                 <path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z" />
                 <circle cx="12" cy="9.5" r="2.5" />
               </svg>
-              <input
+              <SuggestInput
                 id="js-location"
                 value={location}
-                onChange={(e) => setLocation(e.target.value)}
+                onChange={setLocation}
+                kind="place"
                 placeholder="City, state, or United States"
                 maxLength={200}
                 className="w-full rounded-full border border-[#8f88bb] bg-white py-2.5 pl-10 pr-4 text-[13px] text-ink-900 placeholder:text-[#6a6585] focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
@@ -555,6 +622,7 @@ export function JobSearch() {
                   draft={keywordDraft}
                   onDraft={setKeywordDraft}
                   placeholder="healthcare, Agile, SaaS"
+                  suggest="keyword"
                 />
               </div>
               <div>
@@ -568,6 +636,31 @@ export function JobSearch() {
                   placeholder="Add a company"
                 />
               </div>
+            </div>
+          )}
+
+          {filterChips.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-[#ebe8f6] bg-white px-5 py-3">
+              <span className="mr-1 text-xs font-extrabold text-[#5a5570]">Filters in use</span>
+              {filterChips.map((c) => (
+                <span
+                  key={c.key}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[#d4cef4] bg-white py-1 pl-3 pr-1.5 text-xs font-bold text-ink-900"
+                >
+                  {c.text}
+                  <button
+                    type="button"
+                    aria-label={`Clear ${c.text}`}
+                    onClick={c.clear}
+                    className="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-extrabold text-ink-500 hover:bg-brand-50"
+                  >
+                    &#10005;
+                  </button>
+                </span>
+              ))}
+              <button type="button" onClick={clearFilters} className="ml-1 text-xs font-bold text-brand-600 hover:text-brand-700 hover:underline">
+                Clear all
+              </button>
             </div>
           )}
 
@@ -588,8 +681,6 @@ export function JobSearch() {
           </p>
         </form>
       </Card>
-
-      <EmployersPanel />
 
       {search.isPending && (
         <p className="animate-pulse text-sm text-ink-500" role="status">
@@ -669,11 +760,12 @@ export function JobSearch() {
                 Sort
                 <select
                   value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value === "fit" ? "fit" : "newest")}
+                  onChange={(e) => setSortBy(e.target.value === "resume" ? "resume" : e.target.value === "newest" ? "newest" : "search")}
                   className="rounded-full border border-[#8f88bb] bg-white px-3.5 py-2 text-[13px] font-bold text-brand-700 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
                 >
+                  <option value="search">Best search match</option>
+                  <option value="resume">Best resume match</option>
                   <option value="newest">Newest posted</option>
-                  <option value="fit">Best fit first</option>
                 </select>
               </label>
               {anyAutofill && (
@@ -739,12 +831,14 @@ export function JobSearch() {
                 <ResultCard
                   key={r.id}
                   r={r}
-                  busy={busyId === r.id || scoringAll !== null}
+                  busy={busyId === r.id || scoringAll !== null || hiding}
                   scoring={score.isPending && score.variables === r.id}
                   problem={score.isError && score.variables === r.id ? errorText(score.error) : undefined}
                   onScore={() => score.mutate(r.id)}
                   onAdd={() => add.mutate(r.id)}
                   onRemove={() => remove.mutate(r.id)}
+                  onHideCompany={() => hideCompany(r)}
+                  onHideTitle={() => hideTitle(r)}
                 />
               ))}
             </ul>
@@ -762,6 +856,8 @@ export function JobSearch() {
           )}
         </section>
       )}
+
+      <EmployersPanel />
     </div>
   );
 }
@@ -774,6 +870,8 @@ function ResultCard({
   onScore,
   onAdd,
   onRemove,
+  onHideCompany,
+  onHideTitle,
 }: {
   r: JobSearchResultOut;
   busy: boolean;
@@ -783,6 +881,8 @@ function ResultCard({
   onScore: () => void;
   onAdd: () => void;
   onRemove: () => void;
+  onHideCompany: () => void;
+  onHideTitle: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const posted = formatPosted(r.posted_at);
@@ -790,6 +890,8 @@ function ResultCard({
   // A score that came only from the one-line summary is not shown; it would look surer than it is.
   const score = r.match_from_page === false ? null : (r.match_score ?? null);
   const edge = score === null ? "#e3dff3" : scoreColor(score);
+  // The plain-words line says how the posting fits the search. It is not a grade, so it is never shown as a number.
+  const noteTone = r.fit_score == null ? "text-ink-500" : r.fit_score >= 0.75 ? "text-[#0e6b4c]" : "text-[#8a5a12]";
   return (
     <li>
       <Card className="flex">
@@ -821,6 +923,7 @@ function ResultCard({
                 {r.salary_text && <span>{r.salary_text}</span>}
                 <span className={posted ? "" : "text-ink-400"}>{posted ? `Posted ${posted}` : "Posted date not listed"}</span>
               </div>
+              {r.fit_note && <div className={`mt-1.5 text-xs font-bold ${noteTone}`}>{r.fit_note}</div>}
             </div>
             <div className="flex shrink-0 items-center gap-2.5">
               {!r.grounded && (
@@ -850,6 +953,11 @@ function ResultCard({
               style={{ display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}
             >
               {r.summary}
+            </p>
+          )}
+          {!r.grounded && (
+            <p className="mt-3 rounded-xl bg-[#fff4dc] px-3.5 py-2.5 text-[13px] leading-relaxed text-[#8a5a00]">
+              Found on the web. We could not open this link to confirm the job is still open, so check it before you apply.
             </p>
           )}
           {problem && !scoring && (
@@ -902,14 +1010,22 @@ function ResultCard({
                   {open ? "Hide details" : "Show more details"}
                 </button>
               )}
-              <MoreMenu>
+              <MoreMenu wide>
                 {score !== null && (
                   <MenuItem onClick={onScore} disabled={busy}>
                     Score again
                   </MenuItem>
                 )}
-                <MenuItem danger onClick={onRemove} disabled={busy}>
-                  Remove
+                <MenuItem onClick={onRemove} disabled={busy}>
+                  Not interested: hide this job
+                </MenuItem>
+                {r.company && (
+                  <MenuItem onClick={onHideCompany} disabled={busy}>
+                    Hide all from {r.company}
+                  </MenuItem>
+                )}
+                <MenuItem onClick={onHideTitle} disabled={busy}>
+                  Hide jobs titled "{r.title}"
                 </MenuItem>
               </MoreMenu>
             </div>

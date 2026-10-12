@@ -746,3 +746,25 @@ def test_city_suggestions_complete_what_is_typed(search):
     client, _ = search
     got = client.get("/api/v1/job-search/places", params={"q": "Orlan"}).json()
     assert got[0] == {"label": "Orlando, FL", "city": "Orlando", "state": "FL"}
+
+
+def test_title_and_keyword_suggestions():
+    from app.services.jobcache import suggest
+
+    rows = [("Project Manager", 40), ("Project Manager III", 5), ("Project Management Specialist", 12), ("Senior Project Manager", 20), ("Program Manager", 30)]
+    labels = [t["label"] for t in suggest.titles("project man", rows)]
+    assert labels[0] == "Project Manager"  # most postings first
+    assert "Project Manager III" not in labels  # level numbers are not offered
+    assert "Senior Project Manager" in labels  # a word inside the title also matches
+    assert suggest.titles("p", rows) == []
+    kw = [k["label"] for k in suggest.keywords("pm")]
+    assert kw[:2] == ["PMI", "PMO"] or "PMP" in kw
+    assert "PMP" in kw and "PMBOK" in kw
+    assert suggest.keywords("zzzz") == []
+
+
+def test_suggest_endpoint(search):
+    client, _ = search
+    kw = client.get("/api/v1/job-search/suggest", params={"kind": "keyword", "q": "pm"}).json()
+    assert {"label": "PMP"} in kw
+    assert isinstance(client.get("/api/v1/job-search/suggest", params={"kind": "title", "q": "proj"}).json(), list)

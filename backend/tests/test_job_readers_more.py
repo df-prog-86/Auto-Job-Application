@@ -145,3 +145,51 @@ def test_known_names_for_the_new_systems():
     assert known_name("pinpoint", "igsinsights") == "IGS"
     assert guess_name("oracle", "zzzz.fa.us2.oraclecloud.com|CX_1") == "Zzzz"
     assert guess_name("breezy", "some-firm") == "Some Firm"
+
+
+ICIMS_PAGE = (
+    '<div>Page 1 of 2</div><ul><li class="iCIMS_JobCardItem"> <div class="row"> <div class="col-xs-6 header left"> <span class="sr-only field-label">Job Locations</span> <span > US-MA-Waltham</span> </div>'
+    ' <div class="col-xs-12 title"> <a href="https://careers-berrydunn.icims.com/jobs/4103/staff-auditor/job?in_iframe=1" class="iCIMS_Anchor" title="4103 - Staff Auditor">'
+    ' <span class="sr-only field-label">Title</span> <h3 > Staff Auditor</h3> </a> </div> <div class="col-xs-12 description">Are you curious...</div></div></li>'
+    '<li class="iCIMS_JobCardItem"> <div class="row"> <div class="col-xs-6 header left"> <span class="sr-only field-label">Job Locations</span> <span > US-Remote</span> </div>'
+    ' <div class="col-xs-12 title"> <a href="https://careers-berrydunn.icims.com/jobs/4085/medicaid-h.r.-1-project-manager/job?in_iframe=1" title="4085 - Medicaid-H.R.1 Project Manager">'
+    ' <h3 > Medicaid-H.R.1 Project Manager</h3> </a> </div></div></li></ul>'
+)
+
+
+def test_icims_links_and_places():
+    assert readers.employer_ref("https://careers-cotiviti.icims.com/jobs/20126/data-governance/job") == ("icims", "careers-cotiviti.icims.com")
+    assert readers.employer_ref("https://www.icims.com/") is None
+    assert readers._icims_place("US-MA-Waltham") == "Waltham, MA"
+    assert readers._icims_place("US-Remote") == "Remote"
+    assert readers._icims_place("GB-London") == "London"
+    assert readers._icims_place("US-MA-Boston | US-NY-New York") == "Boston, MA; New York, NY"
+
+
+def test_icims_cards_are_parsed():
+    posts, pages = readers.parse_icims(ICIMS_PAGE, "careers-berrydunn.icims.com")
+    assert pages == 2 and len(posts) == 2
+    assert posts[0].ext_id == "4103" and posts[0].title == "Staff Auditor" and posts[0].location == "Waltham, MA"
+    assert posts[0].url == "https://careers-berrydunn.icims.com/jobs/4103/staff-auditor/job"
+    assert posts[1].work_type == "remote" and posts[1].title.startswith("Medicaid")
+
+
+def test_icims_reader_follows_the_pages_and_refuses_a_page_it_cannot_read():
+    seen = []
+
+    class Client:
+        def __init__(self, texts):
+            self.texts = texts
+
+        async def request(self, method, url, **kw):
+            seen.append(url)
+            self.n = getattr(self, "n", 0) + 1
+            return _Resp(None, self.texts[self.n - 1])
+
+    page2 = ICIMS_PAGE.replace("4103", "5103").replace("4085", "5085").replace("Page 1 of 2", "Page 2 of 2")
+    res = asyncio.run(readers.read_employer("icims", "careers-berrydunn.icims.com", Client([ICIMS_PAGE, page2]), _NoWait()))
+    assert len(res.postings) == 4 and res.complete and seen[1].endswith("pr=1")
+    with pytest.raises(readers.ReaderError):
+        asyncio.run(readers.read_employer("icims", "x.icims.com", Client(["<html>new layout</html>"]), _NoWait()))
+    assert guess_name("icims", "careers-cotiviti.icims.com") == "Cotiviti"
+    assert guess_name("icims", "careers-berrydunn.icims.com") == "BerryDunn"

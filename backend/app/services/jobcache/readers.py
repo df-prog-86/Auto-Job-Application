@@ -26,14 +26,14 @@ from app.services.jobcache.text import pay_midpoint, work_type_from, workday_pos
 USER_AGENT = "JobAgent/1.0 (personal job search tool; reads public job lists)"
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
-SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle")
+SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle", "icims")
 WORKDAY_PAGE = 20  # Workday returns at most 20 jobs per request
 WORKDAY_MAX_JOBS = 1500  # a very large employer is read up to this many jobs, newest first as Workday lists them
 SMARTRECRUITERS_PAGE = 100  # postings per request from the public Posting API
 SMARTRECRUITERS_MAX_JOBS = 2000
 _MIN_GAP = {
     "workday": 0.6, "greenhouse": 0.3, "lever": 0.3, "ashby": 0.3, "smartrecruiters": 0.4,
-    "breezy": 0.5, "workable": 0.5, "bamboohr": 0.5, "pinpoint": 0.5, "jazzhr": 0.8, "jobvite": 0.8, "oracle": 0.6,
+    "breezy": 0.5, "workable": 0.5, "bamboohr": 0.5, "pinpoint": 0.5, "jazzhr": 0.8, "jobvite": 0.8, "oracle": 0.6, "icims": 1.0,
 }  # seconds between requests to one site
 _LANG = re.compile(r"[a-z]{2}-[A-Za-z]{2}")
 
@@ -116,6 +116,8 @@ def employer_ref(url: str) -> tuple[str, str] | None:
         return "jazzhr", sub
     if host == "jobs.jobvite.com" and segs and segs[0].lower() not in ("careers", "search", "job", "jobs", "api"):
         return "jobvite", segs[0]
+    if host.endswith(".icims.com") and sub not in ("www", "app", "api", "login", "careers", "jobs"):
+        return "icims", host
     if host.endswith(".oraclecloud.com") and ".fa." in host and "sites" in segs[:-1]:
         site = segs[segs.index("sites") + 1]
         return "oracle", f"{host}|{site}"
@@ -595,11 +597,82 @@ async def _read_oracle(identifier: str, client: httpx.AsyncClient, throttle: Thr
     return ReadResult(postings, complete=complete, notes=notes)
 
 
+# ---- iCIMS (page reading) -----------------------------------------------------------------------------------------
+
+ICIMS_MAX_PAGES = 40
+
+
+def _icims_place(raw: str) -> str | None:
+    """iCIMS writes places like "US-MA-Waltham", "US-Remote" or "GB-London"; several are joined with " | " or ";"."""
+    out: list[str] = []
+    for chunk in re.split(r"\s*[|;]\s*", raw.strip()):
+        parts = [p.strip() for p in chunk.split("-")]
+        if len(parts) >= 2 and re.fullmatch(r"[A-Za-z]{2}", parts[0]):
+            country, rest = parts[0].upper(), parts[1:]
+            if len(rest) == 1:
+                place = "Remote" if rest[0].lower() == "remote" else rest[0]
+            elif country == "US":
+                place = f"{'-'.join(rest[1:])}, {rest[0]}"
+            else:
+                place = f"{'-'.join(rest[1:])}, {country}"
+        else:
+            place = chunk.strip()
+        if place and place not in out:
+            out.append(place)
+    return "; ".join(out) or None
+
+
+def parse_icims(page: Any, host: str) -> tuple[list[PostingIn], int | None]:
+    """iCIMS' search page (https://<name>.icims.com/jobs/search?ss=1&in_iframe=1): one <li class="iCIMS_JobCardItem"> per opening, and "Page 1 of N"."""
+    import html as _html
+
+    html = page if isinstance(page, str) else ""
+    pages_m = re.search(r"Page\s+\d+\s+of\s+(\d+)", html)
+    pages = int(pages_m.group(1)) if pages_m else None
+    out: list[PostingIn] = []
+    seen: set[str] = set()
+    for block in re.split(r'<li[^>]*class="[^"]*iCIMS_JobCardItem', html)[1:]:
+        link = re.search(r'href="(https?://[^"]*?/jobs/(\d+)/[^"?]*)(?:\?[^"]*)?"', block)
+        if not link or link.group(2) in seen:
+            continue
+        title_m = re.search(r"<h3[^>]*>(.*?)</h3>", block, re.S)
+        title = _plain(title_m.group(1)) if title_m else ""
+        if not title:
+            attr = re.search(r'title="\d+\s*-\s*([^"]+)"', block)
+            title = _html.unescape(attr.group(1)).strip() if attr else ""
+        if not title:
+            continue
+        seen.add(link.group(2))
+        loc_m = re.search(r"Job Locations</span>\s*<span[^>]*>(.*?)</span>", block, re.S)
+        loc = _icims_place(_plain(loc_m.group(1))) if loc_m else None
+        out.append(PostingIn(ext_id=link.group(2), title=title, url=link.group(1), location=loc, work_type=work_type_from(None, loc, title)))
+    return out, pages
+
+
+async def _read_icims(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    postings: list[PostingIn] = []
+    pages: int | None = None
+    complete = False
+    for n in range(ICIMS_MAX_PAGES):
+        page = await _request(client, throttle, "icims", "GET", f"https://{identifier}/jobs/search?ss=1&in_iframe=1&pr={n}", text=True, headers={"Accept": "text/html"})
+        found, count = parse_icims(page, identifier)
+        if n == 0:
+            pages = count
+            if not found and not _NO_JOBS.search(_plain(page)):
+                raise ReaderError("we couldn't make sense of that careers page")
+        postings.extend(p for p in found if p.ext_id not in {q.ext_id for q in postings})
+        if not found or n + 1 >= (pages or 1):
+            complete = True
+            break
+    notes = [] if complete else [f"read the first {len(postings)} jobs"]
+    return ReadResult(postings, complete=complete, notes=notes)
+
+
 # ---- entry point --------------------------------------------------------------------------------------------------
 
 _READERS = {"greenhouse": _read_greenhouse, "lever": _read_lever, "ashby": _read_ashby, "workday": _read_workday, "smartrecruiters": _read_smartrecruiters,
     "breezy": _read_breezy, "workable": _read_workable, "bamboohr": _read_bamboohr, "pinpoint": _read_pinpoint,
-    "jazzhr": _read_jazzhr, "jobvite": _read_jobvite, "oracle": _read_oracle,
+    "jazzhr": _read_jazzhr, "jobvite": _read_jobvite, "oracle": _read_oracle, "icims": _read_icims,
 }
 
 

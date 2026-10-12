@@ -10,6 +10,7 @@ it), every filter the search uses has an index, and a search reads a bounded num
 
 from __future__ import annotations
 
+import re
 import datetime as dt
 import sqlite3
 import threading
@@ -478,6 +479,7 @@ OTHER_NAMES = {
     ("workable", "rapdev"): "RapDev",
     ("jazzhr", "kaufmanhall"): "Kaufman Hall",
     ("jobvite", "medullan"): "Medullan",
+    ("icims", "careers-berrydunn.icims.com"): "BerryDunn",
 }
 
 
@@ -498,5 +500,7 @@ def guess_name(ats: str, identifier: str) -> str:
     slug = identifier.split("|")[1] if ats == "workday" and "|" in identifier else identifier
     if ats == "oracle":
         slug = identifier.split(".")[0]
+    if ats == "icims":
+        slug = re.sub(r"^(careers|jobs)-|-(careers|jobs)$", "", identifier.split(".")[0])
     slug = slug.removeprefix("eu:")
     return " ".join(w.capitalize() for w in slug.replace("_", "-").split("-") if w) or identifier

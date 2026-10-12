@@ -22,6 +22,15 @@ from app.config import settings
 from app.services.llm.exceptions import LLMNotConfiguredError
 
 
+def reply_text(content: Any) -> str:
+    """The answer as plain text: some models send nothing at all, and some send a list of parts instead of a string."""
+    if not content:
+        return ""
+    if isinstance(content, list):
+        return "".join(p.get("text") or "" if isinstance(p, dict) else str(p) for p in content)
+    return str(content)
+
+
 @dataclass
 class ChatCompletionResult:
     content: str
@@ -84,7 +93,7 @@ class LLMClient:
             data = resp.json()
 
         # Some models answer with nothing (an empty reply, or only a tool call); callers expect text, so that is an empty string.
-        choice = data["choices"][0]["message"].get("content") or ""
+        choice = reply_text(data["choices"][0]["message"].get("content"))
         usage = data.get("usage", {})
         return ChatCompletionResult(
             content=choice,

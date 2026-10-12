@@ -775,3 +775,13 @@ def test_empty_model_reply_does_not_crash_the_parsers():
 
     assert ws.parse_items("") == []
     assert ws.parse_object("") == {}
+
+
+def test_model_reply_text_is_always_a_string():
+    from app.services.llm.client import reply_text
+
+    assert reply_text(None) == ""
+    assert reply_text("") == ""
+    assert reply_text("[1]") == "[1]"
+    assert reply_text([{"type": "text", "text": "[1]"}, {"type": "text", "text": "[2]"}]) == "[1][2]"
+    assert reply_text([{"type": "other"}, "x"]) == "x"

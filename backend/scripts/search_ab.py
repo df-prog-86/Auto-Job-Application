@@ -76,6 +76,7 @@ class Meter:
                     "out": result.output_tokens,
                     "web": 1 if any(p.get("id") == "web" for p in plugins) else 0,
                     "secs": round(time.time() - t0, 1),
+                    "cost": (result.raw.get("usage") or {}).get("cost") if isinstance(result.raw, dict) else None,
                     "empty": 0 if (result.content or "").strip() else 1,
                     "stop": ((result.raw.get("choices") or [{}])[0].get("finish_reason")) if isinstance(result.raw, dict) else None,
                 }
@@ -182,10 +183,26 @@ async def run(args: argparse.Namespace) -> int:
     global NO_REASONING
     NO_REASONING = bool(getattr(args, "no_reasoning", False))
     print("Reasoning: " + ("switched off for every call" if NO_REASONING else "model default"))
+    spent = 0.0
     meter = Meter()
     meter.install()
+    ok_models = []
+    for model in models:  # one tiny call per model (a fraction of a cent) so a wrong name or setting fails before the real runs
+        try:
+            r = await LLMClient().chat_completion(model=model, messages=[{"role": "user", "content": "Reply with the single word OK."}], max_tokens=400, timeout=60.0)
+            spent += meter.cost(model, len(meter.calls) - 1)
+            if r.content.strip():
+                print(f"  check {model}: ok")
+            else:
+                print(f"  check {model}: answered with nothing (its thinking may use the whole answer budget); continuing")
+            ok_models.append(model)
+        except Exception as exc:
+            print(f"  check {model}: FAILED ({type(exc).__name__}: {str(exc)[:200]}); this model is skipped, nothing more is spent on it")
+    models = ok_models
+    if not models:
+        print("No model passed the check. Nothing was run.")
+        return 1
     rows: list[dict[str, Any]] = []
-    spent = 0.0
     seen: dict[tuple[int, str], set[str]] = {}
     ws.MAX_RESOLVE = 8
     for si, criteria in enumerate(searches):
@@ -224,6 +241,7 @@ async def run(args: argparse.Namespace) -> int:
                     "empty_replies": sum(c["empty"] for c in calls),
                     "stop_reasons": "/".join(sorted({str(c["stop"]) for c in calls})),
                     "est_cost_usd": round(cost, 4),
+                    "billed_usd": round(sum(c["cost"] for c in calls), 4) if calls and all(c.get("cost") is not None for c in calls) else "n/a",
                     "seconds": round(time.time() - t0, 1),
                     "error": err,
                     "_urls": [(i["title"], i["company"], i["url"]) for i in items],

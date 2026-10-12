@@ -26,12 +26,15 @@ from app.services.jobcache.text import pay_midpoint, work_type_from, workday_pos
 USER_AGENT = "JobAgent/1.0 (personal job search tool; reads public job lists)"
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
-SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters")
+SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle")
 WORKDAY_PAGE = 20  # Workday returns at most 20 jobs per request
 WORKDAY_MAX_JOBS = 1500  # a very large employer is read up to this many jobs, newest first as Workday lists them
 SMARTRECRUITERS_PAGE = 100  # postings per request from the public Posting API
 SMARTRECRUITERS_MAX_JOBS = 2000
-_MIN_GAP = {"workday": 0.6, "greenhouse": 0.3, "lever": 0.3, "ashby": 0.3, "smartrecruiters": 0.4}  # seconds between requests to one site
+_MIN_GAP = {
+    "workday": 0.6, "greenhouse": 0.3, "lever": 0.3, "ashby": 0.3, "smartrecruiters": 0.4,
+    "breezy": 0.5, "workable": 0.5, "bamboohr": 0.5, "pinpoint": 0.5, "jazzhr": 0.8, "jobvite": 0.8, "oracle": 0.6,
+}  # seconds between requests to one site
 _LANG = re.compile(r"[a-z]{2}-[A-Za-z]{2}")
 
 
@@ -100,12 +103,28 @@ def employer_ref(url: str) -> tuple[str, str] | None:
         return ("smartrecruiters", segs[0]) if segs and segs[0].lower() not in ("search", "login", "job", "jobs", "oga") else None
     if host in ("www.smartrecruiters.com", "smartrecruiters.com") and len(segs) >= 2 and segs[1][:1].isdigit():
         return "smartrecruiters", segs[0]  # an application link: smartrecruiters.com/<company>/<id>-<title>
+    sub = host.split(".")[0]
+    if host.endswith(".breezy.hr") and sub not in ("www", "app", "api"):
+        return "breezy", sub
+    if host == "apply.workable.com" and segs and segs[0] not in ("j", "api", "jobs", "tos", "privacy"):
+        return "workable", segs[0]
+    if host.endswith(".bamboohr.com") and sub not in ("www", "app", "api", "documentation"):
+        return "bamboohr", sub
+    if host.endswith(".pinpointhq.com") and sub not in ("www", "app", "api", "developers"):
+        return "pinpoint", sub
+    if host.endswith(".applytojob.com") and sub not in ("www", "app", "api"):
+        return "jazzhr", sub
+    if host == "jobs.jobvite.com" and segs and segs[0].lower() not in ("careers", "search", "job", "jobs", "api"):
+        return "jobvite", segs[0]
+    if host.endswith(".oraclecloud.com") and ".fa." in host and "sites" in segs[:-1]:
+        site = segs[segs.index("sites") + 1]
+        return "oracle", f"{host}|{site}"
     return None
 
 
 # ---- fetching ----------------------------------------------------------------------------------------------------
 
-async def _request(client: httpx.AsyncClient, throttle: Throttle, system: str, method: str, url: str, **kwargs: Any) -> Any:
+async def _request(client: httpx.AsyncClient, throttle: Throttle, system: str, method: str, url: str, text: bool = False, **kwargs: Any) -> Any:
     host = urlsplit(url).hostname or url
     await throttle.wait(host, _MIN_GAP[system])
     try:
@@ -119,6 +138,8 @@ async def _request(client: httpx.AsyncClient, throttle: Throttle, system: str, m
         raise ReaderError("that job list was not found", gone=True)
     if resp.status_code != 200:
         raise ReaderError(f"the site answered with an error ({resp.status_code})")
+    if text:
+        return resp.text
     try:
         return resp.json()
     except ValueError as exc:
@@ -316,9 +337,270 @@ async def _read_smartrecruiters(identifier: str, client: httpx.AsyncClient, thro
     return ReadResult(postings, complete=complete, name=name, notes=notes)
 
 
+# ---- Breezy HR ----------------------------------------------------------------------------------------------------
+
+def parse_breezy(data: Any, sub: str) -> list[PostingIn]:
+    """Breezy's public list (https://<name>.breezy.hr/json): a list of {id, name, url, published_date, location: {name, is_remote}, salary}."""
+    out: list[PostingIn] = []
+    for j in data if isinstance(data, list) else []:
+        if not isinstance(j, dict) or not j.get("id") or not j.get("name"):
+            continue
+        loc_obj = j.get("location") if isinstance(j.get("location"), dict) else {}
+        loc = loc_obj.get("name") if isinstance(loc_obj.get("name"), str) and loc_obj.get("name").strip() else None
+        salary = j.get("salary") if isinstance(j.get("salary"), str) and re.search(r"\d", j.get("salary") or "") else None
+        title = str(j["name"]).strip()
+        out.append(
+            PostingIn(
+                ext_id=str(j["id"]), title=title, url=str(j.get("url") or f"https://{sub}.breezy.hr/p/{j.get('friendly_id') or j['id']}"),
+                location=loc, work_type=work_type_from("remote" if loc_obj.get("is_remote") is True else None, loc, title),
+                pay_text=salary, pay_mid=pay_midpoint(salary), posted_at=_date(j.get("published_date")),
+            )
+        )
+    return out
+
+
+async def _read_breezy(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    data = await _request(client, throttle, "breezy", "GET", f"https://{identifier}.breezy.hr/json")
+    if not isinstance(data, list):
+        raise ReaderError("the site's answer was not what we expected")
+    return ReadResult(parse_breezy(data, identifier))
+
+
+# ---- Workable -----------------------------------------------------------------------------------------------------
+
+def parse_workable(data: Any, slug: str) -> list[PostingIn]:
+    """Workable's public widget list: {"name", "jobs": [{title, shortcode, url, city, state, country, telecommuting, published_on}]}."""
+    out: list[PostingIn] = []
+    for j in (data.get("jobs") if isinstance(data, dict) else None) or []:
+        if not isinstance(j, dict) or not j.get("title") or not (j.get("shortcode") or j.get("url")):
+            continue
+        city, state, country = (str(j.get(k) or "").strip() for k in ("city", "state", "country"))
+        parts = [city, state] if country.lower() in ("united states", "us", "usa", "") else [city, state, country]
+        loc = ", ".join(p for p in parts if p) or None
+        title = str(j["title"]).strip()
+        code = str(j.get("shortcode") or j.get("code") or j.get("url"))
+        url = j.get("url") or j.get("shortlink") or f"https://apply.workable.com/{slug}/j/{code}/"
+        out.append(
+            PostingIn(
+                ext_id=code, title=title, url=str(url), location=loc,
+                work_type=work_type_from("remote" if j.get("telecommuting") is True else None, loc, title),
+                posted_at=_date(j.get("published_on") or j.get("created_at")),
+            )
+        )
+    return out
+
+
+async def _read_workable(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    data = await _request(client, throttle, "workable", "GET", f"https://apply.workable.com/api/v1/widget/accounts/{identifier}")
+    if not isinstance(data, dict) or "jobs" not in data:
+        raise ReaderError("the site's answer was not what we expected")
+    name = data.get("name") if isinstance(data.get("name"), str) and data["name"].strip() else None
+    return ReadResult(parse_workable(data, identifier), name=name)
+
+
+# ---- BambooHR -----------------------------------------------------------------------------------------------------
+
+def parse_bamboohr(data: Any, sub: str) -> list[PostingIn]:
+    """BambooHR's public list (https://<name>.bamboohr.com/careers/list): {"meta": {"totalCount"}, "result": [{id, jobOpeningName, location: {city, state}, isRemote}]}."""
+    out: list[PostingIn] = []
+    for j in (data.get("result") if isinstance(data, dict) else None) or []:
+        if not isinstance(j, dict) or j.get("id") is None or not j.get("jobOpeningName"):
+            continue
+        loc_obj = j.get("location") if isinstance(j.get("location"), dict) else {}
+        loc = ", ".join(str(loc_obj.get(k)).strip() for k in ("city", "state") if loc_obj.get(k)) or None
+        title = str(j["jobOpeningName"]).strip()
+        out.append(
+            PostingIn(
+                ext_id=str(j["id"]), title=title, url=f"https://{sub}.bamboohr.com/careers/{j['id']}", location=loc,
+                work_type=work_type_from("remote" if j.get("isRemote") is True else None, loc, title),
+            )
+        )
+    return out
+
+
+async def _read_bamboohr(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    data = await _request(client, throttle, "bamboohr", "GET", f"https://{identifier}.bamboohr.com/careers/list")
+    if not isinstance(data, dict) or "result" not in data:
+        raise ReaderError("the site's answer was not what we expected")
+    return ReadResult(parse_bamboohr(data, identifier))
+
+
+# ---- Pinpoint -----------------------------------------------------------------------------------------------------
+
+def _pinpoint_pay(j: dict[str, Any]) -> tuple[str | None, float | None]:
+    if not j.get("compensation_visible", True):
+        return None, None
+    lo, hi = j.get("compensation_minimum"), j.get("compensation_maximum")
+    text = j.get("compensation") if isinstance(j.get("compensation"), str) and re.search(r"\d", j.get("compensation") or "") else None
+    if text:
+        return text, pay_midpoint(text)
+    if isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and hi > 0 and str(j.get("compensation_frequency") or "").lower() in ("year", "yearly", "annual", "annually"):
+        return f"${lo:,.0f} - ${hi:,.0f} / year", (lo + hi) / 2
+    return None, None
+
+
+def parse_pinpoint(data: Any, sub: str) -> list[PostingIn]:
+    """Pinpoint's public list (https://<name>.pinpointhq.com/postings.json): {"data": [{id, title, url, location: {name, city, province}, workplace_type, compensation...}]}."""
+    out: list[PostingIn] = []
+    for j in (data.get("data") if isinstance(data, dict) else None) or []:
+        if not isinstance(j, dict) or j.get("id") is None or not j.get("title"):
+            continue
+        loc_obj = j.get("location") if isinstance(j.get("location"), dict) else {}
+        loc = loc_obj.get("name") if isinstance(loc_obj.get("name"), str) and loc_obj.get("name").strip() else None
+        if not loc:
+            loc = ", ".join(str(loc_obj.get(k)).strip() for k in ("city", "province") if loc_obj.get(k)) or None
+        title = str(j["title"]).strip()
+        url = j.get("url") if isinstance(j.get("url"), str) and j["url"].startswith("http") else f"https://{sub}.pinpointhq.com/en/postings/{j['id']}"
+        declared = str(j.get("workplace_type") or j.get("workplace_type_text") or "").lower() or None
+        if declared and declared.replace("-", "").replace("_", "") == "onsite":
+            declared = "onsite"
+        pay_text, mid = _pinpoint_pay(j)
+        out.append(
+            PostingIn(
+                ext_id=str(j["id"]), title=title, url=url, location=loc, work_type=work_type_from(declared, loc, title),
+                pay_text=pay_text, pay_mid=mid, posted_at=_date(j.get("published_at") or j.get("created_at")),
+            )
+        )
+    return out
+
+
+async def _read_pinpoint(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    data = await _request(client, throttle, "pinpoint", "GET", f"https://{identifier}.pinpointhq.com/postings.json")
+    if not isinstance(data, dict) or "data" not in data:
+        raise ReaderError("the site's answer was not what we expected")
+    return ReadResult(parse_pinpoint(data, identifier))
+
+
+# ---- JazzHR (page reading) ----------------------------------------------------------------------------------------
+
+_TAGS = re.compile(r"<[^>]+>")
+_NO_JOBS = re.compile(r"no (?:current |open |available )?(?:job|position|opening)s?|currently (?:no|not)|0 (?:open )?jobs", re.I)
+
+
+def _plain(fragment: str) -> str:
+    import html as _html
+
+    return re.sub(r"\s+", " ", _html.unescape(_TAGS.sub(" ", fragment))).strip()
+
+
+def parse_jazzhr(page: Any, sub: str) -> list[PostingIn]:
+    """JazzHR's careers page (https://<name>.applytojob.com/apply): each opening is a link to /apply/<code>/<title> with its place beside it."""
+    html = page if isinstance(page, str) else ""
+    out: list[PostingIn] = []
+    seen: set[str] = set()
+    for m in re.finditer(r'<a[^>]+href="(https?://[^"]*applytojob\.com/apply/([A-Za-z0-9]{6,})(?:/[^"]*)?)"[^>]*>(.*?)</a>', html, re.S):
+        url, code, inner = m.group(1), m.group(2), _plain(m.group(3))
+        if code in seen or not inner or inner.lower() in ("apply", "apply now", "view", "view details", "learn more"):
+            continue
+        seen.add(code)
+        tail = html[m.end(): m.end() + 700]
+        end = tail.find("</li>")
+        marker = re.search(r'fa-map-marker[^>]*>\s*(?:</i>)?\s*([^<]+)', tail[: end if end > 0 else 700] + "</li>") or re.search(r'fa-map-marker[^>]*>\s*(?:</i>)?\s*([^<]+)', tail)
+        loc = _plain(marker.group(1)) if marker else None
+        out.append(PostingIn(ext_id=code, title=inner, url=url.split("?")[0], location=loc or None, work_type=work_type_from(None, loc, inner)))
+    return out
+
+
+async def _read_jazzhr(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    page = await _request(client, throttle, "jazzhr", "GET", f"https://{identifier}.applytojob.com/apply", text=True, headers={"Accept": "text/html"})
+    postings = parse_jazzhr(page, identifier)
+    if not postings and not _NO_JOBS.search(_plain(page)):
+        raise ReaderError("we couldn't make sense of that careers page")
+    return ReadResult(postings)
+
+
+# ---- Jobvite (page reading) ---------------------------------------------------------------------------------------
+
+def parse_jobvite(page: Any, slug: str) -> list[PostingIn]:
+    """Jobvite's careers page (https://jobs.jobvite.com/<name>/jobs): each opening is a link to /<name>/job/<code> with its place in the next cell."""
+    html = page if isinstance(page, str) else ""
+    out: list[PostingIn] = []
+    seen: set[str] = set()
+    for m in re.finditer(r'<a[^>]+href="((?:https?://jobs\.jobvite\.com)?/[^"/]+/job/([A-Za-z0-9]+)[^"]*)"[^>]*>(.*?)</a>', html, re.S):
+        href, code, inner = m.group(1), m.group(2), _plain(m.group(3))
+        if code in seen or not inner or inner.lower() in ("apply", "apply now", "view", "learn more"):
+            continue
+        seen.add(code)
+        tail = html[m.end(): m.end() + 800]
+        loc_m = re.search(r'jv-job-list-location[^>]*>(.*?)</(?:td|div|span|p)>', tail, re.S)
+        loc = _plain(loc_m.group(1)) if loc_m else None
+        url = href if href.startswith("http") else f"https://jobs.jobvite.com{href}"
+        out.append(PostingIn(ext_id=code, title=inner, url=url.split("?")[0], location=loc or None, work_type=work_type_from(None, loc, inner)))
+    return out
+
+
+async def _read_jobvite(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    page = await _request(client, throttle, "jobvite", "GET", f"https://jobs.jobvite.com/{identifier}/jobs", text=True, headers={"Accept": "text/html"})
+    postings = parse_jobvite(page, identifier)
+    if not postings and not _NO_JOBS.search(_plain(page)):
+        raise ReaderError("we couldn't make sense of that careers page")
+    return ReadResult(postings)
+
+
+# ---- Oracle Cloud recruiting --------------------------------------------------------------------------------------
+
+ORACLE_PAGE = 100
+ORACLE_MAX_JOBS = 2500
+
+
+def parse_oracle(data: Any, host: str, site: str) -> tuple[list[PostingIn], int | None]:
+    """Oracle's candidate-experience list: {"items": [{"TotalJobsCount", "requisitionList": [{Id, Title, PostedDate, PrimaryLocation, WorkplaceType}]}]}."""
+    items = data.get("items") if isinstance(data, dict) else None
+    head = items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else {}
+    total = head.get("TotalJobsCount") if isinstance(head.get("TotalJobsCount"), int) else None
+    out: list[PostingIn] = []
+    for j in head.get("requisitionList") or []:
+        if not isinstance(j, dict) or j.get("Id") is None or not j.get("Title"):
+            continue
+        loc = j.get("PrimaryLocation") if isinstance(j.get("PrimaryLocation"), str) and j["PrimaryLocation"].strip() else None
+        if loc:
+            loc = re.sub(r",\s*United States$", "", loc)
+        title = str(j["Title"]).strip()
+        out.append(
+            PostingIn(
+                ext_id=str(j["Id"]), title=title, url=f"https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{j['Id']}",
+                location=loc, work_type=work_type_from(str(j.get("WorkplaceType") or "").replace("-", "") or None, loc, title),
+                posted_at=_date(j.get("PostedDate")),
+            )
+        )
+    return out, total
+
+
+async def _read_oracle(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    try:
+        host, site = identifier.split("|")
+    except ValueError as exc:
+        raise ReaderError("that Oracle address is incomplete", gone=True) from exc
+    postings: list[PostingIn] = []
+    total: int | None = None
+    complete = False
+    offset = 0
+    while offset < ORACLE_MAX_JOBS:
+        # The finder is written out whole: Oracle wants its semicolon and commas as they are.
+        url = (
+            f"https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList"
+            f"&finder=findReqs;siteNumber={site},limit={ORACLE_PAGE},offset={offset},sortBy=POSTING_DATES_DESC"
+        )
+        data = await _request(client, throttle, "oracle", "GET", url)
+        if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+            raise ReaderError("the site's answer was not what we expected")
+        page, count = parse_oracle(data, host, site)
+        total = count if count is not None else total
+        postings.extend(page)
+        offset += len(page)
+        if not page or (total is not None and offset >= total):
+            complete = True
+            break
+    notes = [] if complete else [f"read the first {len(postings)} of {total or 'many'} jobs"]
+    return ReadResult(postings, complete=complete, notes=notes)
+
+
 # ---- entry point --------------------------------------------------------------------------------------------------
 
-_READERS = {"greenhouse": _read_greenhouse, "lever": _read_lever, "ashby": _read_ashby, "workday": _read_workday, "smartrecruiters": _read_smartrecruiters}
+_READERS = {"greenhouse": _read_greenhouse, "lever": _read_lever, "ashby": _read_ashby, "workday": _read_workday, "smartrecruiters": _read_smartrecruiters,
+    "breezy": _read_breezy, "workable": _read_workable, "bamboohr": _read_bamboohr, "pinpoint": _read_pinpoint,
+    "jazzhr": _read_jazzhr, "jobvite": _read_jobvite, "oracle": _read_oracle,
+}
 
 
 async def read_employer(system: str, identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:

@@ -466,7 +466,19 @@ WORKDAY_NAMES = {
     "cornerstone|cornerstoneresearch_careers": "Cornerstone Research",
     "roberthalf|protivitiexperiencedcareers": "Protiviti",  # Protiviti's careers site runs on Robert Half's Workday account
 }
-OTHER_NAMES = {("lever", "pmaconsultants"): "PMA Consultants"}
+OTHER_NAMES = {
+    ("lever", "pmaconsultants"): "PMA Consultants",
+    ("oracle", "ebez.fa.us2.oraclecloud.com|cx_1"): "CBIZ",
+    ("oracle", "ehzq.fa.us2.oraclecloud.com|cx_1"): "Grant Thornton",
+    ("oracle", "eedu.fa.em3.oraclecloud.com|cx_1003"): "WTW",
+    ("pinpoint", "igsinsights"): "IGS",
+    ("breezy", "tyton-partners"): "Tyton Partners",
+    ("breezy", "charted-inc"): "Charted Inc",
+    ("bamboohr", "reptrak"): "RepTrak",
+    ("workable", "rapdev"): "RapDev",
+    ("jazzhr", "kaufmanhall"): "Kaufman Hall",
+    ("jobvite", "medullan"): "Medullan",
+}
 
 
 def known_name(ats: str, identifier: str) -> str | None:
@@ -484,5 +496,7 @@ def guess_name(ats: str, identifier: str) -> str:
     if known:
         return known
     slug = identifier.split("|")[1] if ats == "workday" and "|" in identifier else identifier
+    if ats == "oracle":
+        slug = identifier.split(".")[0]
     slug = slug.removeprefix("eu:")
     return " ".join(w.capitalize() for w in slug.replace("_", "-").split("-") if w) or identifier

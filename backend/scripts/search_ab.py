@@ -49,6 +49,9 @@ DEFAULT_SEARCHES = [
 ]
 
 
+NO_REASONING = False  # set by --no-reasoning: asks the model not to "think" before answering
+
+
 class Meter:
     """Counts every AI call (tokens and web searches) by wrapping the real client."""
 
@@ -61,6 +64,8 @@ class Meter:
 
         async def wrapped(self_client, **kw):  # type: ignore[no-untyped-def]
             t0 = time.time()
+            if NO_REASONING:
+                kw["extra"] = {**(kw.get("extra") or {}), "reasoning": {"enabled": False}}
             result = await meter.real(self_client, **kw)
             plugins = (kw.get("extra") or {}).get("plugins") or []
             meter.calls.append(
@@ -173,6 +178,9 @@ async def run(args: argparse.Namespace) -> int:
         print("Dry run: no AI calls made.")
         return 0
 
+    global NO_REASONING
+    NO_REASONING = bool(getattr(args, "no_reasoning", False))
+    print("Reasoning: " + ("switched off for every call" if NO_REASONING else "model default"))
     meter = Meter()
     meter.install()
     rows: list[dict[str, Any]] = []
@@ -234,7 +242,7 @@ async def run(args: argparse.Namespace) -> int:
     out.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M")
     cols = [k for k in rows[0] if not k.startswith("_")] if rows else []
-    with open(out / f"search_ab-{stamp}.csv", "w", newline="") as fh:
+    with open(out / f"search_ab-{stamp}{'-noreason' if NO_REASONING else ''}.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
@@ -245,7 +253,7 @@ async def run(args: argparse.Namespace) -> int:
         lines.append("| " + " | ".join(str(r.get(c, "")) for c in cols) + " |")
     for r in rows:
         lines += ["", f"## {r['search']} | {r['model']} | mode {r['mode']}"] + [f"- {t} at {c}: {u}" for t, c, u in r["_urls"]]
-    (out / f"search_ab-{stamp}.md").write_text("\n".join(lines))
+    (out / f"search_ab-{stamp}{'-noreason' if NO_REASONING else ''}.md").write_text("\n".join(lines))
     print(f"\nEstimated total ${spent:.2f}. Report: {out / f'search_ab-{stamp}.md'}")
     return 0
 
@@ -257,6 +265,7 @@ def main() -> None:
     p.add_argument("--searches", help="JSON file with a list of search criteria (same fields as the Job Search form)")
     p.add_argument("--max-spend", type=float, default=1.0)
     p.add_argument("--out", default=str(Path.home() / "Desktop" / "job-agent-experiments"))
+    p.add_argument("--no-reasoning", action="store_true", help="ask the model to answer without a thinking step")
     p.add_argument("--dry-run", action="store_true")
     sys.exit(asyncio.run(run(p.parse_args())))
 

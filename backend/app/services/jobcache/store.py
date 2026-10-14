@@ -15,6 +15,8 @@ import datetime as dt
 import sqlite3
 import threading
 import time
+import zlib
+import hashlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -74,6 +76,10 @@ CREATE TABLE IF NOT EXISTS lookups (
 );
 """
 
+# Columns added after the first release: (name, definition)
+MIGRATIONS = (("description_z", "BLOB"), ("desc_hash", "TEXT"), ("agency", "INTEGER"))
+DESCRIPTION_CAP = 8000  # characters of a posting's text kept (pay is read from the whole text before this)
+
 FTS_SCHEMA = (
     "CREATE VIRTUAL TABLE IF NOT EXISTS postings_fts USING fts5("
     "title, company, location, tokenize = 'porter unicode61 remove_diacritics 2')"
@@ -96,6 +102,8 @@ class PostingIn:
     pay_text: str | None = None
     pay_mid: float | None = None
     posted_at: dt.date | None = None
+    description: str | None = None  # plain text of the posting, when the employer's list carries it for free
+    agency: bool | None = None  # True / False when known, None when not decided
 
 
 @dataclass
@@ -107,6 +115,21 @@ class RefreshResult:
 
 def now_ts() -> int:
     return int(time.time())
+
+
+def pack_description(text_: str | None) -> tuple[bytes | None, str | None]:
+    """(compressed text, short fingerprint) for a posting's description, or (None, None) when there is none."""
+    body = (text_ or "").strip()[:DESCRIPTION_CAP]
+    if not body:
+        return None, None
+    return zlib.compress(body.encode("utf-8"), 6), hashlib.sha1(body.encode("utf-8")).hexdigest()[:16]
+
+
+def unpack_description(blob: bytes | None) -> str | None:
+    try:
+        return zlib.decompress(blob).decode("utf-8") if blob else None
+    except (zlib.error, UnicodeDecodeError):
+        return None
 
 
 class JobCache:
@@ -124,6 +147,10 @@ class JobCache:
             conn = self._raw()
             try:
                 conn.executescript(SCHEMA)
+                have = {r["name"] for r in conn.execute("PRAGMA table_info(postings)")}
+                for column, ddl in MIGRATIONS:  # older copies gain the new columns; nothing is lost or rewritten
+                    if column not in have:
+                        conn.execute(f"ALTER TABLE postings ADD COLUMN {column} {ddl}")
                 try:
                     conn.execute(FTS_SCHEMA)
                     fts = True
@@ -283,7 +310,7 @@ class JobCache:
             company = emp["name"]
             existing = {
                 r["ext_id"]: r
-                for r in db.execute("SELECT id, ext_id, title, location, closed_at FROM postings WHERE employer_id = ?", (employer_id,))
+                for r in db.execute("SELECT id, ext_id, title, location, closed_at, desc_hash, agency FROM postings WHERE employer_id = ?", (employer_id,))
             }
             seen: set[str] = set()
             fts_add: list[tuple[int, str, str, str]] = []
@@ -294,11 +321,14 @@ class JobCache:
                 seen.add(p.ext_id)
                 row = existing.get(p.ext_id)
                 posted = p.posted_at.isoformat() if p.posted_at else None
+                blob, fingerprint = pack_description(p.description)
+                agency = None if p.agency is None else int(p.agency)
                 if row is None:
                     cur = db.execute(
-                        "INSERT INTO postings (employer_id, ext_id, title, location, work_type, pay_text, pay_mid, posted_at, url, first_seen, last_seen) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (employer_id, p.ext_id, p.title[:300], (p.location or None) and p.location[:300], p.work_type, p.pay_text, p.pay_mid, posted, p.url[:1000], now, now),
+                        "INSERT INTO postings (employer_id, ext_id, title, location, work_type, pay_text, pay_mid, posted_at, url, first_seen, last_seen, "
+                        "description_z, desc_hash, agency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (employer_id, p.ext_id, p.title[:300], (p.location or None) and p.location[:300], p.work_type, p.pay_text, p.pay_mid, posted, p.url[:1000], now, now,
+                         blob, fingerprint, agency),
                     )
                     fts_add.append((int(cur.lastrowid), p.title[:300], company, (p.location or "")[:300]))
                     result.new += 1
@@ -308,6 +338,10 @@ class JobCache:
                     "pay_mid = COALESCE(?, pay_mid), posted_at = COALESCE(?, posted_at), url = ?, last_seen = ?, closed_at = NULL WHERE id = ?",
                     (p.title[:300], (p.location or None) and p.location[:300], p.work_type, p.pay_text, p.pay_mid, posted, p.url[:1000], now, row["id"]),
                 )
+                if fingerprint and fingerprint != row["desc_hash"]:  # the text is saved again only when it is new or has changed
+                    db.execute("UPDATE postings SET description_z = ?, desc_hash = ? WHERE id = ?", (blob, fingerprint, row["id"]))
+                if agency is not None and agency != row["agency"]:
+                    db.execute("UPDATE postings SET agency = ? WHERE id = ?", (agency, row["id"]))
                 changed = row["title"] != p.title[:300] or (row["location"] or "") != (p.location or "")[:300]
                 if row["closed_at"] is not None or changed:
                     fts_del.append(row["id"])
@@ -373,7 +407,12 @@ class JobCache:
                     f"WHERE ({like}) AND p.closed_at IS NULL AND e.enabled = 1" + date_clause + " LIMIT ?"
                 )
                 rows = db.execute(sql, [*[f"%{t}%" for t in terms], *params, limit]).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["description"] = unpack_description(d.pop("description_z", None))
+            out.append(d)
+        return out
 
     def lookup_get(self, board_key: str, max_age_seconds: int) -> tuple[bool, str | None]:
         """(remembered, found link). `remembered` is False when nothing was stored in the last `max_age_seconds`."""

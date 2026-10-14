@@ -176,6 +176,22 @@ def pay_from_text(text_: str | None) -> tuple[str | None, float | None]:
     return None, None
 
 
+_LOC_LABEL = re.compile(
+    r"(?:^|\n)\s*(?i:(?:job |work |office |primary )?location(?:s)?)\s*[:\-]\s*([A-Z][A-Za-z.'\- ]{2,40}),\s*([A-Z]{2})\b"
+)
+
+
+def location_from_text(text_: str | None) -> str | None:
+    """
+    "City, ST" when a posting's text states it on a labelled line ("Location: Waltham, MA"), else None. Only an explicit label counts:
+    a city mentioned in passing ("our Boston headquarters") is never taken as the job's place.
+    """
+    m = _LOC_LABEL.search(text_ or "")
+    if m and m.group(2) in US_STATES:
+        return f"{m.group(1).strip()}, {m.group(2)}"
+    return None
+
+
 # ---- work type --------------------------------------------------------------------------------------------------
 
 def work_type_from(declared: str | None, location: str | None, title: str | None = None) -> str | None:

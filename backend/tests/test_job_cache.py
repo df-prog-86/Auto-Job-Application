@@ -866,3 +866,64 @@ def test_cache_tools_coverage_report(tmp_path, capsys):
     assert cache_tools.cmd_coverage(argparse.Namespace(db=str(tmp_path / "c.db"))) == 0
     out = capsys.readouterr().out
     assert "lever" in out and "50%" in out and "coordinates" in out
+
+
+# ---- descriptions ----------------------------------------------------------------------------------------------
+
+def test_location_from_text_needs_an_explicit_label():
+    f = text.location_from_text
+    assert f("Great role.\nLocation: Waltham, MA\nApply now") == "Waltham, MA"
+    assert f("Work Location - Austin, TX") == "Austin, TX"
+    assert f("Our Boston headquarters is lovely") is None and f("Location: Narnia, ZZ") is None and f(None) is None
+
+
+def test_description_is_saved_compressed_and_rewritten_only_when_changed(tmp_path):
+    cache = JobCache(str(tmp_path / "d.db"))
+    eid, _ = cache.upsert_employer("greenhouse", "acme", "Acme", "search")
+    base = dict(ext_id="1", title="Revenue Cycle Manager", url="https://x/1", location="Boston, MA")
+    cache.apply_refresh(eid, [PostingIn(**base, description="Lead denials management and charge capture.")], now_ts())
+    with cache.session() as db:
+        row = db.execute("SELECT description_z, desc_hash FROM postings").fetchone()
+        first = row["desc_hash"]
+        assert isinstance(row["description_z"], bytes) and first
+    # same text again: untouched; new text: replaced; no text this time: the saved text is kept
+    cache.apply_refresh(eid, [PostingIn(**base, description="Lead denials management and charge capture.")], now_ts())
+    cache.apply_refresh(eid, [PostingIn(**base)], now_ts())
+    with cache.session() as db:
+        assert db.execute("SELECT desc_hash FROM postings").fetchone()["desc_hash"] == first
+    cache.apply_refresh(eid, [PostingIn(**base, description="Now also owns payer contracting.")], now_ts())
+    got = cache.candidates(None, ["%"], 10)
+    assert got[0]["description"] == "Now also owns payer contracting." and "description_z" not in got[0]
+
+
+def test_older_copies_gain_the_new_columns(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE employers (id INTEGER PRIMARY KEY, ats TEXT NOT NULL, identifier TEXT NOT NULL, name TEXT NOT NULL, industry TEXT,
+          source TEXT NOT NULL DEFAULT 'search', enabled INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'new', fail_count INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT, last_checked INTEGER, last_ok INTEGER, next_check INTEGER NOT NULL DEFAULT 0, open_count INTEGER NOT NULL DEFAULT 0,
+          hits INTEGER NOT NULL DEFAULT 0, added_at INTEGER NOT NULL, UNIQUE (ats, identifier));
+        CREATE TABLE postings (id INTEGER PRIMARY KEY, employer_id INTEGER NOT NULL, ext_id TEXT NOT NULL, title TEXT NOT NULL, location TEXT,
+          work_type TEXT, pay_text TEXT, pay_mid REAL, posted_at TEXT, url TEXT NOT NULL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL,
+          closed_at INTEGER, UNIQUE (employer_id, ext_id));
+        INSERT INTO employers (id, ats, identifier, name, added_at) VALUES (1, 'lever', 'a', 'A', 1);
+        INSERT INTO postings (employer_id, ext_id, title, url, first_seen, last_seen) VALUES (1, 'x', 'Old Job', 'https://x', 1, 1);
+    """)
+    conn.commit()
+    conn.close()
+    cache = JobCache(str(path))
+    with cache.session() as db:
+        cols = {r["name"] for r in db.execute("PRAGMA table_info(postings)")}
+        assert {"description_z", "desc_hash", "agency"} <= cols
+        assert db.execute("SELECT title FROM postings").fetchone()["title"] == "Old Job"
+
+
+def test_keywords_are_found_in_a_saved_description():
+    plan = matcher.build_plan(SimpleNamespace(titles="Revenue Cycle Manager", keywords="Epic Resolute", location="", work_type="any",
+                                              target_salary=None, exclude_companies="", posted_within_days=0))
+    row = {"title": "Revenue Cycle Manager", "company": "Acme", "location": "Boston, MA", "work_type": None, "pay_mid": None, "posted_at": None}
+    assert matcher.score_row(plan, row) is None  # the keyword is nowhere in the title, employer or place
+    assert matcher.score_row(plan, {**row, "description": "Experience with Epic Resolute billing required"}) is not None

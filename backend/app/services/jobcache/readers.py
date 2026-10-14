@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 from app.services.jobcache.store import PostingIn
-from app.services.jobcache.text import html_to_text, pay_from_text, pay_midpoint, work_type_from, workday_posted
+from app.services.jobcache.text import html_to_text, is_vague_place, location_from_text, pay_from_text, pay_midpoint, work_type_from, workday_posted
 
 USER_AGENT = "JobAgent/1.0 (personal job search tool; reads public job lists)"
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
@@ -184,11 +184,14 @@ def parse_greenhouse(data: Any, token: str) -> list[PostingIn]:
         if "greenhouse.io" not in url:  # an employer that embeds its board: use the board's own address for the posting
             url = f"https://job-boards.greenhouse.io/{token}/jobs/{j['id']}"
         posted = _date(j.get("first_published"))
-        pay_text, mid = pay_from_text(html_to_text(j.get("content"))) if j.get("content") else (None, None)
+        body = html_to_text(j.get("content")) if j.get("content") else ""
+        pay_text, mid = pay_from_text(body)
+        if is_vague_place(loc):
+            loc = location_from_text(body) or loc
         out.append(
             PostingIn(
                 ext_id=str(j["id"]), title=str(j["title"]).strip(), url=url, location=loc, work_type=work_type_from(None, loc, j["title"]),
-                pay_text=pay_text, pay_mid=mid, posted_at=posted,
+                pay_text=pay_text, pay_mid=mid, posted_at=posted, description=body or None,
             )
         )
     return out
@@ -224,17 +227,19 @@ def parse_lever(data: Any) -> list[PostingIn]:
             if yearly:
                 pay_text = f"${rng['min']:,.0f} - ${rng['max']:,.0f}" if cur == "USD" else f"{cur} {rng['min']:,.0f} - {rng['max']:,.0f}"
                 mid = (rng["min"] + rng["max"]) / 2 if cur == "USD" else None
+        body = " \n".join(str(j.get(k) or "") for k in ("descriptionPlain", "additionalPlain"))
+        body += " \n" + " \n".join(html_to_text(x.get("content")) for x in (j.get("lists") or []) if isinstance(x, dict))
         if pay_text is None:  # no pay field: look in the posting's own words
-            body = " ".join(str(j.get(k) or "") for k in ("salaryDescriptionPlain", "descriptionPlain", "additionalPlain"))
-            body += " " + " ".join(html_to_text(x.get("content")) for x in (j.get("lists") or []) if isinstance(x, dict))
-            pay_text, mid = pay_from_text(body)
+            pay_text, mid = pay_from_text(f"{j.get('salaryDescriptionPlain') or ''} {body}")
+        if is_vague_place(loc):
+            loc = location_from_text(body) or loc
         created = j.get("createdAt")
         posted = dt.datetime.fromtimestamp(created / 1000, tz=dt.timezone.utc).date() if isinstance(created, (int, float)) and created > 0 else None
         url = j.get("hostedUrl") or f"https://jobs.lever.co/{j.get('id')}"
         out.append(
             PostingIn(
                 ext_id=str(j["id"]), title=str(j["text"]).strip(), url=url, location=loc,
-                work_type=work_type_from(j.get("workplaceType"), loc, j["text"]), pay_text=pay_text, pay_mid=mid, posted_at=posted,
+                work_type=work_type_from(j.get("workplaceType"), loc, j["text"]), pay_text=pay_text, pay_mid=mid, posted_at=posted, description=body.strip() or None,
             )
         )
     return out
@@ -260,13 +265,16 @@ def parse_ashby(data: Any, board: str) -> list[PostingIn]:
         pay_text = comp.get("compensationTierSummary") or comp.get("scrapeableCompensationSalarySummary")
         pay_text = pay_text if isinstance(pay_text, str) and pay_text.strip() else None
         mid = pay_midpoint(pay_text)
+        body = j.get("descriptionPlain") or html_to_text(j.get("descriptionHtml"))
         if pay_text is None:
-            pay_text, mid = pay_from_text(j.get("descriptionPlain") or html_to_text(j.get("descriptionHtml")))
+            pay_text, mid = pay_from_text(body)
+        if is_vague_place(loc):
+            loc = location_from_text(body) or loc
         out.append(
             PostingIn(
                 ext_id=str(j["id"]), title=str(j["title"]).strip(), url=j.get("jobUrl") or f"https://jobs.ashbyhq.com/{board}/{j['id']}",
                 location=loc, work_type=work_type_from(declared, loc, j["title"]), pay_text=pay_text, pay_mid=mid,
-                posted_at=_date(j.get("publishedAt")),
+                posted_at=_date(j.get("publishedAt")), description=body or None,
             )
         )
     return out

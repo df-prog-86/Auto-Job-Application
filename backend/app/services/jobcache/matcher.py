@@ -218,9 +218,9 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
         return None
     kw = 0.0
     if plan.keyword_phrases:
-        # Keywords are required: every word of at least one keyword must be in the title, employer or place
-        # (saved postings carry no description). A posting that has none of them is left out.
-        if not keyword_match(plan, f"{row['title']} {row.get('company') or ''} {row.get('location') or ''}"):
+        # Keywords are required: every word of at least one keyword must be in the title, employer, place or (when the
+        # posting's text was saved) its description. A posting that has none of them is left out.
+        if not keyword_match(plan, f"{row['title']} {row.get('company') or ''} {row.get('location') or ''} {row.get('description') or ''}"):
             return None
         kw = 1.0
     fit = W_TITLE * tf + W_PLACE * lf + W_RECENT * _recency(posted, today) + W_PAY * (1.0 if mid is not None else 0.0) + W_KEYWORD * kw

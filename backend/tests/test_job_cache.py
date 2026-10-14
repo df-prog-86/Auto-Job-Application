@@ -1027,3 +1027,34 @@ async def test_expand_titles_uses_onet_first_and_the_ai_only_to_fill_gaps(tmp_pa
     assert "Medical Biller" in full and len(full) >= 4 and calls == []
     gap = await service.expand_titles("tax accountant")             # fewer than four: the AI fills in, no repeats
     assert "Staff Accountant" in gap and "Collections Analyst" in gap and gap.count("Staff Accountant") == 1 and calls == ["tax accountant"]
+
+
+# ---- agency flag (a label only) --------------------------------------------------------------------------------
+
+def test_agency_flag_needs_evidence():
+    from app.services.jobcache.agency import is_agency
+
+    assert is_agency("Robert Half") is True and is_agency("Acme Staffing Solutions") is True and is_agency("Kforce Inc") is True
+    assert is_agency("Mass General Brigham", "On behalf of our client, a leading health system...") is True
+    assert is_agency("Mass General Brigham", "Join our billing team and help patients.") is None   # not decided, never 'direct'
+    assert is_agency(None, None) is None
+
+
+def test_agency_flag_never_changes_which_jobs_a_search_returns(tmp_path, monkeypatch):
+    monkeypatch.setattr(service.settings, "JOB_CACHE_PATH", str(tmp_path / "ag.db"))
+    cache = JobCache()
+    direct, _ = cache.upsert_employer("lever", "mgb", "Mass General Brigham", "search")
+    agency, _ = cache.upsert_employer("lever", "rh", "Robert Half", "search")
+    for eid in (direct, agency):
+        cache.apply_refresh(eid, [PostingIn(ext_id="1", title="Revenue Cycle Manager", url=f"https://x/{eid}", location="Boston, MA")], now_ts())
+    with cache.session() as db:
+        flags = {r["name"]: r["agency"] for r in db.execute("SELECT e.name, p.agency FROM postings p JOIN employers e ON e.id = p.employer_id")}
+    assert flags == {"Mass General Brigham": None, "Robert Half": 1}
+    crit = SimpleNamespace(titles="Revenue Cycle Manager", keywords="", location="Boston, MA", work_type="any", target_salary=None,
+                           exclude_companies="", posted_within_days=0)
+    def results():
+        return sorted((s.row["company"], s.fit) for s in matcher.rank(matcher.build_plan(crit), cache.candidates(None, ["%"], 50)))
+    with_flags = results()
+    with cache.session() as db:
+        db.execute("UPDATE postings SET agency = NULL")
+    assert results() == with_flags and len(with_flags) == 2   # same jobs, same order, same scores, flagged or not

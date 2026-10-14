@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
+from app.services.jobcache.agency import is_agency
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS employers (
@@ -335,7 +336,8 @@ class JobCache:
                 row = existing.get(p.ext_id)
                 posted = p.posted_at.isoformat() if p.posted_at else None
                 blob, fingerprint = pack_description(p.description)
-                agency = None if p.agency is None else int(p.agency)
+                decided = p.agency if p.agency is not None else is_agency(company, p.description)
+                agency = None if decided is None else int(decided)
                 if row is None:
                     cur = db.execute(
                         "INSERT INTO postings (employer_id, ext_id, title, location, work_type, pay_text, pay_mid, posted_at, url, first_seen, last_seen, "

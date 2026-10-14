@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -974,3 +975,55 @@ def test_a_trusted_first_seen_day_counts_as_the_posting_date(tmp_path, monkeypat
     assert item["posted_at"] == dt.date.fromisoformat(_day(now))
     undated = service.to_item(next(r for r in matcher.rank(matcher.build_plan(crit), cache.candidates(None, ["%"], 50)) if r.row["ext_id"] == "1"))
     assert undated["posted_at"] is None
+
+
+# ---- O*NET titles ----------------------------------------------------------------------------------------------
+
+def _write_onet(tmp_path, monkeypatch):
+    from app.services.jobcache import onet
+
+    monkeypatch.setattr(onet.settings, "JOB_CACHE_PATH", str(tmp_path / "job_cache.db"))
+    (tmp_path / "onet").mkdir()
+    (tmp_path / "onet" / "titles.json").write_text(json.dumps({"release": "O*NET 99.9", "occupations": [
+        ["Medical Records Specialists", ["Billing Specialist", "Medical Biller", "Patient Account Representative", "Claims Specialist", "Senior Billing Specialist",
+                                         "Billing Manager", "Coding Specialist"]],
+        ["Accountants", ["Staff Accountant", "Tax Accountant"]],
+    ]}))
+    return onet
+
+
+def test_onet_gives_other_names_for_the_same_job_and_nothing_when_unknown(tmp_path, monkeypatch):
+    onet = _write_onet(tmp_path, monkeypatch)
+    got = onet.alternates("billing specialist")
+    assert "Medical Biller" in got and "Billing Specialist" not in got
+    assert "Billing Manager" not in got and "Senior Billing Specialist" not in got      # a different seniority is left out
+    assert "Staff Accountant" not in got                                               # a different occupation
+    assert onet.alternates("Specialist Billing") != [] and onet.alternates("quantum llama wrangler") == []
+    assert onet.release() == "O*NET 99.9" and "CC BY 4.0" in onet.ATTRIBUTION
+
+
+def test_onet_is_optional_and_a_damaged_file_is_ignored(tmp_path, monkeypatch):
+    from app.services.jobcache import onet
+
+    monkeypatch.setattr(onet.settings, "JOB_CACHE_PATH", str(tmp_path / "none.db"))
+    assert onet.alternates("billing specialist") == [] and not onet.available()
+    (tmp_path / "onet").mkdir()
+    (tmp_path / "onet" / "titles.json").write_text("{broken")
+    monkeypatch.setattr(onet.settings, "JOB_CACHE_PATH", str(tmp_path / "job_cache.db"))
+    assert onet.alternates("billing specialist") == []
+
+
+async def test_expand_titles_uses_onet_first_and_the_ai_only_to_fill_gaps(tmp_path, monkeypatch):
+    _write_onet(tmp_path, monkeypatch)
+    monkeypatch.setattr(service.settings, "JOB_CACHE_PATH", str(tmp_path / "job_cache.db"))
+    calls = []
+
+    async def fake_ai(titles):
+        calls.append(titles)
+        return ["Collections Analyst", "Staff Accountant"]
+
+    monkeypatch.setattr(service, "_expand_titles_ai", fake_ai)
+    full = await service.expand_titles("billing specialist")        # four or more from O*NET: no AI call at all
+    assert "Medical Biller" in full and len(full) >= 4 and calls == []
+    gap = await service.expand_titles("tax accountant")             # fewer than four: the AI fills in, no repeats
+    assert "Staff Accountant" in gap and "Collections Analyst" in gap and gap.count("Staff Accountant") == 1 and calls == ["tax accountant"]

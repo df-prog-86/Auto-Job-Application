@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import settings
-from app.services.jobcache import geo, matcher
+from app.services.jobcache import geo, matcher, onet
 from app.services.jobcache.keys import loose_keys, url_key
 from app.services.jobcache.readers import SYSTEMS, ReaderError, Throttle, employer_ref, make_client, read_employer
 from app.services.jobcache.store import JobCache, now_ts
@@ -95,6 +95,22 @@ async def expand_titles(titles: str) -> list[str]:
     "manager, patient financial services". One small AI call per new search wording, remembered afterwards; nothing from
     your profile is sent, only the words you typed. Returns [] if the AI is not set up or the answer is unusable.
     """
+    known = onet.alternates(titles)  # the government's list of other names for the same job: free and the same every time
+    if len(known) >= 4:
+        return known
+    return _merge_titles(known, await _expand_titles_ai(titles), titles)
+
+
+def _merge_titles(known: list[str], more: list[str], titles: str) -> list[str]:
+    given = {fold(t) for t in titles.split(",")}
+    out: list[str] = []
+    for t in [*known, *more]:
+        if fold(t) not in given and fold(t) not in {fold(o) for o in out}:
+            out.append(t)
+    return out[:8]
+
+
+async def _expand_titles_ai(titles: str) -> list[str]:
     model = settings.JOB_SEARCH_MODEL or settings.PRIMARY_FAST_MODEL
     if not model:
         return []

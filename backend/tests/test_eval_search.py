@@ -123,6 +123,16 @@ def test_score_counts_relevance_misses_duplicates_and_dead_links(data):
     assert only_you["unlabeled"] == 1 and only_you["known_relevant"] == 2  # the AI suggestion no longer counts
 
 
+def test_finding_a_full_screen_of_relevant_jobs_is_a_perfect_score(data):
+    shown = [item(f"Revenue Cycle Manager {i}") for i in range(15)]
+    extra = [item(f"Revenue Cycle Director {i}") for i in range(19)]  # 34 relevant jobs are known, only 15 fit on the screen
+    labels = {"s1": {evalset.job_key(i): {"label": "rel", "by": "user", "title": i["title"], "company": "Acme Health"} for i in shown + extra}}
+    p = evalset.score_run(run_of("saved", "s1", shown), labels)["per_search"][0]
+    assert (p["known_relevant"], p["found_relevant"], p["recall"]) == (34, 15, 1.0)
+    half = evalset.score_run(run_of("saved", "s1", shown[:5]), labels)["per_search"][0]
+    assert half["recall"] == pytest.approx(5 / 15)
+
+
 def test_report_is_plain_text_and_has_no_em_dashes(data):
     run = run_of("full", "s1", [item("Revenue Cycle Manager")], seconds=3.0, cost_usd=0.03)
     report = evalset.format_report([evalset.score_run(run, {})], {"s1": "revenue cycle manager / Boston, MA"})
@@ -231,6 +241,24 @@ async def test_dry_run_spends_and_saves_nothing(data, capsys):
     assert await eval_search.cmd_run(argparse.Namespace(arm="full", name="t", only=None, check_live=False, max_spend=1.0, dry_run=True)) == 0
     out = capsys.readouterr().out
     assert "24 searches" in out and "Dry run" in out and not (data / "runs").exists()
+
+
+async def test_prelabel_asks_again_for_jobs_a_reply_left_out(data, restored, monkeypatch):
+    monkeypatch.setattr(settings, "PRIMARY_FAST_MODEL", "openai/gpt-4o-mini")
+    jobs = [item(f"Revenue Cycle Manager {i}") for i in range(5)]
+    evalset.write_json(data / "pool.json", evalset.build_pool([run_of("full", "rcm-mgr-bos", jobs)]))
+    asked = []
+
+    async def cut_off(self, **kw):  # the first reply only covers two of the five jobs
+        n = len(re.findall(r"^\d+\. ", kw["messages"][1]["content"], re.M))
+        asked.append(n)
+        upto = 2 if len(asked) == 1 else n
+        return SimpleNamespace(content=json.dumps([{"n": i, "label": "rel", "why": "ok"} for i in range(1, upto + 1)]), input_tokens=500, output_tokens=50)
+
+    monkeypatch.setattr(LLMClient, "chat_completion", cut_off)
+    assert await eval_search.cmd_prelabel(argparse.Namespace(max_spend=1.0, dry_run=False)) == 0
+    assert asked == [5, 3]
+    assert len(evalset.load_labels()["rcm-mgr-bos"]) == 5
 
 
 def test_label_prompt_and_reply_parsing():

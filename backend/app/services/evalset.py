@@ -258,10 +258,16 @@ def _percentile(values: list[float], p: float) -> float | None:
     return vals[min(len(vals) - 1, max(0, math.ceil(p * len(vals)) - 1))]
 
 
-def score_run(run: dict[str, Any], labels: dict[str, dict[str, Any]], *, only_user: bool = False) -> dict[str, Any]:
+RESULT_CAP = 15  # the most results one search can show
+
+
+def score_run(run: dict[str, Any], labels: dict[str, dict[str, Any]], *, only_user: bool = False, cap: int = RESULT_CAP) -> dict[str, Any]:
     """
     Per search and overall: how many of the results are relevant, how many known relevant jobs the search missed, duplicates,
     dead links, time and cost. `only_user` ignores AI suggestions (they count as unlabeled).
+
+    "Found" is measured against the best a search could do: with 34 known relevant jobs and room for 15 results, finding 15 is a
+    perfect score, not 44%. Otherwise a search would look bad for showing only what fits on the screen.
     """
     per_search = []
     for s in run.get("searches", []):
@@ -287,7 +293,7 @@ def score_run(run: dict[str, Any], labels: dict[str, dict[str, Any]], *, only_us
                 "precision": (len(rel) / (len(rel) + len(no))) if (rel or no) else None,
                 "known_relevant": len(known_rel),
                 "found_relevant": len(found),
-                "recall": (len(found) / len(known_rel)) if known_rel else None,
+                "recall": (len(found) / min(len(known_rel), cap)) if known_rel else None,
                 "missed": [lab[k].get("title", k) + " at " + lab[k].get("company", "") for k in missed][:10],
                 "duplicates": len(keys) - len(set(keys)),
                 "dead_links": sum(1 for i in items if i.get("live") is False),
@@ -306,6 +312,7 @@ def score_run(run: dict[str, Any], labels: dict[str, dict[str, Any]], *, only_us
         "searches": len(per_search),
         "with_results": sum(1 for p in per_search if p["returned"]),
         "avg_results": statistics.fmean(p["returned"] for p in per_search) if per_search else None,
+        "avg_relevant": statistics.fmean(p["relevant"] for p in per_search) if per_search else None,
         "avg_precision": statistics.fmean(precs) if precs else None,
         "avg_recall": statistics.fmean(recs) if recs else None,
         "searches_with_duplicates": sum(1 for p in per_search if p["duplicates"]),
@@ -333,12 +340,12 @@ def format_report(scores: list[dict[str, Any]], titles: dict[str, str] | None = 
     """A plain-text report: overall numbers per run, then one line per search."""
     titles = titles or {}
     lines = ["# Search quality report", ""]
-    lines.append("| Run | Searches | Avg results | Relevant share | Known relevant found | Duplicates | Dead links | Median s | Slowest 5% s | Avg cost |")
-    lines.append("|---|---|---|---|---|---|---|---|---|---|")
+    lines.append("| Run | Searches | Avg results | Avg relevant results | Relevant share | Best possible found | Duplicates | Dead links | Median s | Slowest 5% s | Avg cost |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
     for sc in scores:
         t = sc["total"]
         lines.append(
-            f"| {sc['run']} ({sc['arm']}) | {t['with_results']}/{t['searches']} | {_num(t['avg_results'])} | {_pct(t['avg_precision'])} | {_pct(t['avg_recall'])} | "
+            f"| {sc['run']} ({sc['arm']}) | {t['with_results']}/{t['searches']} | {_num(t['avg_results'])} | {_num(t['avg_relevant'])} | {_pct(t['avg_precision'])} | {_pct(t['avg_recall'])} | "
             f"{t['duplicates']} in {t['searches_with_duplicates']} searches | {_pct(t['dead_link_share'])} | {_num(t['median_seconds'])} | {_num(t['p95_seconds'])} | "
             f"{_num(t['avg_cost_usd'], '${:.4f}')} |"
         )

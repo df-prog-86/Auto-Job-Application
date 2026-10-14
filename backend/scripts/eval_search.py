@@ -264,24 +264,29 @@ async def cmd_prelabel(args: argparse.Namespace) -> int:
     del labels
     spent, done = 0.0, 0
     for s, rows in todo:
-        if spent >= args.max_spend:
-            print(f"Stopped: reached the ${args.max_spend:.2f} limit.")
-            break
-        try:
-            r = await LLMClient().chat_completion(model=model, messages=label_messages(s, rows), temperature=0.0, max_tokens=1500, timeout=90.0)
-        except Exception as exc:
-            print(f"  {s['id']}: failed ({type(exc).__name__}: {str(exc)[:120]})")
-            continue
-        spent += (r.input_tokens * pin + r.output_tokens * pout) / 1e6
-        got = parse_labels(r.content, len(rows))
-        for n, (label, why) in got.items():
-            row = rows[n - 1]
-            evalset.set_label(
-                s["id"], row["key"], label, by="ai", why=why,
-                record={k: row[k] for k in ("title", "company", "location", "pay", "posted", "url")},
-            )
-            done += 1
-        print(f"  {s['id']:22} {len(got)} of {len(rows)} labeled")
+        pending, total = rows, len(rows)
+        for attempt in (1, 2, 3):  # a reply that is cut off or garbled leaves some jobs unlabeled: ask again for just those
+            if not pending:
+                break
+            if spent >= args.max_spend:
+                print(f"Stopped: reached the ${args.max_spend:.2f} limit.")
+                return 0
+            try:
+                r = await LLMClient().chat_completion(model=model, messages=label_messages(s, pending), temperature=0.0, max_tokens=2500, timeout=90.0)
+            except Exception as exc:
+                print(f"  {s['id']}: failed ({type(exc).__name__}: {str(exc)[:120]})")
+                break
+            spent += (r.input_tokens * pin + r.output_tokens * pout) / 1e6
+            got = parse_labels(r.content, len(pending))
+            for n, (label, why) in got.items():
+                row = pending[n - 1]
+                evalset.set_label(
+                    s["id"], row["key"], label, by="ai", why=why,
+                    record={k: row[k] for k in ("title", "company", "location", "pay", "posted", "url")},
+                )
+                done += 1
+            pending = [row for n, row in enumerate(pending, 1) if n not in got]
+        print(f"  {s['id']:22} {total - len(pending)} of {total} labeled")
     print(f"\nAI suggestions saved for {done} jobs, about ${spent:.3f}. Open http://127.0.0.1:8765/eval-review to confirm or change them.")
     return 0
 

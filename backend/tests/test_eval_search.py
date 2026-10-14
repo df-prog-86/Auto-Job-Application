@@ -289,3 +289,23 @@ async def test_prelabel_saves_ai_suggestions_and_respects_dry_run(data, restored
     assert sorted((v["label"], v["by"]) for v in labels.values()) == [("no", "ai"), ("rel", "ai")]
     assert await eval_search.cmd_prelabel(argparse.Namespace(max_spend=1.0, dry_run=False)) == 0
     assert "already has a label" in capsys.readouterr().out
+
+
+async def test_redo_unsure_only_changes_unsure_ai_labels(data, restored, monkeypatch):
+    monkeypatch.setattr(settings, "PRIMARY_FAST_MODEL", "openai/gpt-4o-mini")
+    items = [item("Revenue Cycle Manager"), item("Billing Clerk"), item("Denials Lead")]
+    evalset.write_json(data / "pool.json", evalset.build_pool([run_of("full", "rcm-mgr-bos", items)]))
+    keys = [evalset.job_key(i) for i in items]
+    for k, label, by in zip(keys, ("unsure", "unsure", "rel"), ("ai", "user", "ai")):
+        evalset.set_label("rcm-mgr-bos", k, label, by=by, why="old")
+
+    async def fake(self, **kw):
+        n = len(re.findall(r"^\d+\. ", kw["messages"][1]["content"], re.M))
+        return SimpleNamespace(content=json.dumps([{"n": i, "label": "rel", "why": "new"} for i in range(1, n + 1)]), input_tokens=900, output_tokens=100)
+
+    monkeypatch.setattr(LLMClient, "chat_completion", fake)
+    assert await eval_search.cmd_prelabel(argparse.Namespace(max_spend=1.0, dry_run=False, redo_unsure=True)) == 0
+    got = evalset.load_labels()["rcm-mgr-bos"]
+    assert (got[keys[0]]["label"], got[keys[0]]["by"]) == ("rel", "ai")      # AI unsure: asked again
+    assert (got[keys[1]]["label"], got[keys[1]]["by"]) == ("unsure", "user")  # yours: untouched
+    assert got[keys[2]]["why"] == "old"                                       # settled AI label: untouched

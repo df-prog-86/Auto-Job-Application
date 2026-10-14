@@ -20,6 +20,8 @@ import sys
 from pathlib import Path
 
 from app.config import settings
+from app.services.jobcache import geo
+from app.services.jobcache.text import parse_location_query
 from app.services.jobcache.readers import ReaderError, Throttle, make_client, read_employer
 from app.services.jobcache.store import JobCache, now_ts
 
@@ -29,7 +31,6 @@ FIELDS = {
     "posted_at": "posted date",
     "work_type": "work type",
     "description": "description",
-    "lat": "coordinates",
     "agency": "agency flag set",
 }
 
@@ -50,16 +51,23 @@ def cmd_coverage(args: argparse.Namespace) -> int:
     )
     rows = conn.execute(sql).fetchall()
     total = sum(r["n"] for r in rows) or 1
-    head = f"{'system':16}{'open':>8}" + "".join(f"{FIELDS[c]:>16}" for c in cols)
+    placed: dict[str, int] = {}  # open postings whose city has known coordinates
+    for r in conn.execute(
+        "SELECT e.ats AS ats, p.location AS loc, COUNT(*) AS n FROM postings p JOIN employers e ON e.id = p.employer_id "
+        "WHERE p.closed_at IS NULL AND e.enabled = 1 AND p.location IS NOT NULL GROUP BY e.ats, p.location"
+    ):
+        q = parse_location_query(r["loc"])
+        state = next(iter(q.states)) if len(q.states) == 1 else None
+        if q.cities and geo.lookup(q.cities[0], state):
+            placed[r["ats"]] = placed.get(r["ats"], 0) + r["n"]
+    head = f"{'system':16}{'open':>8}" + "".join(f"{FIELDS[c]:>16}" for c in cols) + f"{'coordinates':>16}"
     print(f"Saved job lists: {path}\n{head}")
     sums = {c: 0 for c in cols}
     for r in rows:
-        print(f"{r['ats']:16}{r['n']:>8}" + "".join(f"{(r[c] or 0) / r['n']:>15.0%} " for c in cols))
+        print(f"{r['ats']:16}{r['n']:>8}" + "".join(f"{(r[c] or 0) / r['n']:>15.0%} " for c in cols) + f"{placed.get(r['ats'], 0) / r['n']:>15.0%} ")
         for c in cols:
             sums[c] += r[c] or 0
-    print(f"{'ALL':16}{total:>8}" + "".join(f"{sums[c] / total:>15.0%} " for c in cols))
-    if "lat" not in have:
-        print("\n(no coordinates column in this copy)")
+    print(f"{'ALL':16}{total:>8}" + "".join(f"{sums[c] / total:>15.0%} " for c in cols) + f"{sum(placed.values()) / total:>15.0%} ")
     return 0
 
 

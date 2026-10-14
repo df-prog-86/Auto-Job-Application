@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import settings
-from app.services.jobcache import matcher
+from app.services.jobcache import geo, matcher
 from app.services.jobcache.keys import loose_keys, url_key
 from app.services.jobcache.readers import SYSTEMS, ReaderError, Throttle, employer_ref, make_client, read_employer
 from app.services.jobcache.store import JobCache, now_ts
@@ -146,11 +146,17 @@ async def expand_places(location: str | None) -> list[str]:
     greater Boston, including across a state line (Washington, DC and Arlington, VA). One small AI call per new place,
     remembered afterwards; only the place you typed is sent. Returns [] when the AI is not set up or the answer is unusable.
     """
-    model = settings.JOB_SEARCH_MODEL or settings.PRIMARY_FAST_MODEL
-    if not model or not location or not location.strip():
+    if not location or not location.strip():
         return []
     query = parse_location_query(location)
     if not query.cities:
+        return []
+    state = next(iter(query.states)) if len(query.states) == 1 else None
+    around = geo.nearby(query.cities[0], state)  # known coordinates: places within 25 miles, worked out in code (free, instant, the same every time)
+    if around:
+        return around
+    model = settings.JOB_SEARCH_MODEL or settings.PRIMARY_FAST_MODEL
+    if not model:
         return []
     cache = JobCache()
     key = "near:" + fold(location)

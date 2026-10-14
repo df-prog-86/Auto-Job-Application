@@ -628,8 +628,8 @@ def test_the_area_around_a_place_is_asked_once_and_remembered(monkeypatch):
 
     monkeypatch.setattr(llm_client, "LLMClient", FakeLLM)
     monkeypatch.setattr(settings, "PRIMARY_FAST_MODEL", "m")
-    first = asyncio.run(service.expand_places("Boston, MA"))
-    again = asyncio.run(service.expand_places("Boston, MA"))
+    first = asyncio.run(service.expand_places("Smalltown, MA"))  # no known coordinates: the AI is asked
+    again = asyncio.run(service.expand_places("Smalltown, MA"))
     assert first == again and first[:3] == ["Cambridge, MA", "Somerville, MA", "Quincy, MA"] and first.count("Cambridge, MA") == 1
     assert len(calls) == 1
     assert asyncio.run(service.expand_places("remote")) == []  # no city to expand
@@ -816,3 +816,53 @@ async def test_cache_tools_reread_updates_only_existing_postings(tmp_path, monke
     live = argparse.Namespace(db=str(tmp_path / "copy.db"), only=None, live=False)
     monkeypatch.setattr(cache_tools.settings, "JOB_CACHE_PATH", str(tmp_path / "copy.db"))
     assert await cache_tools._reread(live) == 1  # refuses the live path without --live
+
+
+# ---- places and distance ---------------------------------------------------------------------------------------
+
+def test_geo_distances_and_nearby_places():
+    from app.services.jobcache import geo
+
+    boston, cambridge, nyc = geo.lookup("Boston", "MA"), geo.lookup("Cambridge", "MA"), geo.lookup("New York", "NY")
+    assert 1 < geo.miles_between(boston, cambridge) < 4
+    assert 180 < geo.miles_between(boston, nyc) < 200
+    assert geo.lookup("Boston", None) == boston and geo.lookup("Nowhereville", "MA") is None
+    assert geo.lookup("St. Louis", "MO") == geo.lookup("Saint Louis", "MO")
+    near = geo.nearby("Boston", "MA")
+    assert "Cambridge, MA" in near and "Worcester, MA" not in near and "Boston, MA" not in near and "Providence, RI" not in near
+    assert "Newark, NJ" in geo.nearby("New York", "NY") and "Boston, MA" not in geo.nearby("New York", "NY")
+    assert geo.nearby("Nowhereville", "MA") == []
+
+
+def test_geo_file_adds_places_and_a_damaged_file_is_ignored(tmp_path, monkeypatch):
+    from app.services.jobcache import geo
+
+    monkeypatch.setattr(geo.settings, "JOB_CACHE_PATH", str(tmp_path / "job_cache.db"))
+    (tmp_path / "geo").mkdir()
+    (tmp_path / "geo" / "us_places.json").write_text('[["Wayland","MA",42.3626,-71.3612,13000]]')
+    assert "Wayland, MA" in geo.nearby("Boston", "MA") and geo.lookup("Wayland", "MA") is not None
+    (tmp_path / "geo" / "us_places.json").write_text("not json")
+    assert geo.lookup("Boston", "MA") is not None  # built-in places still work
+
+
+async def test_expand_places_uses_coordinates_without_the_ai(tmp_path, monkeypatch):
+    monkeypatch.setattr(service.settings, "JOB_SEARCH_MODEL", "")
+    monkeypatch.setattr(service.settings, "PRIMARY_FAST_MODEL", "")
+    assert "Somerville, MA" in await service.expand_places("Boston, MA")
+    assert "Somerville, MA" in await service.expand_places("Boston, MA or remote")
+    assert await service.expand_places("Nowhereville, MA") == []  # no coordinates and no AI: stays on the place typed
+
+
+def test_cache_tools_coverage_report(tmp_path, capsys):
+    import argparse
+    from scripts import cache_tools
+
+    cache = JobCache(str(tmp_path / "c.db"))
+    eid, _ = cache.upsert_employer("lever", "acme", "Acme", "search")
+    cache.apply_refresh(eid, [
+        PostingIn(ext_id="1", title="A", url="https://x/1", location="Boston, MA", pay_text="$1"),
+        PostingIn(ext_id="2", title="B", url="https://x/2", location="2 Locations"),
+    ], now_ts())
+    assert cache_tools.cmd_coverage(argparse.Namespace(db=str(tmp_path / "c.db"))) == 0
+    out = capsys.readouterr().out
+    assert "lever" in out and "50%" in out and "coordinates" in out

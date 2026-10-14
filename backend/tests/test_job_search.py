@@ -535,10 +535,25 @@ def test_closed_postings_reported_by_their_own_system_are_removed(monkeypatch):
 def test_same_job_from_two_sources_is_one_result_and_the_ats_link_wins():
     from app.services.discovery.web_search import merge_same_jobs
 
-    site = {"title": "Revenue Cycle Consultant", "company": "Huron", "url": "https://huron.com/careers/1", "grounded": True}
-    ats = {"title": "Revenue Cycle  Consultant", "company": "HURON", "url": "https://huron.wd1.myworkdayjobs.com/en-US/c/job/R1", "grounded": False}
+    wd = "https://huron.wd1.myworkdayjobs.com/en-US/c/job/Boston/Revenue-Cycle-Consultant_R10234"
+    site = {"title": "Revenue Cycle Consultant", "company": "Huron", "url": "https://huron.com/careers/1?jid=R10234", "grounded": True}
+    ats = {"title": "Revenue Cycle  Consultant", "company": "HURON", "url": wd, "grounded": False}
     other = {"title": "Revenue Cycle Billing Analyst", "company": "Huron", "url": "https://huron.com/careers/2", "grounded": False}
-    assert merge_same_jobs([site, ats, other]) == [ats, other]
+    assert merge_same_jobs([site, ats, other]) == [ats, other]  # same requisition number: one job
+
+
+def test_same_company_and_title_is_not_enough_to_merge_two_results():
+    from app.services.discovery.web_search import merge_same_jobs
+
+    boston = {"title": "Billing Analyst", "company": "Acme", "url": "https://boards.greenhouse.io/acme/jobs/111", "grounded": True}
+    chicago = {"title": "Billing Analyst", "company": "Acme", "url": "https://boards.greenhouse.io/acme/jobs/222", "grounded": True}
+    assert merge_same_jobs([boston, chicago]) == [boston, chicago]      # two job numbers on one board: two jobs
+    site = {"title": "Billing Analyst", "company": "Acme", "url": "https://acme.com/careers/billing", "grounded": True}
+    assert merge_same_jobs([boston, site]) == [boston, site]            # no shared number, link or text: kept apart
+    text_a = "Lead the billing team and own charge capture and denials across the revenue cycle for our hospitals. " * 3
+    a = {**boston, "_desc": text_a}
+    b = {**site, "_desc": text_a + " Apply today."}
+    assert merge_same_jobs([a, b]) == [a]                              # near-identical descriptions: one job (the ATS link wins)
 
 
 def test_results_are_trimmed_to_the_count_with_verified_ones_first():
@@ -697,8 +712,8 @@ def test_names_and_titles_are_tidied_twins_merged_and_off_topic_results_left_out
 
     day = dt.date(2026, 10, 7)
     twins = [
-        {"title": "Marketing Project Manager", "company": "Abbott", "location": "Alameda", "salary_text": "$90,000 - $180,000", "posted_at": day, "url": "https://a.example/1"},
-        {"title": "Marketing Project Manager", "company": "Exact Sciences", "location": "Alameda", "salary_text": "$90,000 - $180,000", "posted_at": day, "url": "https://b.example/2"},
+        {"title": "Marketing Project Manager", "company": "Abbott", "location": "Alameda", "salary_text": "$90,000 - $180,000", "posted_at": day, "url": "https://a.example/1?req=777"},
+        {"title": "Marketing Project Manager", "company": "Exact Sciences", "location": "Alameda", "salary_text": "$90,000 - $180,000", "posted_at": day, "url": "https://b.example/2?req=777"},
         {"title": "Project Manager", "company": "Disney", "location": "Anaheim", "salary_text": None, "posted_at": day, "url": "https://c.example/3"},
         {"title": "Project Manager", "company": "Other", "location": "Anaheim", "salary_text": None, "posted_at": day, "url": "https://d.example/4"},
     ]

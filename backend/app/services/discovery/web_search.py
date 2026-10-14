@@ -664,13 +664,19 @@ def _source_rank(item: dict[str, Any]) -> int:
 
 
 def merge_same_jobs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The same role found through two sources (an ATS page and the company site) is one result; the ATS link wins."""
-    best: dict[str, dict[str, Any]] = {}
-    for item in items:
-        key = _same_job_key(item)
-        if key not in best or _source_rank(item) < _source_rank(best[key]):
-            best[key] = item
-    return [i for i in items if best[_same_job_key(i)] is i]
+    """
+    The same role found through two sources (an ATS page and the company site) is one result; the ATS link wins. "The same"
+    needs evidence (see same_job.py): the same job number, apply link or requisition number, or a near-identical description.
+    Two openings that merely share a company and a title stay two results.
+    """
+    from app.services.discovery import same_job
+
+    best: dict[int, dict[str, Any]] = {}
+    for cluster in same_job.clusters(items, _same_job_key):
+        winner = min(cluster, key=_source_rank)
+        for item in cluster:
+            best[id(item)] = winner
+    return [i for i in items if best[id(i)] is i]
 
 
 def tidy_items(items: list[dict[str, Any]]) -> None:
@@ -686,19 +692,24 @@ def tidy_items(items: list[dict[str, Any]]) -> None:
 def merge_twin_postings(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     One posting listed under two employer names (a company and its parent or sister entity on one hiring site) is one result:
-    same title, place, pay and posting date. Only merged when place, pay and date are all stated, so two different
-    openings that merely share a title are never joined.
+    same title, place, pay and posting date, AND the evidence same_job.py asks for (the same requisition number or apply link,
+    or a near-identical description). Place, pay and date must all be stated, so two different openings that merely share a
+    title are never joined.
     """
+    from app.services.discovery import same_job
+
     squash = lambda text: re.sub(r"[^a-z0-9]+", "", (text or "").lower())
-    best: dict[str, dict[str, Any]] = {}
-    keys: dict[int, str | None] = {}
-    for item in items:
+
+    def key(item: dict[str, Any]) -> str:
         loc, pay, posted = item.get("location"), item.get("salary_text"), item.get("posted_at")
-        key = f"{squash(item['title'])}|{squash(loc)}|{squash(pay)}|{posted}" if (loc and pay and posted) else None
-        keys[id(item)] = key
-        if key and (key not in best or _source_rank(item) < _source_rank(best[key])):
-            best[key] = item
-    return [i for i in items if keys[id(i)] is None or best[keys[id(i)]] is i]
+        return f"{squash(item['title'])}|{squash(loc)}|{squash(pay)}|{posted}" if (loc and pay and posted) else f"alone:{id(item)}"
+
+    best: dict[int, dict[str, Any]] = {}
+    for cluster in same_job.clusters(items, key):
+        winner = min(cluster, key=_source_rank)
+        for item in cluster:
+            best[id(item)] = winner
+    return [i for i in items if best[id(i)] is i]
 
 
 def fit_note(plan: Any, item: dict[str, Any]) -> str:
@@ -904,6 +915,7 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
     items = merge_twin_postings(items)
     items, not_found = await resolve_original_sources(items)
     items = await upgrade_to_ats_links(items)
+    items = _dedupe_by_address(items)  # two results can end up with the same apply link once company-site links become ATS links
     items, gone = await enrich_from_ats(items)
     items, too_old = await fill_posted_dates(items, criteria.posted_within_days, need_pay=criteria.require_salary)
     items, no_pay = apply_pay_rules(items, criteria)
@@ -921,7 +933,7 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
     if from_saved:
         await asyncio.to_thread(cache_service.record_hits, [i["employer_id"] for i in from_saved])
     for item in final:  # working notes, not saved columns
-        for key in ("ats_checked", "ats_live", "site_url", "fit", "employer_id"):
+        for key in ("ats_checked", "ats_live", "site_url", "fit", "employer_id", "_desc"):
             item.pop(key, None)
     coverage = None
     if cached.coverage and cached.coverage.get("employers"):

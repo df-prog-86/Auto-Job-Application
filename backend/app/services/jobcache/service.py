@@ -58,6 +58,7 @@ def to_item(scored: matcher.Scored) -> dict[str, Any]:
         "salary_text": r.get("pay_text"),
         "posted_at": dt.date.fromisoformat(posted[:10]) if isinstance(posted, str) and len(posted) >= 10 else None,
         "summary": None,
+        "_desc": (r.get("description") or "")[:3000] or None,  # working note for telling copies of one job apart; never saved
         "url": r["url"],
         "url_key": url_key(r["url"]),
         "grounded": True,  # the employer's own list: as direct as a link gets

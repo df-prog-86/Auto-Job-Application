@@ -49,7 +49,7 @@ class CacheOutcome:
 
 def to_item(scored: matcher.Scored) -> dict[str, Any]:
     r = scored.row
-    posted = r.get("posted_at")
+    posted = r.get("posted_at") or r.get("seen_date")  # the board's own date, else the day we first saw it (only saved when trustworthy)
     return {
         "title": r["title"],
         "company": r["company"],

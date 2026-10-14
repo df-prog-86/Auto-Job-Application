@@ -213,7 +213,7 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
         mid = pay_midpoint(row["pay_text"])  # saved before the pay could be read: read it now
     if plan.pay_floor and mid is not None and mid < plan.pay_floor:
         return None
-    posted = _date(row.get("posted_at"))
+    posted = _date(row.get("posted_at") or row.get("seen_date"))
     if plan.window_days and posted and (today - posted).days > plan.window_days:
         return None
     kw = 0.0
@@ -245,7 +245,7 @@ def fit_for_item(plan: Plan, title: str, location: str | None, work_type: str | 
 
 def rank(plan: Plan, rows: list[dict[str, Any]], today: dt.date | None = None) -> list[Scored]:
     scored = [s for r in rows if (s := score_row(plan, r, today)) is not None]
-    scored.sort(key=lambda s: s.row.get("posted_at") or "", reverse=True)  # newer first among equals
+    scored.sort(key=lambda s: s.row.get("posted_at") or s.row.get("seen_date") or "", reverse=True)  # newer first among equals
     scored.sort(key=lambda s: -s.fit)  # stable: best fit first
     return scored
 

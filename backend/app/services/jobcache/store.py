@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS lookups (
 """
 
 # Columns added after the first release: (name, definition)
-MIGRATIONS = (("description_z", "BLOB"), ("desc_hash", "TEXT"), ("agency", "INTEGER"))
+MIGRATIONS = (("description_z", "BLOB"), ("desc_hash", "TEXT"), ("agency", "INTEGER"), ("seen_date", "TEXT"))
+TRUST_GAP_HOURS = 48  # a posting's first-seen day counts as a date only when the board was also read within this many hours before
 DESCRIPTION_CAP = 8000  # characters of a posting's text kept (pay is read from the whole text before this)
 
 FTS_SCHEMA = (
@@ -304,7 +305,7 @@ class JobCache:
         """
         result = RefreshResult(total=len(postings))
         with self.session() as db:
-            emp = db.execute("SELECT name FROM employers WHERE id = ?", (employer_id,)).fetchone()
+            emp = db.execute("SELECT name, last_ok FROM employers WHERE id = ?", (employer_id,)).fetchone()
             if emp is None:
                 return result
             company = emp["name"]
@@ -312,6 +313,18 @@ class JobCache:
                 r["ext_id"]: r
                 for r in db.execute("SELECT id, ext_id, title, location, closed_at, desc_hash, agency FROM postings WHERE employer_id = ?", (employer_id,))
             }
+            # A new posting's first-seen day stands in for its posting date ONLY when it is trustworthy: this board was read before,
+            # within the last 48 hours, completely, and the list did not suddenly look brand new (an employer changing its job
+            # numbers would make every old job look new today). Otherwise the date stays empty, which the app shows as "not listed".
+            fresh = sum(1 for p in postings if p.ext_id and p.ext_id not in existing)
+            trusted = (
+                close_missing
+                and bool(existing)
+                and emp["last_ok"] is not None
+                and 0 <= now - emp["last_ok"] <= TRUST_GAP_HOURS * 3600
+                and fresh <= max(20, len(existing) // 2)
+            )
+            seen_day = dt.datetime.fromtimestamp(now, tz=dt.timezone.utc).date().isoformat() if trusted else None
             seen: set[str] = set()
             fts_add: list[tuple[int, str, str, str]] = []
             fts_del: list[int] = []
@@ -326,9 +339,9 @@ class JobCache:
                 if row is None:
                     cur = db.execute(
                         "INSERT INTO postings (employer_id, ext_id, title, location, work_type, pay_text, pay_mid, posted_at, url, first_seen, last_seen, "
-                        "description_z, desc_hash, agency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "description_z, desc_hash, agency, seen_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (employer_id, p.ext_id, p.title[:300], (p.location or None) and p.location[:300], p.work_type, p.pay_text, p.pay_mid, posted, p.url[:1000], now, now,
-                         blob, fingerprint, agency),
+                         blob, fingerprint, agency, None if p.posted_at else seen_day),
                     )
                     fts_add.append((int(cur.lastrowid), p.title[:300], company, (p.location or "")[:300]))
                     result.new += 1

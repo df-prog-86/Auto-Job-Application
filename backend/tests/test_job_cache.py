@@ -927,3 +927,50 @@ def test_keywords_are_found_in_a_saved_description():
     row = {"title": "Revenue Cycle Manager", "company": "Acme", "location": "Boston, MA", "work_type": None, "pay_mid": None, "posted_at": None}
     assert matcher.score_row(plan, row) is None  # the keyword is nowhere in the title, employer or place
     assert matcher.score_row(plan, {**row, "description": "Experience with Epic Resolute billing required"}) is not None
+
+
+# ---- safe first-seen dates -------------------------------------------------------------------------------------
+
+def _day(ts):
+    return dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc).date().isoformat()
+
+
+def test_first_seen_day_is_a_date_only_when_it_is_trustworthy(tmp_path):
+    cache = JobCache(str(tmp_path / "s.db"))
+    eid, _ = cache.upsert_employer("workday", "acme", "Acme", "search")
+    P = lambda n, **kw: PostingIn(ext_id=str(n), title=f"Job {n}", url=f"https://x/{n}", **kw)
+
+    def seen(n):
+        with cache.session() as db:
+            return db.execute("SELECT seen_date FROM postings WHERE ext_id = ?", (str(n),)).fetchone()["seen_date"]
+
+    t0 = 1_800_000_000
+    cache.apply_refresh(eid, [P(1), P(2)], t0)                       # the board's first read: nothing is dated
+    assert seen(1) is None and seen(2) is None
+    cache.apply_refresh(eid, [P(1), P(2), P(3)], t0 + 3600 * 6)      # read again 6 hours later: the new job is dated
+    assert seen(3) == _day(t0 + 3600 * 6) and seen(1) is None
+    cache.apply_refresh(eid, [P(1), P(2), P(3), P(4)], t0 + 3600 * 6 + 3600 * 60)   # 60 hours since the last read: too long a gap
+    assert seen(4) is None
+    cache.apply_refresh(eid, [P(1), P(2), P(3), P(4), P(5, posted_at=dt.date(2026, 1, 2))], t0 + 3600 * 70)
+    assert seen(5) is None                                           # the board gave a real date: that is used, not ours
+    cache.apply_refresh(eid, [P(1), P(2), P(3), P(4), P(5), P(6)], t0 + 3600 * 76, close_missing=False)  # a partial read
+    assert seen(6) is None
+    cache.apply_refresh(eid, [P(n) for n in range(100, 160)], t0 + 3600 * 80)  # every job looks new: the employer renumbered
+    assert all(seen(n) is None for n in (100, 150))
+
+
+def test_a_trusted_first_seen_day_counts_as_the_posting_date(tmp_path, monkeypatch):
+    monkeypatch.setattr(service.settings, "JOB_CACHE_PATH", str(tmp_path / "w.db"))
+    cache = JobCache()
+    eid, _ = cache.upsert_employer("workday", "acme", "Acme", "search")
+    now = now_ts()
+    cache.apply_refresh(eid, [PostingIn(ext_id="1", title="Revenue Cycle Manager", url="https://x/1", location="Boston, MA")], now - 3600 * 5)
+    cache.apply_refresh(eid, [PostingIn(ext_id="1", title="Revenue Cycle Manager", url="https://x/1", location="Boston, MA"),
+                              PostingIn(ext_id="2", title="Revenue Cycle Director", url="https://x/2", location="Boston, MA")], now)
+    crit = SimpleNamespace(titles="Revenue Cycle Manager, Revenue Cycle Director", keywords="", location="Boston, MA", work_type="any", target_salary=None,
+                           exclude_companies="", posted_within_days=7)
+    ranked = matcher.rank(matcher.build_plan(crit), cache.candidates(None, ["%"], 50))
+    item = service.to_item(next(r for r in ranked if r.row["ext_id"] == "2"))
+    assert item["posted_at"] == dt.date.fromisoformat(_day(now))
+    undated = service.to_item(next(r for r in matcher.rank(matcher.build_plan(crit), cache.candidates(None, ["%"], 50)) if r.row["ext_id"] == "1"))
+    assert undated["posted_at"] is None

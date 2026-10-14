@@ -9,7 +9,7 @@ import pytest
 
 from app.services.jobcache import matcher, readers, service, text
 from app.services.jobcache.keys import loose_keys, url_key
-from app.services.jobcache.store import JobCache, PostingIn
+from app.services.jobcache.store import JobCache, PostingIn, now_ts
 
 TODAY = dt.date.today()
 
@@ -756,3 +756,63 @@ def test_employers_known_by_address_get_their_proper_name(tmp_path):
     JobCache(path)  # opening the copy again fixes the name
     with cache.session() as db:
         assert db.execute("SELECT name FROM employers").fetchone()["name"] == "Protiviti"
+
+
+# ---- pay written inside a posting's text -----------------------------------------------------------------------
+
+def test_pay_from_text_reads_believable_ranges_only():
+    f = text.pay_from_text
+    assert f("The salary range for this role is $85,000 - $110,000 per year.") == ("$85,000 - $110,000 / year", 97500)
+    assert f("Pay range: $85K to $110K") == ("$85,000 - $110,000 / year", 97500)
+    assert f("We pay $42 to $55 an hour") == ("$42 - $55 / hour", 48.5 * 2080)
+    assert f("Starting salary of $82,000 plus benefits") == ("$82,000 / year", 82000)
+    assert f("Base pay: $90,000.00 – $120,000.00") == ("$90,000 - $120,000 / year", 105000)
+    # not pay: company facts, bonuses, small numbers with no pay word, absurd ranges, nothing at all
+    assert f("We raised $50 - $75 million in funding") == (None, None)
+    assert f("Our revenue is $200,000 - $300,000 per client") == (None, None)
+    assert f("Sign-on bonus of $5,000 - $10,000") == (None, None)
+    assert f("Join our team of 10 - 20 people") == (None, None)
+    assert f("Salary $30,000 - $900,000") == (None, None)
+    assert f("") == (None, None) and f(None) == (None, None)
+
+
+def test_html_to_text_decodes_escaped_markup():
+    assert text.html_to_text("&lt;p&gt;Pay: &amp;lt;b&amp;gt;$90,000&amp;lt;/b&amp;gt; &lt;/p&gt;").strip() == "Pay: $90,000"
+
+
+def test_readers_find_pay_in_posting_text():
+    gh = readers.parse_greenhouse({"jobs": [{"id": 1, "title": "Revenue Cycle Manager", "absolute_url": "https://boards.greenhouse.io/x/jobs/1",
+                                              "content": "&lt;p&gt;The base salary range is $100,000 - $130,000 annually.&lt;/p&gt;"},
+                                             {"id": 2, "title": "Analyst", "absolute_url": "https://boards.greenhouse.io/x/jobs/2", "content": "&lt;p&gt;No pay here&lt;/p&gt;"}]}, "x")
+    assert (gh[0].pay_text, gh[0].pay_mid) == ("$100,000 - $130,000 / year", 115000) and gh[1].pay_text is None
+    lv = readers.parse_lever([{"id": "a", "text": "Billing Lead", "descriptionPlain": "Compensation: $70,000 to $85,000 per year", "categories": {}}])
+    assert lv[0].pay_mid == 77500
+    lv2 = readers.parse_lever([{"id": "b", "text": "Billing Lead", "salaryRange": {"min": 60000, "max": 70000, "currency": "USD", "interval": "per-year-salary"},
+                                "descriptionPlain": "Compensation: $1 to $2", "categories": {}}])
+    assert lv2[0].pay_text == "$60,000 - $70,000"  # the posting's own pay field wins over the text
+    ab = readers.parse_ashby({"jobs": [{"id": "z", "title": "Denials Specialist", "descriptionPlain": "Salary: $65,000 - $75,000 per year"}]}, "b")
+    assert ab[0].pay_mid == 70000
+
+
+async def test_cache_tools_reread_updates_only_existing_postings(tmp_path, monkeypatch):
+    import argparse
+    from scripts import cache_tools
+
+    cache = JobCache(str(tmp_path / "copy.db"))
+    eid, _ = cache.upsert_employer("greenhouse", "acme", "Acme", "search")
+    cache.apply_refresh(eid, [PostingIn(ext_id="1", title="Revenue Cycle Manager", url="https://x/1", location="Boston, MA")], now_ts())
+
+    async def fake_read(ats, ident, client, throttle):
+        return readers.ReadResult([
+            PostingIn(ext_id="1", title="Revenue Cycle Manager", url="https://x/1", location="Boston, MA", pay_text="$90,000 - $100,000 / year", pay_mid=95000),
+            PostingIn(ext_id="2", title="Brand New Job", url="https://x/2"),
+        ])
+
+    monkeypatch.setattr(cache_tools, "read_employer", fake_read)
+    assert await cache_tools._reread(argparse.Namespace(db=str(tmp_path / "copy.db"), only=None, live=False)) == 0
+    with cache.session() as db:
+        rows = {r["ext_id"]: r for r in db.execute("SELECT * FROM postings")}
+    assert set(rows) == {"1"} and rows["1"]["pay_mid"] == 95000 and rows["1"]["closed_at"] is None
+    live = argparse.Namespace(db=str(tmp_path / "copy.db"), only=None, live=False)
+    monkeypatch.setattr(cache_tools.settings, "JOB_CACHE_PATH", str(tmp_path / "copy.db"))
+    assert await cache_tools._reread(live) == 1  # refuses the live path without --live

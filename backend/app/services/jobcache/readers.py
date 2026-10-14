@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 from app.services.jobcache.store import PostingIn
-from app.services.jobcache.text import pay_midpoint, work_type_from, workday_posted
+from app.services.jobcache.text import html_to_text, pay_from_text, pay_midpoint, work_type_from, workday_posted
 
 USER_AGENT = "JobAgent/1.0 (personal job search tool; reads public job lists)"
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
@@ -184,8 +184,12 @@ def parse_greenhouse(data: Any, token: str) -> list[PostingIn]:
         if "greenhouse.io" not in url:  # an employer that embeds its board: use the board's own address for the posting
             url = f"https://job-boards.greenhouse.io/{token}/jobs/{j['id']}"
         posted = _date(j.get("first_published"))
+        pay_text, mid = pay_from_text(html_to_text(j.get("content"))) if j.get("content") else (None, None)
         out.append(
-            PostingIn(ext_id=str(j["id"]), title=str(j["title"]).strip(), url=url, location=loc, work_type=work_type_from(None, loc, j["title"]), posted_at=posted)
+            PostingIn(
+                ext_id=str(j["id"]), title=str(j["title"]).strip(), url=url, location=loc, work_type=work_type_from(None, loc, j["title"]),
+                pay_text=pay_text, pay_mid=mid, posted_at=posted,
+            )
         )
     return out
 
@@ -193,7 +197,7 @@ def parse_greenhouse(data: Any, token: str) -> list[PostingIn]:
 async def _read_greenhouse(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
     eu, token = _eu(identifier)
     base = f"https://boards-api.{'eu.' if eu else ''}greenhouse.io/v1/boards/{token}"
-    data = await _request(client, throttle, "greenhouse", "GET", f"{base}/jobs")
+    data = await _request(client, throttle, "greenhouse", "GET", f"{base}/jobs", params={"content": "true"})  # with the text, so pay written in it can be read
     name = None
     try:
         info = await _request(client, throttle, "greenhouse", "GET", base)
@@ -220,6 +224,10 @@ def parse_lever(data: Any) -> list[PostingIn]:
             if yearly:
                 pay_text = f"${rng['min']:,.0f} - ${rng['max']:,.0f}" if cur == "USD" else f"{cur} {rng['min']:,.0f} - {rng['max']:,.0f}"
                 mid = (rng["min"] + rng["max"]) / 2 if cur == "USD" else None
+        if pay_text is None:  # no pay field: look in the posting's own words
+            body = " ".join(str(j.get(k) or "") for k in ("salaryDescriptionPlain", "descriptionPlain", "additionalPlain"))
+            body += " " + " ".join(html_to_text(x.get("content")) for x in (j.get("lists") or []) if isinstance(x, dict))
+            pay_text, mid = pay_from_text(body)
         created = j.get("createdAt")
         posted = dt.datetime.fromtimestamp(created / 1000, tz=dt.timezone.utc).date() if isinstance(created, (int, float)) and created > 0 else None
         url = j.get("hostedUrl") or f"https://jobs.lever.co/{j.get('id')}"
@@ -251,10 +259,13 @@ def parse_ashby(data: Any, board: str) -> list[PostingIn]:
         comp = j.get("compensation") if isinstance(j.get("compensation"), dict) else {}
         pay_text = comp.get("compensationTierSummary") or comp.get("scrapeableCompensationSalarySummary")
         pay_text = pay_text if isinstance(pay_text, str) and pay_text.strip() else None
+        mid = pay_midpoint(pay_text)
+        if pay_text is None:
+            pay_text, mid = pay_from_text(j.get("descriptionPlain") or html_to_text(j.get("descriptionHtml")))
         out.append(
             PostingIn(
                 ext_id=str(j["id"]), title=str(j["title"]).strip(), url=j.get("jobUrl") or f"https://jobs.ashbyhq.com/{board}/{j['id']}",
-                location=loc, work_type=work_type_from(declared, loc, j["title"]), pay_text=pay_text, pay_mid=pay_midpoint(pay_text),
+                location=loc, work_type=work_type_from(declared, loc, j["title"]), pay_text=pay_text, pay_mid=mid,
                 posted_at=_date(j.get("publishedAt")),
             )
         )

@@ -104,6 +104,78 @@ def pay_midpoint(text: str | None) -> float | None:
     return None
 
 
+# Pay written inside a posting's text ("The salary range is $85,000 - $110,000 per year", "$42 to $55 an hour").
+_AMT = r"\$\s?(\d{1,3}(?:,\d{3})+|\d{1,7})(?:\.\d{1,2})?\s*([kK])?(?![\d,]*\s*(?:m\b|mm\b|million|billion|bn\b|b\b))"
+_AMT2 = r"\$?\s?(\d{1,3}(?:,\d{3})+|\d{1,7})(?:\.\d{1,2})?\s*([kK])?"
+_RANGE = re.compile(_AMT + r"\s*(?:-|\u2013|\u2014|to|and|through)\s*" + _AMT2, re.I)
+_SINGLE = re.compile(_AMT)
+_PAY_WORDS = re.compile(r"\b(salary|pay|compensation|base|wage|wages|hourly|range|rate|earn|earning|annual)\b", re.I)
+_NOT_PAY = re.compile(r"\b(revenue|funding|raised|valuation|series [a-f]|budget|assets|sales|billion|million|bonus of|sign[- ]?on|referral|tuition|stipend|reimbursement)\b", re.I)
+_HOURLY = re.compile(r"^\s*(?:/|per|an|a|each)?\s*(?:hour|hr|hourly)\b", re.I)
+_YEARLY = re.compile(r"^\s*(?:/|per|a|an|each)?\s*(?:year|yr|annum|annual|annually|yearly)\b", re.I)
+
+
+def html_to_text(markup: str | None) -> str:
+    """A posting's markup as plain text: entities decoded (twice, some sites escape their own markup), tags turned into spaces."""
+    import html as _html
+
+    out = _html.unescape(_html.unescape(markup or ""))
+    out = re.sub(r"<\s*(br|/p|/li|/div|/h\d|/tr)\b[^>]*>", "\n", out, flags=re.I)
+    out = re.sub(r"<[^>]+>", " ", out)
+    return re.sub(r"[ \t\r\f\v\u00a0]+", " ", out).replace(" \n", "\n").strip()
+
+
+def _amount(number: str, k: str | None) -> float:
+    value = float(number.replace(",", ""))
+    return value * 1000 if k else value
+
+
+def pay_from_text(text_: str | None) -> tuple[str | None, float | None]:
+    """
+    A pay range found in free text, as (readable text, yearly midpoint), or (None, None). Careful on purpose: it needs a dollar sign,
+    a believable range, and not a company's revenue, funding or a bonus. A single figure counts only next to a pay word
+    ("starting salary of $82,000"). An hourly rate is turned into a yearly figure (2,080 hours). The first believable range wins.
+    """
+    if not text_:
+        return None, None
+    body = text_[:60000]
+    ranges = [(m.start(), m.end()) for m in _RANGE.finditer(body)]  # a range that was turned down must not be read again as one figure
+    for m in _RANGE.finditer(body):
+        before = body[max(0, m.start() - 120) : m.start()]
+        if _NOT_PAY.search(before[-50:]):
+            continue
+        lo, hi = _amount(m.group(1), m.group(2)), _amount(m.group(3), m.group(4))
+        if m.group(2) and not m.group(4) and hi < 1000:  # "$85K - 110" : the K applies to both
+            hi *= 1000
+        after = body[m.end() : m.end() + 24]
+        hourly = bool(_HOURLY.match(after))
+        yearly = bool(_YEARLY.match(after))
+        if lo > hi:
+            continue
+        if hourly or (not yearly and hi <= 250):
+            if not (8 <= lo and hi <= 250 and hi <= lo * 3):
+                continue
+            if not hourly and not _PAY_WORDS.search(before):
+                continue  # small numbers with no "per hour" and no pay word are not pay
+            return f"${lo:,.2f} - ${hi:,.2f} / hour".replace(".00", ""), (lo + hi) / 2 * HOURS_PER_YEAR
+        if not (20000 <= lo and hi <= 1500000 and hi <= lo * 3):
+            continue
+        return f"${lo:,.0f} - ${hi:,.0f} / year", (lo + hi) / 2
+    for m in _SINGLE.finditer(body):
+        if any(a <= m.start() < b for a, b in ranges):
+            continue
+        before = body[max(0, m.start() - 60) : m.start()]
+        if not _PAY_WORDS.search(before) or _NOT_PAY.search(before):
+            continue
+        value = _amount(m.group(1), m.group(2))
+        after = body[m.end() : m.end() + 24]
+        if _HOURLY.match(after) and 8 <= value <= 250:
+            return f"${value:,.2f} / hour".replace(".00", ""), value * HOURS_PER_YEAR
+        if 20000 <= value <= 1500000:
+            return f"${value:,.0f} / year", value
+    return None, None
+
+
 # ---- work type --------------------------------------------------------------------------------------------------
 
 def work_type_from(declared: str | None, location: str | None, title: str | None = None) -> str | None:

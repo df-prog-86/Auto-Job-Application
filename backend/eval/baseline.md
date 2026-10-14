@@ -19,7 +19,8 @@ How to read it
 - The paid web search changed the label counts in about half of the 24 searches. Where it helped (nurse manager, compliance analyst,
   HR manager) the saved lists lack the employers.
 - Many jobs were relevant but had no pay or place listed. Pay and location cleanup is the first data-quality change (step 2).
+- "Duplicates" counts results with the same employer, title and city. Since step 2.6 two real openings that share all three are kept apart, so a few counted here may be legitimate.
 - About 4 of 24 full searches billed one web call ($0.015) instead of two: one call probably failed. Not yet investigated.
 
 Targets to beat (proposals): relevant share above 36%, best possible found above 63%, median under 1 second for index results,
-average cost under $0.005, no duplicates, dead links under 5%.
+average cost under $0.005, no duplicates, dead links under 1% (owner's goal).

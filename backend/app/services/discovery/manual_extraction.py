@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import httpx
+
+from app.services.safe_fetch import UnsafeUrlError, safe_get
 from sqlalchemy.orm import Session
 
 from app.services.discovery import ats
@@ -79,16 +81,16 @@ async def fetch_page(url: str) -> FetchedPage:
     their own browser and isn't affected by it.
     """
     url = posting_url_for(url)
-    async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT, follow_redirects=True) as client:
-        try:
-            resp = await client.get(url, headers={"User-Agent": _USER_AGENT})
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise ManualExtractionError(
-                f"Couldn't fetch that page directly ({exc}). Some sites block automated "
-                "fetches even for a single page -- try the 'Save this job' button in the "
-                "browser extension instead, which reads the page from your own browser."
-            ) from exc
+    try:
+        resp = await safe_get(url, headers={"User-Agent": _USER_AGENT}, timeout=float(_FETCH_TIMEOUT))
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        reason = "that address is not one this app fetches" if isinstance(exc, UnsafeUrlError) else str(exc)
+        raise ManualExtractionError(
+            f"Couldn't fetch that page directly ({reason}). Some sites block automated "
+            "fetches even for a single page -- try the 'Save this job' button in the "
+            "browser extension instead, which reads the page from your own browser."
+        ) from exc
 
     html = resp.text
     return FetchedPage(

@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import html as htmllib
-import ipaddress
 import json
 import logging
 import math
@@ -27,6 +26,8 @@ from app.config import settings
 from app.schemas.job_search import JobSearchIn
 from app.services.discovery.normalization import parse_posted_date, strip_tracking_params
 from app.services.discovery import ats
+from app.services import safe_fetch
+from app.services.safe_fetch import safe_get
 from app.services.jobcache.keys import loose_keys
 from app.services.llm.client import LLMClient
 from app.services.llm.exceptions import LLMNotConfiguredError
@@ -90,15 +91,8 @@ _UA = (
 
 
 def is_public_host(url: str) -> bool:
-    """False for localhost and private addresses, so a search result can never aim this computer at itself."""
-    host = (urlsplit(url).hostname or "").lower()
-    if not host or host == "localhost" or host.endswith((".local", ".internal", ".localhost")):
-        return False
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return True
-    return ip.is_global
+    """False for localhost and private addresses, so a search result can never aim this computer at itself (see safe_fetch.py)."""
+    return safe_fetch.is_public_host(url)
 
 
 def looks_closed(original_url: str, final_url: str, status: int, text: str) -> bool:
@@ -125,9 +119,8 @@ async def check_live(url: str) -> bool | None:
     if not is_public_host(url):
         return False
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, max_redirects=5) as client:
-            resp = await client.get(url, headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
-    except httpx.HTTPError:
+        resp = await safe_get(url, headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
+    except (httpx.HTTPError, ValueError):
         return None
     if resp.status_code in (404, 410):
         return False
@@ -280,12 +273,11 @@ async def _original_is_acceptable(item: dict[str, Any], url: str, grounded: bool
     # cannot be read here, so those must have been returned by the search engine itself.
     text = ""
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, max_redirects=5) as client:
-            resp = await client.get(url, headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
+        resp = await safe_get(url, headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
         if resp.status_code == 200:
             body = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", resp.text[:400000], flags=re.I | re.S)
             text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body)).lower()
-    except httpx.HTTPError:
+    except (httpx.HTTPError, ValueError):
         text = ""
     if len(text) >= 500:
         words = _title_words(item["title"])
@@ -468,8 +460,7 @@ async def upgrade_to_ats_links(items: list[dict[str, Any]]) -> list[dict[str, An
             return
         async with gate:
             try:
-                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, max_redirects=5) as client:
-                    resp = await client.get(item["url"], headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
+                resp = await safe_get(item["url"], headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
                 if resp.status_code != 200 or not is_public_host(str(resp.url)):
                     return
                 link = find_ats_link(resp.text, str(resp.url))
@@ -545,14 +536,13 @@ async def fill_posted_dates(
             return
         async with gate:
             try:
-                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, max_redirects=5) as client:
-                    resp = await client.get(item["url"], headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
-                    if resp.status_code == 200:
-                        page = resp.text[:600000]
-                        if needs_date:
-                            item["posted_at"] = extract_posted_date(page)
-                        if needs_pay:
-                            item["salary_text"] = ats.extract_pay_text(page)
+                resp = await safe_get(item["url"], headers={"User-Agent": _UA, "Accept": "text/html,*/*"})
+                if resp.status_code == 200:
+                    page = resp.text[:600000]
+                    if needs_date:
+                        item["posted_at"] = extract_posted_date(page)
+                    if needs_pay:
+                        item["salary_text"] = ats.extract_pay_text(page)
             except Exception:
                 return
 

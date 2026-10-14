@@ -431,10 +431,10 @@ def test_date_window_drops_old_postings_but_keeps_undated_ones(monkeypatch):
     import datetime as dt
     from app.services.discovery import web_search as ws
 
-    async def no_visit(self, *a, **k):
+    async def no_visit(*a, **k):
         raise RuntimeError("tests never visit real sites")
 
-    monkeypatch.setattr(ws.httpx.AsyncClient, "get", no_visit)
+    monkeypatch.setattr(ws, "safe_get", no_visit)
     today = dt.date.today()
     mk = lambda n, d: {"title": n, "url": f"https://jobs.example.com/{n}", "posted_at": d}
     items = [mk("new", today - dt.timedelta(days=3)), mk("old", today - dt.timedelta(days=40)), mk("undated", None)]
@@ -654,10 +654,10 @@ def test_upgrade_swaps_the_link_and_merges_duplicates(monkeypatch):
         url = "https://jobs.bilh.org/jobs/x/"
         text = '<a href="https://bilh.wd1.myworkdayjobs.com/External/job/A/Role_JR1/apply">Apply</a>'
 
-    async def fake_get(self, *a, **k):
+    async def fake_get(*a, **k):
         return Resp()
 
-    monkeypatch.setattr(ws.httpx.AsyncClient, "get", fake_get)
+    monkeypatch.setattr(ws, "safe_get", fake_get)
     items = [
         {"title": "a", "url": "https://jobs.bilh.org/jobs/x/", "url_key": "jobs.bilh.org/jobs/x"},
         {"title": "a", "url": "https://bilh.wd1.myworkdayjobs.com/External/job/A/Role_JR1", "url_key": "bilh.wd1.myworkdayjobs.com/external/job/a/role_jr1"},

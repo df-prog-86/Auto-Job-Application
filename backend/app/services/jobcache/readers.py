@@ -145,7 +145,31 @@ def employer_ref(url: str) -> tuple[str, str] | None:
 
 # ---- fetching ----------------------------------------------------------------------------------------------------
 
+# The only sites a reader may ever contact. A list address is built from text taken out of a link (a company name, a subdomain),
+# so this is checked once, here, for every reader: whatever the text said, the request goes to one of these hiring systems.
+READER_HOST_SUFFIXES = (
+    ".greenhouse.io", ".lever.co", ".ashbyhq.com", ".smartrecruiters.com", ".myworkdayjobs.com", ".breezy.hr", ".workable.com",
+    ".bamboohr.com", ".pinpointhq.com", ".applytojob.com", ".jobvite.com", ".oraclecloud.com", ".icims.com", ".taleo.net",
+    ".dayforcehcm.com", ".kpmguscareers.com",
+)
+
+
+def reader_url_allowed(url: str) -> bool:
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        return False
+    if parts.scheme != "https" or parts.username or parts.password or (parts.port not in (None, 443)):
+        return False
+    if any(bad in parts.path.lower() for bad in ("..", "%2e", "%2f", "%5c", "\\")) or any(c.isspace() for c in url):
+        return False
+    return host in PHENOM_SITES or host in SUCCESSFACTORS_SITES or host.endswith(READER_HOST_SUFFIXES) or any(host == s[1:] for s in READER_HOST_SUFFIXES)
+
+
 async def _request(client: httpx.AsyncClient, throttle: Throttle, system: str, method: str, url: str, text: bool = False, **kwargs: Any) -> Any:
+    if not reader_url_allowed(url):
+        raise ReaderError("that address is not a hiring-system address we read", gone=True)
     host = urlsplit(url).hostname or url
     await throttle.wait(host, _MIN_GAP[system])
     try:

@@ -24,3 +24,26 @@ How to read it
 
 Targets to beat (proposals): relevant share above 36%, best possible found above 63%, median under 1 second for index results,
 average cost under $0.005, no duplicates, dead links under 1% (owner's goal).
+
+## Step 2 result, October 14, 2026 (pool grew to 1,133 labeled jobs, so the baseline was re-scored on it)
+
+| Variant | Relevant share | Best possible found | Median s | Slowest 5% s | Avg cost | Duplicates (old count) |
+|---|---|---|---|---|---|---|
+| full, baseline | 36% | 46% | 24.4 | 38.5 | $0.0278 | 0 |
+| full, after step 2 | 44% | 58% | 22.2 | 27.1 | $0.0287 | 20 in 9 searches |
+| saved, baseline | 32% | 41% | 6.4 | 10.6 | $0 | 0 |
+| saved, after step 2 | 32% | 39% | 5.4 | 13.2 | $0 | 22 in 11 searches |
+| deep, baseline | 27% | 79% | 1.8 | 2.7 | $0.0001 | 70 |
+| deep, after step 2 | 27% | 80% | 0.0 | 0.0 | $0 | 70 |
+
+Reading it
+- The earlier "best possible found" figures (63%, 56%, 47%) were measured on a smaller pool. Compare only numbers from the same table.
+- The gain is in the full search (web search plus saved lists): +8 points relevant share, +12 points best possible found. The saved-only
+  search did not improve, so the data-quality changes alone did not lift ranking inside the saved lists. Web search results vary from run to
+  run, so part of the full-search gain may be noise until it is repeated.
+- Duplicates rose from 0 because step 2.6 no longer merges two job numbers on one board. Those were counted as duplicates by the old rule.
+  Scoring now counts a repeat once and reports separate openings on their own (`eval_search dupes --run NAME` lists them).
+- Dead links were not checked in this run (add `--check-live`). The goal is under 1%.
+- Saved-search slowest 5% got slower (10.6 to 13.2 seconds), probably from reading saved descriptions. To check.
+- Pay is now filled for only 3% of saved postings and coordinates resolve for 28% of place names, because most employers
+  (Workday and others) do not give pay in their lists.

@@ -113,8 +113,8 @@ def test_score_counts_relevance_misses_duplicates_and_dead_links(data):
     }}
     sc = evalset.score_run(run, labels)
     p = sc["per_search"][0]
-    assert (p["returned"], p["relevant"], p["not_relevant"], p["duplicates"]) == (4, 3, 1, 1)  # the duplicate counts as relevant twice, and as one duplicate
-    assert p["precision"] == pytest.approx(0.75)
+    assert (p["returned"], p["relevant"], p["not_relevant"], p["duplicates"]) == (4, 2, 1, 1)  # the repeat is one duplicate and is not counted as relevant a second time
+    assert p["precision"] == pytest.approx(2 / 3)
     assert (p["known_relevant"], p["found_relevant"], p["recall"]) == (3, 2, pytest.approx(2 / 3))
     assert p["missed"] == ["Patient Access Manager at Acme Health"]
     assert (p["dead_links"], p["checked_links"]) == (1, 2)
@@ -309,3 +309,19 @@ async def test_redo_unsure_only_changes_unsure_ai_labels(data, restored, monkeyp
     assert (got[keys[0]]["label"], got[keys[0]]["by"]) == ("rel", "ai")      # AI unsure: asked again
     assert (got[keys[1]]["label"], got[keys[1]]["by"]) == ("unsure", "user")  # yours: untouched
     assert got[keys[2]]["why"] == "old"                                       # settled AI label: untouched
+
+
+def test_repeats_are_counted_once_but_separate_openings_are_kept():
+    gh = lambda n: {"title": "Billing Analyst", "company": "Acme", "location": "Boston, MA", "url": f"https://boards.greenhouse.io/acme/jobs/{n}"}
+    site = {"title": "Billing Analyst", "company": "Acme", "location": "Boston, MA", "url": "https://acme.com/careers/billing"}
+    extra, separate = evalset.extra_copies([gh(1), gh(2), gh(1), site])
+    assert extra == [False, False, True, True] and separate == 1   # job 2 is another opening; the repeat of job 1 and the site copy are not
+    assert evalset.extra_copies([gh(1)]) == ([False], 0)
+
+
+def test_dupes_command_labels_repeats_and_separate_openings(data, capsys):
+    gh = lambda n: item("Billing Analyst", url=f"https://boards.greenhouse.io/acme/jobs/{n}") if "url" in item.__code__.co_varnames else {**item("Billing Analyst"), "url": f"https://boards.greenhouse.io/acme/jobs/{n}"}
+    evalset.write_json(evalset.runs_dir() / "t-saved.json", run_of("saved", "s1", [gh(1), gh(2), {**item("Billing Analyst"), "url": "https://acme.com/x"}]) | {"name": "t-saved"})
+    assert eval_search.cmd_dupes(argparse.Namespace(run="t-saved")) == 0
+    out = capsys.readouterr().out
+    assert out.count("separate") >= 2 and "REPEAT" in out and "1 groups" in out

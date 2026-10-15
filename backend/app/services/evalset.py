@@ -24,6 +24,7 @@ from typing import Any
 
 from app.config import DEFAULT_DATA_DIR
 from app.schemas.job_search import JobSearchIn
+from app.services.discovery.same_job import job_ref
 from app.services.jobcache.text import fold
 
 SEARCHES_FILE = Path(__file__).resolve().parents[2] / "eval" / "test_searches.json"
@@ -261,6 +262,30 @@ def _percentile(values: list[float], p: float) -> float | None:
 RESULT_CAP = 15  # the most results one search can show
 
 
+def extra_copies(items: list[dict[str, Any]]) -> tuple[list[bool], int]:
+    """
+    For each result, whether it is a repeat of an earlier one, and how many separate openings share a title.
+    Two results with the same employer, title and city are two real openings when their job numbers differ on one hiring board
+    (a company posting the same job in two buildings); otherwise the later one is a repeat and is not counted again.
+    """
+    seen: dict[str, set[Any]] = {}
+    extra: list[bool] = []
+    separate = 0
+    for item in items:
+        key = job_key(item)
+        ref = job_ref(item.get("url") or "")
+        if key not in seen:
+            seen[key] = {ref} if ref else set()
+            extra.append(False)
+        elif ref is not None and ref not in seen[key] and seen[key]:
+            seen[key].add(ref)
+            separate += 1
+            extra.append(False)
+        else:
+            extra.append(True)
+    return extra, separate
+
+
 def score_run(run: dict[str, Any], labels: dict[str, dict[str, Any]], *, only_user: bool = False, cap: int = RESULT_CAP) -> dict[str, Any]:
     """
     Per search and overall: how many of the results are relevant, how many known relevant jobs the search missed, duplicates,
@@ -274,7 +299,9 @@ def score_run(run: dict[str, Any], labels: dict[str, dict[str, Any]], *, only_us
         sid = s["id"]
         lab = {k: v for k, v in labels.get(sid, {}).items() if v.get("label") and (not only_user or v.get("by") == "user")}
         items = s.get("items", [])
-        keys = [job_key(i) for i in items]
+        extra, separate = extra_copies(items)
+        all_keys = [job_key(i) for i in items]
+        keys = [k for k, e in zip(all_keys, extra) if not e]  # a repeat of the same job is not counted a second time
         rel = [k for k in keys if lab.get(k, {}).get("label") == "rel"]
         no = [k for k in keys if lab.get(k, {}).get("label") == "no"]
         unsure = [k for k in keys if lab.get(k, {}).get("label") == "unsure"]
@@ -295,7 +322,8 @@ def score_run(run: dict[str, Any], labels: dict[str, dict[str, Any]], *, only_us
                 "found_relevant": len(found),
                 "recall": (len(found) / min(len(known_rel), cap)) if known_rel else None,
                 "missed": [lab[k].get("title", k) + " at " + lab[k].get("company", "") for k in missed][:10],
-                "duplicates": len(keys) - len(set(keys)),
+                "duplicates": sum(extra),
+                "separate_openings": separate,
                 "dead_links": sum(1 for i in items if i.get("live") is False),
                 "checked_links": sum(1 for i in items if i.get("live") is not None),
                 "seconds": s.get("seconds"),
@@ -317,6 +345,7 @@ def score_run(run: dict[str, Any], labels: dict[str, dict[str, Any]], *, only_us
         "avg_recall": statistics.fmean(recs) if recs else None,
         "searches_with_duplicates": sum(1 for p in per_search if p["duplicates"]),
         "duplicates": sum(p["duplicates"] for p in per_search),
+        "separate_openings": sum(p["separate_openings"] for p in per_search),
         "dead_link_share": (sum(p["dead_links"] for p in per_search) / checked) if checked else None,
         "median_seconds": statistics.median(secs) if secs else None,
         "p95_seconds": _percentile(secs, 0.95),
@@ -346,7 +375,7 @@ def format_report(scores: list[dict[str, Any]], titles: dict[str, str] | None = 
         t = sc["total"]
         lines.append(
             f"| {sc['run']} ({sc['arm']}) | {t['with_results']}/{t['searches']} | {_num(t['avg_results'])} | {_num(t['avg_relevant'])} | {_pct(t['avg_precision'])} | {_pct(t['avg_recall'])} | "
-            f"{t['duplicates']} in {t['searches_with_duplicates']} searches | {_pct(t['dead_link_share'])} | {_num(t['median_seconds'])} | {_num(t['p95_seconds'])} | "
+            f"{t['duplicates']} in {t['searches_with_duplicates']} searches (+{t['separate_openings']} separate openings) | {_pct(t['dead_link_share'])} | {_num(t['median_seconds'])} | {_num(t['p95_seconds'])} | "
             f"{_num(t['avg_cost_usd'], '${:.4f}')} |"
         )
     for sc in scores:

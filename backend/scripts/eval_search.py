@@ -301,6 +301,29 @@ async def cmd_prelabel(args: argparse.Namespace) -> int:
 
 # ---- score -----------------------------------------------------------------------------------------------------
 
+def cmd_dupes(args: argparse.Namespace) -> int:
+    """Lists the results that share an employer, title and city, and says whether each is a repeat or a separate opening."""
+    runs = evalset.load_runs([args.run])
+    if not runs:
+        print(f"No run named {args.run}. Names are like step2-saved.")
+        return 1
+    shown = 0
+    for s in runs[0].get("searches", []):
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for it in s.get("items", []):
+            groups.setdefault(evalset.job_key(it), []).append(it)
+        for key, members in groups.items():
+            if len(members) < 2:
+                continue
+            extra, _ = evalset.extra_copies(members)
+            print(f"\n{s['id']}: {members[0]['title']} | {members[0]['company']} | {members[0].get('location') or 'no place'}")
+            for m, e in zip(members, extra):
+                print(f"   {'REPEAT  ' if e else 'separate'} {m['url']}")
+            shown += 1
+    print(f"\n{shown} groups of results share an employer, title and city.")
+    return 0
+
+
 def cmd_score(args: argparse.Namespace) -> int:
     runs = evalset.load_runs([n.strip() for n in args.runs.split(",")] if args.runs else None)
     if not runs:
@@ -337,6 +360,8 @@ def main() -> None:
     l.add_argument("--max-spend", type=float, default=1.0)
     l.add_argument("--dry-run", action="store_true")
     l.add_argument("--redo-unsure", action="store_true", help="ask the AI again about jobs it left unsure (never changes your labels)")
+    d = sub.add_parser("dupes", help="show results that share an employer, title and city")
+    d.add_argument("--run", required=True, help="a run file name without .json, e.g. step2-saved")
     s = sub.add_parser("score", help="the numbers")
     s.add_argument("--runs")
     s.add_argument("--only-you", action="store_true", help="count only labels you confirmed or set yourself")
@@ -345,6 +370,8 @@ def main() -> None:
         sys.exit(cmd_snapshot(args))
     if args.cmd == "pool":
         sys.exit(cmd_pool(args))
+    if args.cmd == "dupes":
+        sys.exit(cmd_dupes(args))
     if args.cmd == "score":
         sys.exit(cmd_score(args))
     fn = cmd_run if args.cmd == "run" else cmd_prelabel

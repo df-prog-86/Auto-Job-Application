@@ -325,3 +325,21 @@ def test_dupes_command_labels_repeats_and_separate_openings(data, capsys):
     assert eval_search.cmd_dupes(argparse.Namespace(run="t-saved")) == 0
     out = capsys.readouterr().out
     assert out.count("separate") >= 2 and "REPEAT" in out and "1 groups" in out
+
+
+def test_separate_requisitions_on_boards_we_cannot_read_are_separate_openings():
+    ens = lambda n: {"title": "HIM Specialist", "company": "Ensemble", "location": "Philadelphia, PA", "url": f"https://ensemblehealthpartners.wd1.example.com/job/{n}"}
+    extra, separate = evalset.extra_copies([ens(1234567), ens(7654321), ens(1234567)])
+    assert extra == [False, False, True] and separate == 1
+    site = {**ens(1), "url": "https://careers.ensemble.example.com/billing-specialist"}   # no number to tell it apart: counted as a repeat
+    assert evalset.extra_copies([ens(1234567), site])[0] == [False, True]
+
+
+def test_misses_command_explains_why_a_relevant_job_was_not_shown(data, capsys):
+    shown = [item("Revenue Cycle Manager")]
+    gone = item("Dental Hygienist")
+    evalset.write_json(evalset.runs_dir() / "t-saved.json", run_of("saved", "rcm-mgr-bos", shown) | {"name": "t-saved"})
+    evalset.set_label("rcm-mgr-bos", evalset.job_key(gone), "rel", by="user", record=evalset.slim(gone))
+    assert eval_search.cmd_misses(argparse.Namespace(run="t-saved", limit=5)) == 0
+    out = capsys.readouterr().out
+    assert "Dental Hygienist" in out and "title too different" in out

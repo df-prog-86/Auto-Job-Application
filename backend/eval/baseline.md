@@ -47,3 +47,20 @@ Reading it
 - Saved-search slowest 5% got slower (10.6 to 13.2 seconds), probably from reading saved descriptions. To check.
 - Pay is now filled for only 3% of saved postings and coordinates resolve for 28% of place names, because most employers
   (Workday and others) do not give pay in their lists.
+
+## Step 2 repeat run, October 14, 2026 (pool 1,165 labeled jobs; every row below is on that same pool)
+
+| Variant | Relevant share | Best possible found | Dead links | Median s | Slowest 5% s | Avg cost |
+|---|---|---|---|---|---|---|
+| full, baseline | 36% | 44% | 0% | 24.4 | 38.5 | $0.0278 |
+| full, after step 2 | 44% | 55% | not checked | 22.2 | 27.1 | $0.0287 |
+| full, after step 2, repeated with link check | 46% | 55% | 0% | 24.3 | 33.9 | $0.0244 |
+| saved, baseline | 32% | 40% | 0% | 6.4 | 10.6 | $0 |
+| saved, after step 2 (twice, identical) | 33% | 37% | 0% | 6.5 | 10.1 | $0 |
+
+- The full-search gain repeated (44% then 46% relevant share, 55% best possible both times), so it is not noise. Cost came down slightly.
+- Saved-only search did not improve (best possible found 40% to 37%): step 2 did not fix ranking inside the saved lists.
+- Dead links 0% on both searches with the link check on; the goal is under 1%.
+- The saved-search slowdown seen earlier was noise (slowest 5% back to 10.1 seconds).
+- Repeats still show in the full and saved searches (13 to 17 per run). Whether they are true repeats is being checked with `eval_search dupes`
+  and `eval_search misses`; the repeat rule was tightened so separate requisition numbers count as separate openings.

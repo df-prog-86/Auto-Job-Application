@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import statistics
 import tempfile
 import threading
@@ -262,23 +263,47 @@ def _percentile(values: list[float], p: float) -> float | None:
 RESULT_CAP = 15  # the most results one search can show
 
 
+_NUMBER = re.compile(r"(?<![a-z0-9])(?:[a-z]{1,4}-?)?\d{5,}")
+
+
+def _job_numbers(url: str) -> set[str]:
+    """Job or requisition numbers an address carries: the board's own number, query numbers like ?req=..., and long numbers in the path."""
+    from urllib.parse import urlsplit
+
+    from app.services.discovery.same_job import req_ids
+
+    parts = urlsplit((url or "").lower())
+    found = set(_NUMBER.findall(parts.path)) | set(_NUMBER.findall(parts.query))
+    return found | req_ids({"url": url or ""})
+
+
 def extra_copies(items: list[dict[str, Any]]) -> tuple[list[bool], int]:
     """
     For each result, whether it is a repeat of an earlier one, and how many separate openings share a title.
-    Two results with the same employer, title and city are two real openings when their job numbers differ on one hiring board
-    (a company posting the same job in two buildings); otherwise the later one is a repeat and is not counted again.
+    Two results with the same employer, title and city are two real openings when their job numbers are known and differ
+    (a company posting the same job twice, once per requisition); a repeat when the numbers match or when nothing can tell them
+    apart (an employer page and a job board page for one job). When in doubt it counts a repeat, so the count is the strict one.
     """
-    seen: dict[str, set[Any]] = {}
+    identities: dict[str, list[dict[str, Any]]] = {}
     extra: list[bool] = []
     separate = 0
     for item in items:
         key = job_key(item)
-        ref = job_ref(item.get("url") or "")
-        if key not in seen:
-            seen[key] = {ref} if ref else set()
+        earlier = identities.setdefault(key, [])
+        if not earlier:
+            earlier.append(item)
             extra.append(False)
-        elif ref is not None and ref not in seen[key] and seen[key]:
-            seen[key].add(ref)
+            continue
+        ref, nums = job_ref(item.get("url") or ""), _job_numbers(item.get("url") or "")
+
+        def proven_apart(other: dict[str, Any]) -> bool:
+            oref, onums = job_ref(other.get("url") or ""), _job_numbers(other.get("url") or "")
+            if ref and oref and ref[0] == oref[0]:
+                return ref[1] != oref[1]
+            return bool(nums) and bool(onums) and not (nums & onums)
+
+        if all(proven_apart(o) for o in earlier):
+            earlier.append(item)
             separate += 1
             extra.append(False)
         else:

@@ -324,6 +324,56 @@ def cmd_dupes(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_misses(args: argparse.Namespace) -> int:
+    """For each relevant job a run did not show: how well it fits the search and, if it was left out, why. Read only; nothing is changed."""
+    from app.services.jobcache import geo, matcher, onet
+    from app.services.jobcache.text import location_fit
+
+    runs = evalset.load_runs([args.run])
+    if not runs:
+        print(f"No run named {args.run}. Names are like step2b-saved.")
+        return 1
+    labels = evalset.load_labels()
+    reasons: dict[str, int] = {}
+    for s in runs[0].get("searches", []):
+        search = evalset.search_by_id(s["id"])
+        crit = search["criteria"]  # a JobSearchIn
+        loc_ref = matcher.parse_location_query(crit.location)
+        state = next(iter(loc_ref.states)) if len(loc_ref.states) == 1 else None
+        near = geo.nearby(loc_ref.cities[0], state) if loc_ref.cities else []
+        plan = matcher.build_plan(crit, onet.alternates(crit.titles), near)
+        shown = {evalset.job_key(i) for i in s.get("items", [])}
+        fits = []
+        for it in s.get("items", []):
+            sc = matcher.score_row(plan, _row(it))
+            fits.append(sc.fit if sc else 0.0)
+        cutoff = min(fits) if fits else 0.0
+        missed = [(k, v) for k, v in labels.get(s["id"], {}).items() if v.get("label") == "rel" and k not in shown]
+        if not missed:
+            continue
+        print(f"\n{s['id']}: shown {len(shown)}, lowest shown fit {cutoff:.2f}, {len(missed)} relevant job(s) not shown")
+        for _k, v in missed[:args.limit]:
+            row = _row(v)
+            sc = matcher.score_row(plan, row)
+            if sc is not None:
+                why = f"fits {sc.fit:.2f} (title {sc.title_fit:.2f}, place {sc.place_fit:.2f}): " + ("ranked below the cutoff" if sc.fit <= cutoff else "should have shown; the candidate list or the 15 limit cut it")
+            else:
+                tf = matcher.title_fit(plan, row["title"])
+                lf = location_fit(plan.loc, row.get("location"), None)
+                why = (f"left out: title too different ({tf:.2f})" if tf < matcher.MIN_TITLE_FIT else "left out: place does not fit" if lf <= 0 else "left out: pay, date, keyword or work type")
+            reasons[why.split(":")[0].split(" (")[0]] = reasons.get(why.split(":")[0].split(" (")[0], 0) + 1
+            print(f"   {v.get('title', '?')} | {v.get('company', '')} | {v.get('location') or 'no place'}\n      {why}")
+    print("\nWhy relevant jobs were missed (first 'limit' per search):")
+    for why, n in sorted(reasons.items(), key=lambda kv: -kv[1]):
+        print(f"   {n:4}  {why}")
+    return 0
+
+
+def _row(rec: dict[str, Any]) -> dict[str, Any]:
+    return {"title": rec.get("title") or "", "company": rec.get("company") or "", "location": rec.get("location"), "work_type": None,
+            "pay_text": rec.get("pay"), "pay_mid": None, "posted_at": rec.get("posted")}
+
+
 def cmd_score(args: argparse.Namespace) -> int:
     runs = evalset.load_runs([n.strip() for n in args.runs.split(",")] if args.runs else None)
     if not runs:
@@ -362,6 +412,9 @@ def main() -> None:
     l.add_argument("--redo-unsure", action="store_true", help="ask the AI again about jobs it left unsure (never changes your labels)")
     d = sub.add_parser("dupes", help="show results that share an employer, title and city")
     d.add_argument("--run", required=True, help="a run file name without .json, e.g. step2-saved")
+    m = sub.add_parser("misses", help="why relevant jobs were not shown by a run")
+    m.add_argument("--run", required=True)
+    m.add_argument("--limit", type=int, default=6, help="jobs listed per search")
     s = sub.add_parser("score", help="the numbers")
     s.add_argument("--runs")
     s.add_argument("--only-you", action="store_true", help="count only labels you confirmed or set yourself")
@@ -372,6 +425,8 @@ def main() -> None:
         sys.exit(cmd_pool(args))
     if args.cmd == "dupes":
         sys.exit(cmd_dupes(args))
+    if args.cmd == "misses":
+        sys.exit(cmd_misses(args))
     if args.cmd == "score":
         sys.exit(cmd_score(args))
     fn = cmd_run if args.cmd == "run" else cmd_prelabel

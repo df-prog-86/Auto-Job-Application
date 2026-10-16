@@ -1058,3 +1058,17 @@ def test_agency_flag_never_changes_which_jobs_a_search_returns(tmp_path, monkeyp
     with cache.session() as db:
         db.execute("UPDATE postings SET agency = NULL")
     assert results() == with_flags and len(with_flags) == 2   # same jobs, same order, same scores, flagged or not
+
+
+def test_sites_from_urls_finds_unread_workday_career_sites():
+    from scripts import cache_tools
+
+    urls = [
+        "https://mgb.wd1.myworkdayjobs.com/en-US/MGBExternal/job/Boston-MA/X_R1",
+        "https://mgb.wd1.myworkdayjobs.com/MGB_Enterprise/job/Somerville/Y_R2",
+        "https://mgb.wd1.myworkdayjobs.com/en-US/MGB_Enterprise/jobs",
+        "https://mgb.wd1.myworkdayjobs.com/en-US/login",
+        "https://example.com/careers",
+    ]
+    got = cache_tools.sites_from_urls(urls, {"mgb.wd1.myworkdayjobs.com|mgb|MGBExternal"})
+    assert got == {"mgb.wd1.myworkdayjobs.com|mgb|MGB_Enterprise": 2}

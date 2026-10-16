@@ -8,6 +8,11 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
                                                           # re-reads employers and fills in details on postings the copy ALREADY has.
                                                           # It adds no postings and closes none, so a before and after test stays fair.
 
+  python -m scripts.cache_tools sites [--db PATH] [--max-hosts 60]
+                                                          # asks Common Crawl's public web index which OTHER career sites each Workday
+                                                          # employer we already read has (one company often runs several). Read only:
+                                                          # it prints a list; nothing is added to the saved lists.
+
 `reread` refuses to run on the live saved lists unless you add --live (the normal background refresh does the same job there).
 """
 
@@ -108,6 +113,57 @@ async def _reread(args: argparse.Namespace) -> int:
     return 0
 
 
+def sites_from_urls(urls: list[str], known: set[str]) -> dict[str, int]:
+    """Workday career sites named by these addresses that are not already read: {"host|tenant|site": addresses seen}."""
+    from app.services.jobcache.readers import employer_ref
+
+    found: dict[str, int] = {}
+    for u in urls:
+        ref = employer_ref(u)
+        if ref and ref[0] == "workday" and ref[1] not in known:
+            found[ref[1]] = found.get(ref[1], 0) + 1
+    return found
+
+
+async def _sites(args: argparse.Namespace) -> int:
+    import json
+
+    from app.services.safe_fetch import safe_get
+
+    path = Path(args.db or settings.JOB_CACHE_PATH)
+    if not path.exists():
+        print(f"No saved lists at {path}.")
+        return 1
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    idents = [r[0] for r in con.execute("SELECT identifier FROM employers WHERE ats = 'workday' AND enabled = 1")]
+    con.close()
+    known = set(idents)
+    hosts = sorted({i.split("|")[0] for i in idents})[: args.max_hosts]
+    print(f"{len(idents)} Workday career sites already read, on {len(hosts)} addresses. Asking Common Crawl (public, read only) about each.")
+    try:
+        info = json.loads((await safe_get("https://index.commoncrawl.org/collinfo.json", timeout=30)).text)
+        api = info[0]["cdx-api"]
+    except Exception as exc:
+        print(f"Could not reach Common Crawl's index ({exc}). Nothing was changed.")
+        return 1
+    print(f"Using crawl {info[0].get('id')}.\n")
+    total_new = 0
+    for host in hosts:
+        try:
+            r = await safe_get(f"{api}?url={host}/*&output=json&fl=url&filter=status:200&limit=4000", timeout=60)
+            urls = [json.loads(line)["url"] for line in r.text.splitlines() if line.startswith("{")] if r.status_code == 200 else []
+        except Exception as exc:
+            print(f"  {host}: could not ask ({type(exc).__name__})")
+            urls = []
+        new = sites_from_urls(urls, known)
+        for ident, n in sorted(new.items(), key=lambda kv: -kv[1]):
+            total_new += 1
+            print(f"  NEW  {ident}   ({n} addresses seen)")
+        await asyncio.sleep(1.5)  # a polite gap between questions
+    print(f"\nDone: {total_new} career sites that are not read yet. Nothing was added; send me this list and I will check each one before anything is added.")
+    return 0
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -117,7 +173,12 @@ def main() -> None:
     r.add_argument("--db", required=True)
     r.add_argument("--only", help="comma separated hiring systems, e.g. greenhouse,lever,ashby")
     r.add_argument("--live", action="store_true")
+    s = sub.add_parser("sites")
+    s.add_argument("--db")
+    s.add_argument("--max-hosts", type=int, default=60)
     args = p.parse_args()
+    if args.cmd == "sites":
+        sys.exit(asyncio.run(_sites(args)))
     sys.exit(cmd_coverage(args) if args.cmd == "coverage" else asyncio.run(_reread(args)))
 
 

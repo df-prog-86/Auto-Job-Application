@@ -360,5 +360,5 @@ def test_gaps_command_counts_held_jobs_and_names_the_hiring_system_of_the_rest(d
         evalset.set_label("rcm-mgr-bos", evalset.job_key(j), "rel", by="user", record=evalset.slim(j))
     assert eval_search.cmd_gaps(argparse.Namespace(top=5)) == 0
     out = capsys.readouterr().out
-    assert "labeled: 2" in out and "In the saved lists: 1 (50%)" in out and "iCIMS" in out and "NOT read" in out
+    assert "labeled: 2" in out and "In the saved lists: 1 (50%)" in out and "iCIMS" in out and "B    1" in out
     assert eval_search.system_of("https://acme.wd5.myworkdayjobs.com/x") == "Workday"

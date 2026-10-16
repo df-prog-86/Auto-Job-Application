@@ -412,7 +412,7 @@ _SYSTEM_HOSTS = (
     ("smartrecruiters.com", "SmartRecruiters"), ("icims.com", "iCIMS"), ("taleo.net", "Taleo"), ("oraclecloud.com", "Oracle Cloud"),
     ("successfactors", "SuccessFactors"), ("workable.com", "Workable"), ("bamboohr.com", "BambooHR"), ("jazz.co", "JazzHR"),
     ("applytojob.com", "JazzHR"), ("jobvite.com", "Jobvite"), ("phenompeople.com", "Phenom"), ("linkedin.com", "LinkedIn"),
-    ("indeed.com", "Indeed"), ("ziprecruiter.com", "ZipRecruiter"), ("glassdoor.com", "Glassdoor"), ("dayforcehcm.com", "Dayforce"),
+    ("indeed.com", "Indeed"), ("pinpointhq.com", "Pinpoint"), ("ziprecruiter.com", "ZipRecruiter"), ("glassdoor.com", "Glassdoor"), ("dayforcehcm.com", "Dayforce"),
     ("paylocity.com", "Paylocity"), ("adp.com", "ADP"), ("ultipro.com", "UKG"), ("breezy.hr", "Breezy"), ("recruitee.com", "Recruitee"),
 )
 
@@ -424,54 +424,73 @@ def system_of(url: str) -> str:
     return next((name for frag, name in _SYSTEM_HOSTS if frag in host), "company site or other")
 
 
+READABLE = {"Workday", "Greenhouse", "Lever", "Ashby", "SmartRecruiters", "Breezy", "Workable", "BambooHR", "JazzHR", "Jobvite", "Oracle Cloud",
+            "iCIMS", "Taleo", "Phenom", "SuccessFactors", "Dayforce", "Pinpoint"}  # hiring systems the saved lists have a reader for
+AGGREGATORS = {"LinkedIn", "Indeed", "ZipRecruiter", "Glassdoor"}
+
+
 def cmd_gaps(args: argparse.Namespace) -> int:
     """
-    Of every job labeled relevant, how many are in the saved lists, and for the ones that are not: which hiring system they sit on and
-    whether we already read that employer. This is the coverage number and the worklist for adding employers. Read only.
+    Of every job labeled relevant, how many are in the saved lists. For the rest, which of four fixes applies, so the worklist is
+    ordered by what each fix costs. Also counts staffing agencies among the missing. Read only.
     """
+    from app.services.jobcache.agency import is_agency
     from app.services.jobcache.text import fold
 
     use_frozen()
     cache = JobCache()
     with cache.session() as db:
-        employers = [dict(r) for r in db.execute("SELECT name, ats FROM employers WHERE enabled = 1")]
+        known = {fold(r["name"]) for r in db.execute("SELECT name FROM employers WHERE enabled = 1")}
         held_titles: dict[str, list[str]] = {}
         for r in db.execute("SELECT lower(p.title) AS t, e.name AS n FROM postings p JOIN employers e ON e.id = p.employer_id WHERE p.closed_at IS NULL"):
             held_titles.setdefault(r["t"], []).append(fold(r["n"]))
-    known = {fold(e["name"]) for e in employers}
     labels = evalset.load_labels()
-    total = held = 0
+    total = held = agency = 0
+    fixes = {"A": 0, "B": 0, "C": 0, "D": 0}
     by_system: dict[str, int] = {}
-    by_employer: dict[str, list[str]] = {}
-    known_employer_missing = 0
+    by_employer: dict[str, list[tuple[str, str]]] = {}
     seen: set[str] = set()
-    for sid, recs in labels.items():
+    for recs in labels.values():
         for key, v in recs.items():
             if v.get("label") != "rel" or key in seen:
                 continue
             seen.add(key)
             total += 1
             company = fold(v.get("company"))
-            names = held_titles.get((v.get("title") or "").lower(), [])
-            if any(n in company or company in n for n in names if n and company):
+            if any(n in company or company in n for n in held_titles.get((v.get("title") or "").lower(), []) if n and company):
                 held += 1
                 continue
             sysname = system_of(v.get("url") or "")
             by_system[sysname] = by_system.get(sysname, 0) + 1
-            if any(k in company or company in k for k in known if k and company):
-                known_employer_missing += 1
-            by_employer.setdefault(v.get("company") or "?", []).append(sysname)
-    print(f"Relevant jobs labeled: {total}. In the saved lists: {held} ({held / max(total, 1):.0%}). Not in them: {total - held}.")
-    print(f"  of the missing, the employer is already read but this job is not in its list: {known_employer_missing}")
-    print(f"  of the missing, the employer is not read at all: {total - held - known_employer_missing}")
+            if is_agency(v.get("company")):
+                agency += 1
+            employer_read = bool(company) and any(k in company or company in k for k in known if k)
+            if employer_read:
+                fix = "A"   # we read this employer; the job is on another of its boards or not in the list we read
+            elif sysname in READABLE:
+                fix = "B"   # not read yet, but on a system we can read: add the employer
+            elif sysname in AGGREGATORS or sysname == "company site or other":
+                fix = "D"   # the link is a job board or the employer's own site: the employer's real system is unknown
+            else:
+                fix = "C"   # on a system we have no reader for
+            fixes[fix] += 1
+            by_employer.setdefault(v.get("company") or "?", []).append((fix, sysname))
+    miss = total - held
+    print(f"Relevant jobs labeled: {total}. In the saved lists: {held} ({held / max(total, 1):.0%}). Not in them: {miss}.")
+    print(f"  staffing agencies among the missing: {agency} ({agency / max(miss, 1):.0%})")
+    print("\nWhat would fix the missing jobs:")
+    print(f"   A {fixes['A']:4}  employer already read, job is on another board or list (find that board: step 3.2)")
+    print(f"   B {fixes['B']:4}  employer not read, on a system we can read (add the employer: curated list)")
+    print(f"   C {fixes['C']:4}  employer on a system we cannot read yet (build a reader first)")
+    print(f"   D {fixes['D']:4}  link is a job board or the company's own site (find the employer's real system)")
     print("\nHiring system of the missing jobs' links:")
     for name, n in sorted(by_system.items(), key=lambda kv: -kv[1]):
-        print(f"   {n:4}  {name}")
+        print(f"   {n:4}  {name}{'' if name in READABLE else '  (no reader)' if name not in AGGREGATORS else '  (job board)'}")
     print(f"\nEmployers with the most missing relevant jobs (top {args.top}):")
-    for comp, systems in sorted(by_employer.items(), key=lambda kv: -len(kv[1]))[: args.top]:
-        top = max(set(systems), key=systems.count)
-        flag = "read" if any(fold(comp) in k or k in fold(comp) for k in known if k) else "NOT read"
-        print(f"   {len(systems):3}  {comp}  [{top}; {flag}]")
+    for comp, rows in sorted(by_employer.items(), key=lambda kv: -len(kv[1]))[: args.top]:
+        fix = max({r[0] for r in rows}, key=[r[0] for r in rows].count)
+        top = max({r[1] for r in rows}, key=[r[1] for r in rows].count)
+        print(f"   {len(rows):3}  {comp}  [fix {fix}; {top}{'; agency' if is_agency(comp) else ''}]")
     return 0
 
 

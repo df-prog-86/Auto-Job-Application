@@ -64,3 +64,17 @@ Reading it
 - The saved-search slowdown seen earlier was noise (slowest 5% back to 10.1 seconds).
 - Repeats still show in the full and saved searches (13 to 17 per run). Whether they are true repeats is being checked with `eval_search dupes`
   and `eval_search misses`; the repeat rule was tightened so separate requisition numbers count as separate openings.
+
+## AI re-rank trial, October 15, 2026 (pool 1,199 labeled jobs; all rows on that pool)
+
+| Variant | Relevant share | Best possible found | Avg cost |
+|---|---|---|---|
+| full, step 2 | 45% | 52% | |
+| full, with re-rank | 45% | 50% | $0.029 |
+| saved, step 2 | 33% | 35% | $0 |
+| saved, with re-rank | 31% | 32% | $0.00025 |
+
+- The re-rank did not beat the baseline on either arm, so it is switched off by default (`JOB_SEARCH_RERANK=on` turns it on for testing).
+- The differences are within run to run noise (about half a job per search), so this reads as "no measurable gain", not "harmful".
+- The 90 hand set labels cover too few jobs per search to judge a ranking change; the trial rests on the accepted AI labels.
+- Where relevant jobs are missed (saved arm, 262): 43% not in the saved lists, 46% held but ranked below 15 with near-tied fits, 6% filtered out, 5% ranked top 15 but not shown. Coverage is the clearer lever.

@@ -24,6 +24,7 @@ def ai(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "JOB_CACHE_PATH", str(tmp_path / "c.db"))
     monkeypatch.setattr(settings, "PRIMARY_FAST_MODEL", "m", raising=False)
     monkeypatch.setattr(settings, "JOB_SEARCH_MODEL", "m", raising=False)
+    monkeypatch.setattr(settings, "JOB_SEARCH_RERANK", "on", raising=False)
     calls = []
 
     def set_answer(content):

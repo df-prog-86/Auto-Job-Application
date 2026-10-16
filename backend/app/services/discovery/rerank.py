@@ -31,7 +31,7 @@ _PROMPT = (
 
 
 def _enabled() -> bool:
-    return (getattr(settings, "JOB_SEARCH_RERANK", "on") or "on").lower() != "off"
+    return (getattr(settings, "JOB_SEARCH_RERANK", "off") or "off").lower() == "on"
 
 
 def _model() -> str | None:

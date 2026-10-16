@@ -8,6 +8,9 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
                                                           # re-reads employers and fills in details on postings the copy ALREADY has.
                                                           # It adds no postings and closes none, so a before and after test stays fair.
 
+  python -m scripts.cache_tools probe 'workday:HOST|TENANT|SITE' ...
+                                                          # reads those employers' public job lists and prints counts and sample titles.
+                                                          # Saves nothing; this is how a candidate is checked before it is added.
   python -m scripts.cache_tools sites [--db PATH] [--max-hosts 60]
                                                           # asks Common Crawl's public web index which OTHER career sites each Workday
                                                           # employer we already read has (one company often runs several). Read only:
@@ -113,16 +116,49 @@ async def _reread(args: argparse.Namespace) -> int:
     return 0
 
 
+_NOT_SITES = {"robots.txt", "sitemap.xml", "favicon.ico", "wday", "assets", "static"}
+
+
 def sites_from_urls(urls: list[str], known: set[str]) -> dict[str, int]:
-    """Workday career sites named by these addresses that are not already read: {"host|tenant|site": addresses seen}."""
+    """
+    Workday career sites named by these addresses that are not already read: {"host|tenant|site": addresses seen}.
+    Workday ignores capital letters in a site name ("External" and "external" are one site), so they are compared without them.
+    """
     from app.services.jobcache.readers import employer_ref
 
+    have = {k.lower() for k in known}
     found: dict[str, int] = {}
+    spelled: dict[str, str] = {}
     for u in urls:
         ref = employer_ref(u)
-        if ref and ref[0] == "workday" and ref[1] not in known:
-            found[ref[1]] = found.get(ref[1], 0) + 1
+        if not ref or ref[0] != "workday":
+            continue
+        site = ref[1].rsplit("|", 1)[-1]
+        if site.lower() in _NOT_SITES or (len(site) == 2 and site.isalpha()) or ref[1].lower() in have:
+            continue
+        key = ref[1].lower()
+        spelled.setdefault(key, ref[1])
+        found[spelled[key]] = found.get(spelled[key], 0) + 1
     return found
+
+
+async def _probe(args: argparse.Namespace) -> int:
+    """Reads each named employer's public job list the way the app does and prints what is there. Saves nothing anywhere."""
+    throttle = Throttle()
+    async with make_client() as client:
+        for spec in args.employers:
+            system, _, ident = spec.partition(":")
+            try:
+                res = await read_employer(system, ident, client, throttle)
+            except Exception as exc:
+                print(f"\n{spec}\n   could not be read: {type(exc).__name__}: {str(exc)[:120]}")
+                continue
+            ps = res.postings
+            print(f"\n{spec}\n   {len(ps)} open postings{'' if res.complete else ' (only part of a very large list was read)'}; {res.name or 'no name given'}")
+            for p in ps[: args.samples]:
+                print(f"   - {p.title} | {p.location or 'no place'}")
+    print("\nNothing was saved. These are only reads of the employers' public job lists.")
+    return 0
 
 
 async def _sites(args: argparse.Namespace) -> int:
@@ -178,7 +214,12 @@ def main() -> None:
     s = sub.add_parser("sites")
     s.add_argument("--db")
     s.add_argument("--max-hosts", type=int, default=60)
+    pr = sub.add_parser("probe")
+    pr.add_argument("employers", nargs="+", help="system:identifier, e.g. 'workday:bilh.wd1.myworkdayjobs.com|bilh|external'")
+    pr.add_argument("--samples", type=int, default=8)
     args = p.parse_args()
+    if args.cmd == "probe":
+        sys.exit(asyncio.run(_probe(args)))
     if args.cmd == "sites":
         sys.exit(asyncio.run(_sites(args)))
     sys.exit(cmd_coverage(args) if args.cmd == "coverage" else asyncio.run(_reread(args)))

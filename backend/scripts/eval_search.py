@@ -437,13 +437,16 @@ def cmd_gaps(args: argparse.Namespace) -> int:
     from app.services.jobcache.agency import is_agency
     from app.services.jobcache.text import fold
 
+    def squash(name: str | None) -> str:
+        return fold(name).replace(" ", "")  # "Mass General Brigham" and "Massgeneralbrigham" are one employer
+
     use_frozen()
     cache = JobCache()
     with cache.session() as db:
-        known = {fold(r["name"]) for r in db.execute("SELECT name FROM employers WHERE enabled = 1")}
+        known = {squash(r["name"]) for r in db.execute("SELECT name FROM employers WHERE enabled = 1")}
         held_titles: dict[str, list[str]] = {}
         for r in db.execute("SELECT lower(p.title) AS t, e.name AS n FROM postings p JOIN employers e ON e.id = p.employer_id WHERE p.closed_at IS NULL"):
-            held_titles.setdefault(r["t"], []).append(fold(r["n"]))
+            held_titles.setdefault(r["t"], []).append(squash(r["n"]))
     labels = evalset.load_labels()
     total = held = agency = 0
     fixes = {"A": 0, "B": 0, "C": 0, "D": 0}
@@ -456,7 +459,7 @@ def cmd_gaps(args: argparse.Namespace) -> int:
                 continue
             seen.add(key)
             total += 1
-            company = fold(v.get("company"))
+            company = squash(v.get("company"))
             if any(n in company or company in n for n in held_titles.get((v.get("title") or "").lower(), []) if n and company):
                 held += 1
                 continue

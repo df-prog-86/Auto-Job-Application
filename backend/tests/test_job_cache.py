@@ -1072,3 +1072,16 @@ def test_sites_from_urls_finds_unread_workday_career_sites():
     ]
     got = cache_tools.sites_from_urls(urls, {"mgb.wd1.myworkdayjobs.com|mgb|MGBExternal"})
     assert got == {"mgb.wd1.myworkdayjobs.com|mgb|MGB_Enterprise": 2}
+
+
+def test_sites_ignore_capital_letters_robots_and_language_codes():
+    from scripts import cache_tools
+
+    urls = [
+        "https://mgb.wd1.myworkdayjobs.com/en-US/mgbexternal/job/Boston-MA/X_R1",
+        "https://mgb.wd1.myworkdayjobs.com/robots.txt",
+        "https://mgb.wd1.myworkdayjobs.com/es/job/x",
+        "https://mgb.wd1.myworkdayjobs.com/MGB_Ent/job/y",
+        "https://mgb.wd1.myworkdayjobs.com/mgb_ent/job/z",
+    ]
+    assert cache_tools.sites_from_urls(urls, {"mgb.wd1.myworkdayjobs.com|mgb|MGBExternal"}) == {"mgb.wd1.myworkdayjobs.com|mgb|MGB_Ent": 2}

@@ -435,6 +435,7 @@ def cmd_gaps(args: argparse.Namespace) -> int:
     ordered by what each fix costs. Also counts staffing agencies among the missing. Read only.
     """
     from app.services.jobcache.agency import is_agency
+    from app.services.jobcache.readers import employer_ref
     from app.services.jobcache.text import fold
 
     def squash(name: str | None) -> str:
@@ -450,6 +451,7 @@ def cmd_gaps(args: argparse.Namespace) -> int:
     labels = evalset.load_labels()
     total = held = agency = 0
     fixes = {"A": 0, "B": 0, "C": 0, "D": 0}
+    to_probe: dict[str, str] = {}
     by_system: dict[str, int] = {}
     by_employer: dict[str, list[tuple[str, str]]] = {}
     seen: set[str] = set()
@@ -478,6 +480,9 @@ def cmd_gaps(args: argparse.Namespace) -> int:
                 fix = "C"   # on a system we have no reader for
             fixes[fix] += 1
             by_employer.setdefault(v.get("company") or "?", []).append((fix, sysname))
+            ref = employer_ref(v.get("url") or "")
+            if fix == "B" and ref:
+                to_probe.setdefault(f"{ref[0]}:{ref[1]}", v.get("company") or "?")
     miss = total - held
     print(f"Relevant jobs labeled: {total}. In the saved lists: {held} ({held / max(total, 1):.0%}). Not in them: {miss}.")
     print(f"  staffing agencies among the missing: {agency} ({agency / max(miss, 1):.0%})")
@@ -494,6 +499,10 @@ def cmd_gaps(args: argparse.Namespace) -> int:
         fix = max({r[0] for r in rows}, key=[r[0] for r in rows].count)
         top = max({r[1] for r in rows}, key=[r[1] for r in rows].count)
         print(f"   {len(rows):3}  {comp}  [fix {fix}; {top}{'; agency' if is_agency(comp) else ''}]")
+    if to_probe:
+        print("\nEmployers to check next (fix B). Paste these after 'cache_tools probe' to look at each one before anything is added:")
+        for spec, comp in sorted(to_probe.items(), key=lambda kv: kv[1]):
+            print(f"   '{spec}'   # {comp}")
     return 0
 
 

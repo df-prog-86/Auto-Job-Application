@@ -349,3 +349,16 @@ async def test_misses_command_says_where_each_relevant_job_stands(data, restored
     assert "ranked in the top 15 but dropped afterwards" in out        # the saved lists hold it and rank it
     assert "not in the saved lists" in out and "Dental Hygienist" in out  # only the web search found it
     assert "filtered out: title too different" in out
+
+
+def test_gaps_command_counts_held_jobs_and_names_the_hiring_system_of_the_rest(data, restored, capsys):
+    seed_cache()
+    eval_search.cmd_snapshot(argparse.Namespace(source=None, force=False))
+    held = item("Revenue Cycle Manager", company="Acme Health")
+    miss = item("Billing Lead", company="Smile Co", url="https://smile.icims.com/jobs/1")
+    for j in (held, miss):
+        evalset.set_label("rcm-mgr-bos", evalset.job_key(j), "rel", by="user", record=evalset.slim(j))
+    assert eval_search.cmd_gaps(argparse.Namespace(top=5)) == 0
+    out = capsys.readouterr().out
+    assert "labeled: 2" in out and "In the saved lists: 1 (50%)" in out and "iCIMS" in out and "NOT read" in out
+    assert eval_search.system_of("https://acme.wd5.myworkdayjobs.com/x") == "Workday"

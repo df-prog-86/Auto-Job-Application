@@ -407,6 +407,74 @@ async def cmd_misses(args: argparse.Namespace) -> int:
     return 0
 
 
+_SYSTEM_HOSTS = (
+    ("myworkdayjobs.com", "Workday"), ("greenhouse.io", "Greenhouse"), ("lever.co", "Lever"), ("ashbyhq.com", "Ashby"),
+    ("smartrecruiters.com", "SmartRecruiters"), ("icims.com", "iCIMS"), ("taleo.net", "Taleo"), ("oraclecloud.com", "Oracle Cloud"),
+    ("successfactors", "SuccessFactors"), ("workable.com", "Workable"), ("bamboohr.com", "BambooHR"), ("jazz.co", "JazzHR"),
+    ("applytojob.com", "JazzHR"), ("jobvite.com", "Jobvite"), ("phenompeople.com", "Phenom"), ("linkedin.com", "LinkedIn"),
+    ("indeed.com", "Indeed"), ("ziprecruiter.com", "ZipRecruiter"), ("glassdoor.com", "Glassdoor"), ("dayforcehcm.com", "Dayforce"),
+    ("paylocity.com", "Paylocity"), ("adp.com", "ADP"), ("ultipro.com", "UKG"), ("breezy.hr", "Breezy"), ("recruitee.com", "Recruitee"),
+)
+
+
+def system_of(url: str) -> str:
+    from urllib.parse import urlsplit
+
+    host = (urlsplit(url or "").hostname or "").lower()
+    return next((name for frag, name in _SYSTEM_HOSTS if frag in host), "company site or other")
+
+
+def cmd_gaps(args: argparse.Namespace) -> int:
+    """
+    Of every job labeled relevant, how many are in the saved lists, and for the ones that are not: which hiring system they sit on and
+    whether we already read that employer. This is the coverage number and the worklist for adding employers. Read only.
+    """
+    from app.services.jobcache.text import fold
+
+    use_frozen()
+    cache = JobCache()
+    with cache.session() as db:
+        employers = [dict(r) for r in db.execute("SELECT name, ats FROM employers WHERE enabled = 1")]
+        held_titles: dict[str, list[str]] = {}
+        for r in db.execute("SELECT lower(p.title) AS t, e.name AS n FROM postings p JOIN employers e ON e.id = p.employer_id WHERE p.closed_at IS NULL"):
+            held_titles.setdefault(r["t"], []).append(fold(r["n"]))
+    known = {fold(e["name"]) for e in employers}
+    labels = evalset.load_labels()
+    total = held = 0
+    by_system: dict[str, int] = {}
+    by_employer: dict[str, list[str]] = {}
+    known_employer_missing = 0
+    seen: set[str] = set()
+    for sid, recs in labels.items():
+        for key, v in recs.items():
+            if v.get("label") != "rel" or key in seen:
+                continue
+            seen.add(key)
+            total += 1
+            company = fold(v.get("company"))
+            names = held_titles.get((v.get("title") or "").lower(), [])
+            if any(n in company or company in n for n in names if n and company):
+                held += 1
+                continue
+            sysname = system_of(v.get("url") or "")
+            by_system[sysname] = by_system.get(sysname, 0) + 1
+            if any(k in company or company in k for k in known if k and company):
+                known_employer_missing += 1
+            by_employer.setdefault(v.get("company") or "?", []).append(sysname)
+    print(f"Relevant jobs labeled: {total}. In the saved lists: {held} ({held / max(total, 1):.0%}). Not in them: {total - held}.")
+    print(f"  of the missing, the employer is already read but this job is not in its list: {known_employer_missing}")
+    print(f"  of the missing, the employer is not read at all: {total - held - known_employer_missing}")
+    print("\nHiring system of the missing jobs' links:")
+    for name, n in sorted(by_system.items(), key=lambda kv: -kv[1]):
+        print(f"   {n:4}  {name}")
+    print(f"\nEmployers with the most missing relevant jobs (top {args.top}):")
+    for comp, systems in sorted(by_employer.items(), key=lambda kv: -len(kv[1]))[: args.top]:
+        top = max(set(systems), key=systems.count)
+        flag = "read" if any(fold(comp) in k or k in fold(comp) for k in known if k) else "NOT read"
+        print(f"   {len(systems):3}  {comp}  [{top}; {flag}]")
+    return 0
+
+
 def cmd_score(args: argparse.Namespace) -> int:
     runs = evalset.load_runs([n.strip() for n in args.runs.split(",")] if args.runs else None)
     if not runs:
@@ -448,6 +516,8 @@ def main() -> None:
     m = sub.add_parser("misses", help="why relevant jobs were not shown by a run")
     m.add_argument("--run", required=True)
     m.add_argument("--limit", type=int, default=6, help="jobs listed per search")
+    g = sub.add_parser("gaps", help="how many relevant jobs the saved lists hold, and what to add for the rest")
+    g.add_argument("--top", type=int, default=25)
     s = sub.add_parser("score", help="the numbers")
     s.add_argument("--runs")
     s.add_argument("--only-you", action="store_true", help="count only labels you confirmed or set yourself")
@@ -458,6 +528,8 @@ def main() -> None:
         sys.exit(cmd_pool(args))
     if args.cmd == "dupes":
         sys.exit(cmd_dupes(args))
+    if args.cmd == "gaps":
+        sys.exit(cmd_gaps(args))
     if args.cmd == "score":
         sys.exit(cmd_score(args))
     fn = {"run": cmd_run, "misses": cmd_misses}.get(args.cmd, cmd_prelabel)

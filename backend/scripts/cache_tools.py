@@ -145,8 +145,11 @@ def sites_from_urls(urls: list[str], known: set[str]) -> dict[str, int]:
 async def _probe(args: argparse.Namespace) -> int:
     """Reads each named employer's public job list the way the app does and prints what is there. Saves nothing anywhere."""
     throttle = Throttle()
+    specs = list(args.employers)
+    if args.from_file:
+        specs += [ln.split("#")[0].strip().strip("'") for ln in Path(args.from_file).read_text().splitlines() if ln.split("#")[0].strip()]
     async with make_client() as client:
-        for spec in args.employers:
+        for spec in specs:
             system, _, ident = spec.partition(":")
             try:
                 res = await read_employer(system, ident, client, throttle)
@@ -154,7 +157,7 @@ async def _probe(args: argparse.Namespace) -> int:
                 print(f"\n{spec}\n   could not be read: {type(exc).__name__}: {str(exc)[:120]}")
                 continue
             ps = res.postings
-            print(f"\n{spec}\n   {len(ps)} open postings{'' if res.complete else ' (only part of a very large list was read)'}; {res.name or 'no name given'}")
+            print(f"\n{spec}\n   {len(ps)} open postings{'' if res.complete else ' (only part of a very large list was read)'}" + (f"; {'; '.join(res.notes)}" if res.notes else ""))
             for p in ps[: args.samples]:
                 print(f"   - {p.title} | {p.location or 'no place'}")
     print("\nNothing was saved. These are only reads of the employers' public job lists.")
@@ -215,7 +218,8 @@ def main() -> None:
     s.add_argument("--db")
     s.add_argument("--max-hosts", type=int, default=60)
     pr = sub.add_parser("probe")
-    pr.add_argument("employers", nargs="+", help="system:identifier, e.g. 'workday:bilh.wd1.myworkdayjobs.com|bilh|external'")
+    pr.add_argument("--from-file", help="a file of specs, one per line (what 'eval_search gaps --write-probes' writes)")
+    pr.add_argument("employers", nargs="*", help="system:identifier, e.g. 'workday:bilh.wd1.myworkdayjobs.com|bilh|external'")
     pr.add_argument("--samples", type=int, default=8)
     args = p.parse_args()
     if args.cmd == "probe":

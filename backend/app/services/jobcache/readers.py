@@ -327,30 +327,74 @@ def parse_workday(data: Any, host: str, site: str) -> list[PostingIn]:
     return out
 
 
+WORKDAY_WINDOW = 2000  # Workday answers only the first 2,000 jobs of any one search, however many the employer has
+
+
+def workday_slices(data: Any) -> list[tuple[str, list[tuple[str, int]]]]:
+    """The category filters Workday offers with its first answer: [(filter name, [(value id, jobs)])], one entry per kind of filter."""
+    out: list[tuple[str, list[tuple[str, int]]]] = []
+
+    def walk(facet: Any) -> None:
+        if not isinstance(facet, dict) or not isinstance(facet.get("values"), list):
+            return
+        leaves = [(str(v["id"]), int(v["count"])) for v in facet["values"] if isinstance(v, dict) and v.get("id") and isinstance(v.get("count"), int)]
+        if leaves and isinstance(facet.get("facetParameter"), str):
+            out.append((facet["facetParameter"], leaves))
+        for v in facet["values"]:
+            if isinstance(v, dict) and isinstance(v.get("values"), list):
+                walk(v)
+
+    for f in (data.get("facets") if isinstance(data, dict) else None) or []:
+        walk(f)
+    return out
+
+
+async def _workday_window(client: httpx.AsyncClient, throttle: Throttle, url: str, host: str, site: str, facets: dict[str, list[str]]) -> tuple[list[PostingIn], int | None, Any, bool]:
+    """One search read page by page up to Workday's window: (postings, reported total, first answer, True when the list ended inside the window)."""
+    postings: list[PostingIn] = []
+    total: int | None = None
+    first: Any = None
+    for offset in range(0, WORKDAY_MAX_JOBS, WORKDAY_PAGE):
+        data = await _request(
+            client, throttle, "workday", "POST", url,
+            json={"appliedFacets": facets, "limit": WORKDAY_PAGE, "offset": offset, "searchText": ""},
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        first = data if first is None else first
+        page = parse_workday(data, host, site)
+        if total is None and isinstance(data, dict) and isinstance(data.get("total"), int) and data["total"] > 0:
+            total = data["total"]  # Workday only reports the total on the first page
+        postings.extend(page)
+        if len(page) < WORKDAY_PAGE or (total is not None and offset + WORKDAY_PAGE >= total):
+            return postings, total, first, True
+    return postings, total, first, False
+
+
 async def _read_workday(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
     try:
         host, tenant, site = identifier.split("|")
     except ValueError as exc:
         raise ReaderError("that Workday address is incomplete", gone=True) from exc
     url = f"https://{host}/wday/cxs/{tenant}/{site}/jobs"
-    postings: list[PostingIn] = []
-    total: int | None = None
-    complete = False
-    for offset in range(0, WORKDAY_MAX_JOBS, WORKDAY_PAGE):
-        data = await _request(
-            client, throttle, "workday", "POST", url,
-            json={"appliedFacets": {}, "limit": WORKDAY_PAGE, "offset": offset, "searchText": ""},
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-        )
-        page = parse_workday(data, host, site)
-        if total is None and isinstance(data, dict) and isinstance(data.get("total"), int) and data["total"] > 0:
-            total = data["total"]  # Workday only reports the total on the first page
-        postings.extend(page)
-        if len(page) < WORKDAY_PAGE or (total is not None and offset + WORKDAY_PAGE >= total):
-            complete = True  # reached the end of the list
-            break
-    notes = [] if complete else [f"read the first {len(postings)} of {total or 'many'} jobs"]
-    return ReadResult(postings, complete=complete, notes=notes)
+    postings, total, first, ended = await _workday_window(client, throttle, url, host, site, {})
+    if ended and len(postings) != WORKDAY_WINDOW:
+        return ReadResult(postings)  # the list ended on its own, short of Workday's 2,000 cutoff: read in full
+    # A list that stopped at exactly 2,000 (or ran past our own limit) may be cut off. Read it again one category at a time (each is smaller than the window) and join.
+    groups = [(name, vals) for name, vals in workday_slices(first) if vals and all(c < WORKDAY_WINDOW for _i, c in vals)]
+    if not groups:
+        return ReadResult(postings, complete=False, notes=[f"read the first {len(postings)} of {total or 'many'} jobs; no category filter to read the rest"])
+    name, vals = max(groups, key=lambda g: (sum(c for _i, c in g[1]), -len(g[1])))  # the filter that covers the most jobs
+    by_id = {p.ext_id: p for p in postings}
+    all_ended = True
+    for value_id, _count in vals:
+        got, _t, _f, done = await _workday_window(client, throttle, url, host, site, {name: [value_id]})
+        all_ended = all_ended and done
+        for p in got:
+            by_id.setdefault(p.ext_id, p)
+    covered = sum(c for _i, c in vals)
+    complete = all_ended and covered >= 0.95 * (total or covered)
+    notes = [] if complete else [f"read {len(by_id)} of {total or 'many'} jobs by {name}"]
+    return ReadResult(list(by_id.values()), complete=complete, notes=notes)
 
 
 # ---- SmartRecruiters ----------------------------------------------------------------------------------------------

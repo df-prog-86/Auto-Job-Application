@@ -503,6 +503,9 @@ def cmd_gaps(args: argparse.Namespace) -> int:
         print("\nEmployers to check next (fix B). Paste these after 'cache_tools probe' to look at each one before anything is added:")
         for spec, comp in sorted(to_probe.items(), key=lambda kv: kv[1]):
             print(f"   '{spec}'   # {comp}")
+        if args.write_probes:
+            Path(args.write_probes).write_text("".join(f"'{spec}'   # {comp}\n" for spec, comp in sorted(to_probe.items(), key=lambda kv: kv[1])))
+            print(f"(written to {args.write_probes})")
     return 0
 
 
@@ -549,6 +552,7 @@ def main() -> None:
     m.add_argument("--limit", type=int, default=6, help="jobs listed per search")
     g = sub.add_parser("gaps", help="how many relevant jobs the saved lists hold, and what to add for the rest")
     g.add_argument("--top", type=int, default=25)
+    g.add_argument("--write-probes", help="also write the employers to check (fix B) to this file, for 'cache_tools probe --from-file'")
     s = sub.add_parser("score", help="the numbers")
     s.add_argument("--runs")
     s.add_argument("--only-you", action="store_true", help="count only labels you confirmed or set yourself")

@@ -1085,3 +1085,45 @@ def test_sites_ignore_capital_letters_robots_and_language_codes():
         "https://mgb.wd1.myworkdayjobs.com/mgb_ent/job/z",
     ]
     assert cache_tools.sites_from_urls(urls, {"mgb.wd1.myworkdayjobs.com|mgb|MGBExternal"}) == {"mgb.wd1.myworkdayjobs.com|mgb|MGB_Ent": 2}
+
+
+async def test_workday_list_past_the_2000_window_is_read_in_category_slices(monkeypatch):
+    from app.services.jobcache import readers
+
+    jobs = {"A": [f"/job/a{i}_R{i}" for i in range(1200)], "B": [f"/job/b{i}_R{5000 + i}" for i in range(1100)]}
+    everything = jobs["A"] + jobs["B"]
+    facets = [{"facetParameter": "jobFamilyGroup", "values": [{"id": "A", "count": 1200}, {"id": "B", "count": 1100}]}]
+
+    async def fake(client, throttle, system, method, url, text=False, **kw):
+        body = kw["json"]
+        pool = jobs[body["appliedFacets"]["jobFamilyGroup"][0]] if body["appliedFacets"] else everything[:2000]  # the window: only the first 2000
+        page = pool[body["offset"]: body["offset"] + body["limit"]]
+        return {"total": len(pool), "facets": facets, "jobPostings": [{"externalPath": p, "title": "Nurse", "locationsText": "Boston, MA"} for p in page]}
+
+    monkeypatch.setattr(readers, "_request", fake)
+    res = await readers._read_workday("h.wd1.myworkdayjobs.com|h|Careers", None, readers.Throttle())
+    assert len(res.postings) == 2300 and res.complete
+
+
+async def test_workday_list_inside_the_window_is_one_search(monkeypatch):
+    from app.services.jobcache import readers
+
+    calls = []
+
+    async def fake(client, throttle, system, method, url, text=False, **kw):
+        calls.append(kw["json"]["appliedFacets"])
+        n = 45
+        page = [f"/job/x{i}_R{i}" for i in range(n)][kw["json"]["offset"]: kw["json"]["offset"] + 20]
+        return {"total": n, "jobPostings": [{"externalPath": p, "title": "RN"} for p in page]}
+
+    monkeypatch.setattr(readers, "_request", fake)
+    res = await readers._read_workday("h.wd1.myworkdayjobs.com|h|Careers", None, readers.Throttle())
+    assert len(res.postings) == 45 and res.complete and all(c == {} for c in calls)
+
+
+def test_workday_slices_find_nested_filters():
+    from app.services.jobcache import readers
+
+    data = {"facets": [{"facetParameter": "locationMainGroup", "values": [{"facetParameter": "locations", "values": [{"id": "x", "count": 3}]}]},
+                       {"facetParameter": "timeType", "values": [{"id": "ft", "count": 9}]}]}
+    assert readers.workday_slices(data) == [("locations", [("x", 3)]), ("timeType", [("ft", 9)])]

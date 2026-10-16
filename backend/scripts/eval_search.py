@@ -35,6 +35,7 @@ from app.config import settings
 from app.services import evalset
 from app.services.discovery import web_search as ws
 from app.services.jobcache import service as cache_service
+from app.services.jobcache.store import JobCache
 from app.services.llm.client import LLMClient
 from scripts.search_ab import PRICES, SEARCH_FEE, Meter
 
@@ -324,54 +325,86 @@ def cmd_dupes(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_misses(args: argparse.Namespace) -> int:
-    """For each relevant job a run did not show: how well it fits the search and, if it was left out, why. Read only; nothing is changed."""
-    from app.services.jobcache import geo, matcher, onet
-    from app.services.jobcache.text import location_fit
+async def cmd_misses(args: argparse.Namespace) -> int:
+    """
+    For each relevant job a run did not show, where it stands in the real saved-list ranking (the same words, nearby cities
+    and alternate titles the live search uses): ranked but cut, filtered out, or not in the saved lists at all. Read only.
+    """
+    from app.services.jobcache import matcher
+    from app.services.jobcache.text import fold, location_fit
 
     runs = evalset.load_runs([args.run])
     if not runs:
         print(f"No run named {args.run}. Names are like step2b-saved.")
         return 1
+    use_frozen()
     labels = evalset.load_labels()
-    reasons: dict[str, int] = {}
+    cache = JobCache()
+    totals: dict[str, int] = {}
     for s in runs[0].get("searches", []):
         search = evalset.search_by_id(s["id"])
-        crit = search["criteria"]  # a JobSearchIn
-        loc_ref = matcher.parse_location_query(crit.location)
-        state = next(iter(loc_ref.states)) if len(loc_ref.states) == 1 else None
-        near = geo.nearby(loc_ref.cities[0], state) if loc_ref.cities else []
-        plan = matcher.build_plan(crit, onet.alternates(crit.titles), near)
-        shown = {evalset.job_key(i) for i in s.get("items", [])}
-        fits = []
-        for it in s.get("items", []):
-            sc = matcher.score_row(plan, _row(it))
-            fits.append(sc.fit if sc else 0.0)
-        cutoff = min(fits) if fits else 0.0
-        missed = [(k, v) for k, v in labels.get(s["id"], {}).items() if v.get("label") == "rel" and k not in shown]
-        if not missed:
+        if not search:
             continue
-        print(f"\n{s['id']}: shown {len(shown)}, lowest shown fit {cutoff:.2f}, {len(missed)} relevant job(s) not shown")
-        for _k, v in missed[:args.limit]:
-            row = _row(v)
-            sc = matcher.score_row(plan, row)
-            if sc is not None:
-                why = f"fits {sc.fit:.2f} (title {sc.title_fit:.2f}, place {sc.place_fit:.2f}): " + ("ranked below the cutoff" if sc.fit <= cutoff else "should have shown; the candidate list or the 15 limit cut it")
+        crit = search["criteria"]
+        try:
+            extra = await cache_service.expand_titles(crit.titles)
+        except Exception:
+            extra = []
+        try:
+            places = await cache_service.expand_places(crit.location)
+        except Exception:
+            places = []
+        plan = matcher.build_plan(crit, extra, places)
+        ranked = (await asyncio.to_thread(cache_service.search_sync, crit, set(), extra, 600, places)).items
+        pool = ws._pool_size(crit)
+        strict: dict[str, int] = {}
+        loose: dict[str, int] = {}
+        for pos, it in enumerate(ranked, 1):
+            strict.setdefault(evalset.job_key(it), pos)
+            loose.setdefault(f"{fold(it['title'])}|{evalset.city_of(it.get('location'))}", pos)
+        shown = {evalset.job_key(i) for i in s.get("items", [])}
+        shown_pos = [strict[k] for k in shown if k in strict]
+        missed = [(k, v) for k, v in labels.get(s["id"], {}).items() if v.get("label") == "rel" and k not in shown]
+        fits = [round(float(i.get("fit") or 0), 3) for i in ranked]
+        tie = f"15th fit {fits[14]:.2f}, {sum(1 for f in fits if f == fits[14])} tied at that fit" if len(fits) >= 15 else "fewer than 15 in the ranking"
+        print(f"\n{s['id']}: shown {len(shown)} (best ranks {sorted(shown_pos)[:3]}, worst {max(shown_pos, default=0)}, {len(shown) - len(shown_pos)} not from the saved ranking); "
+              f"saved ranking holds {len(ranked)}; {tie}; {len(missed)} relevant not shown")
+        lines = []
+        for _k, v in missed:
+            key = evalset.job_key(v)
+            pos = strict.get(key)
+            spelled = ""
+            if pos is None:
+                pos = loose.get(f"{fold(v.get('title'))}|{evalset.city_of(v.get('location'))}")
+                spelled = " (employer spelled differently)" if pos else ""
+            if pos is not None:
+                fit = fits[pos - 1]
+                bucket = ("ranked in the top 15 but dropped afterwards" if pos <= 15
+                          else f"ranked 16 to {pool}: cut by the 15 limit" if pos <= pool
+                          else f"ranked below {pool}: never checked")
+                lines.append(f"   {v.get('title', '?')} | {v.get('company', '')} | {v.get('location') or 'no place'}\n      {bucket}: rank {pos}, fit {fit:.2f}{spelled}")
             else:
-                tf = matcher.title_fit(plan, row["title"])
-                lf = location_fit(plan.loc, row.get("location"), None)
-                why = (f"left out: title too different ({tf:.2f})" if tf < matcher.MIN_TITLE_FIT else "left out: place does not fit" if lf <= 0 else "left out: pay, date, keyword or work type")
-            reasons[why.split(":")[0].split(" (")[0]] = reasons.get(why.split(":")[0].split(" (")[0], 0) + 1
-            print(f"   {v.get('title', '?')} | {v.get('company', '')} | {v.get('location') or 'no place'}\n      {why}")
-    print("\nWhy relevant jobs were missed (first 'limit' per search):")
-    for why, n in sorted(reasons.items(), key=lambda kv: -kv[1]):
+                with cache.session() as db:
+                    held = db.execute("SELECT p.location, e.name FROM postings p JOIN employers e ON e.id = p.employer_id "
+                                      "WHERE p.closed_at IS NULL AND lower(p.title) = lower(?)", (v.get("title") or "",)).fetchall()
+                held = [h for h in held if fold(h["name"]) in fold(v.get("company")) or fold(v.get("company")) in fold(h["name"])]
+                if not held:
+                    bucket = "not in the saved lists (the web search found it)"
+                else:
+                    tf = matcher.title_fit(plan, v.get("title") or "")
+                    lf = location_fit(plan.loc, v.get("location"), None)
+                    bucket = ("in the saved lists, filtered out: title too different" if tf < matcher.MIN_TITLE_FIT
+                              else "in the saved lists, filtered out: place does not fit" if lf <= 0
+                              else "in the saved lists, filtered out: pay, date, keyword or work type")
+                lines.append(f"   {v.get('title', '?')} | {v.get('company', '')} | {v.get('location') or 'no place'}\n      {bucket}")
+            label = lines[-1].split("\n")[1].strip()
+            name = label.split(": rank")[0] if ": rank" in label else label.split(": title")[0].split(": place")[0].split(": pay")[0]
+            totals[name] = totals.get(name, 0) + 1
+        print("\n".join(lines[: args.limit]))
+    print("\nWhere the relevant jobs that were not shown stand (all of them, not only the ones listed):")
+    for why, n in sorted(totals.items(), key=lambda kv: -kv[1]):
         print(f"   {n:4}  {why}")
     return 0
-
-
-def _row(rec: dict[str, Any]) -> dict[str, Any]:
-    return {"title": rec.get("title") or "", "company": rec.get("company") or "", "location": rec.get("location"), "work_type": None,
-            "pay_text": rec.get("pay"), "pay_mid": None, "posted_at": rec.get("posted")}
 
 
 def cmd_score(args: argparse.Namespace) -> int:
@@ -425,11 +458,9 @@ def main() -> None:
         sys.exit(cmd_pool(args))
     if args.cmd == "dupes":
         sys.exit(cmd_dupes(args))
-    if args.cmd == "misses":
-        sys.exit(cmd_misses(args))
     if args.cmd == "score":
         sys.exit(cmd_score(args))
-    fn = cmd_run if args.cmd == "run" else cmd_prelabel
+    fn = {"run": cmd_run, "misses": cmd_misses}.get(args.cmd, cmd_prelabel)
     sys.exit(asyncio.run(fn(args)))
 
 

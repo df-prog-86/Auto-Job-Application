@@ -335,11 +335,17 @@ def test_separate_requisitions_on_boards_we_cannot_read_are_separate_openings():
     assert evalset.extra_copies([ens(1234567), site])[0] == [False, True]
 
 
-def test_misses_command_explains_why_a_relevant_job_was_not_shown(data, capsys):
-    shown = [item("Revenue Cycle Manager")]
-    gone = item("Dental Hygienist")
-    evalset.write_json(evalset.runs_dir() / "t-saved.json", run_of("saved", "rcm-mgr-bos", shown) | {"name": "t-saved"})
-    evalset.set_label("rcm-mgr-bos", evalset.job_key(gone), "rel", by="user", record=evalset.slim(gone))
-    assert eval_search.cmd_misses(argparse.Namespace(run="t-saved", limit=5)) == 0
+async def test_misses_command_says_where_each_relevant_job_stands(data, restored, capsys):
+    seed_cache()
+    eval_search.cmd_snapshot(argparse.Namespace(source=None, force=False))
+    held = item("Revenue Cycle Manager", company="Acme Health")
+    web_only = item("Dental Hygienist", company="Smile Co")
+    filtered = item("Software Engineer", company="Acme Health", location="Austin, TX")
+    evalset.write_json(evalset.runs_dir() / "t-saved.json", run_of("saved", "rcm-mgr-bos", []) | {"name": "t-saved"})
+    for j in (held, web_only, filtered):
+        evalset.set_label("rcm-mgr-bos", evalset.job_key(j), "rel", by="user", record=evalset.slim(j))
+    assert await eval_search.cmd_misses(argparse.Namespace(run="t-saved", limit=5)) == 0
     out = capsys.readouterr().out
-    assert "Dental Hygienist" in out and "title too different" in out
+    assert "ranked in the top 15 but dropped afterwards" in out        # the saved lists hold it and rank it
+    assert "not in the saved lists" in out and "Dental Hygienist" in out  # only the web search found it
+    assert "filtered out: title too different" in out

@@ -155,6 +155,8 @@ async def _sites(args: argparse.Namespace) -> int:
         except Exception as exc:
             print(f"  {host}: could not ask ({type(exc).__name__})")
             urls = []
+        if len(urls) >= 4000:
+            print(f"  {host}: hit the 4,000 address limit, so the list for this one may be incomplete")
         new = sites_from_urls(urls, known)
         for ident, n in sorted(new.items(), key=lambda kv: -kv[1]):
             total_new += 1

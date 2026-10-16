@@ -503,7 +503,7 @@ def cmd_gaps(args: argparse.Namespace) -> int:
         print("\nEmployers to check next (fix B). Paste these after 'cache_tools probe' to look at each one before anything is added:")
         for spec, comp in sorted(to_probe.items(), key=lambda kv: kv[1]):
             print(f"   '{spec}'   # {comp}")
-        if args.write_probes:
+        if getattr(args, "write_probes", None):
             Path(args.write_probes).write_text("".join(f"'{spec}'   # {comp}\n" for spec, comp in sorted(to_probe.items(), key=lambda kv: kv[1])))
             print(f"(written to {args.write_probes})")
     return 0

@@ -26,6 +26,7 @@ from app.config import settings
 from app.schemas.job_search import JobSearchIn
 from app.services.discovery.normalization import parse_posted_date, strip_tracking_params
 from app.services.discovery import ats
+from app.services.discovery.rerank import rerank as rerank_items
 from app.services import safe_fetch
 from app.services.safe_fetch import safe_get
 from app.services.jobcache.keys import loose_keys
@@ -849,7 +850,9 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
 
     known = known_keys or set()
     try:
-        cached = await cache_service.search_cache(criteria, known, _pool_size(criteria))
+        pool = _pool_size(criteria)
+        cached = await cache_service.search_cache(criteria, known, pool * 2)  # twice as many, so the AI second opinion can lift a good one
+        cached.items = await rerank_items(criteria, cached.items, pool)
     except Exception:  # the saved copy is a bonus: if it fails the web search still runs
         log.exception("job search: the saved employer lists could not be searched")
         cached = cache_service.CacheOutcome()

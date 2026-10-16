@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     JOB_CACHE_AUTO_REFRESH: bool = True  # False stops the app from reading employers on its own (tests turn it off)
     # "always": the AI web search runs with every search (it also finds new employers). "auto": it runs only when the
     # local copy found fewer results than asked for. "off": local copy only.
+    JOB_SEARCH_RERANK: str = "on"  # "off" skips the AI second opinion on saved-list matches
     JOB_SEARCH_AI: str = "always"
 
     # --- Discovery scheduling (spec §18) -----------------------------------

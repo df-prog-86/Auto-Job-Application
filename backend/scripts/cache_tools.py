@@ -249,15 +249,22 @@ async def _add(args: argparse.Namespace) -> int:
     """Adds employers that pass the standing rule to the saved lists and reads them. Without --apply nothing is written."""
     specs = [ln.split("#")[0].strip().strip("'") for ln in Path(args.from_file).read_text().splitlines() if ln.split("#")[0].strip()]
     cache = JobCache()
-    throttle = Throttle()
-    added: list[tuple[int, str]] = []
-    skipped = 0
-    print(f"{len(specs)} employers to check. Rule: at least {args.min_jobs} jobs, at least {args.min_us}% US, not a staffing agency. "
-          f"{'WRITING to the saved lists.' if args.apply else 'Dry run: nothing is written.'}")
-    async with make_client() as client:
-        for spec in specs:
-            system, _, ident = spec.partition(":")
-            res = None
+    throttle = Throttle()  # keeps a polite gap per website; each employer is its own website, so several can be read at once
+    gate = asyncio.Semaphore(getattr(args, "parallel", 6))
+    tally = {"added": 0, "skipped": 0}
+    print(f"{len(specs)} employers to check. Rule: at least {args.min_jobs} jobs, mostly US or unclear, not a staffing agency. "
+          f"{'WRITING to the saved lists.' if args.apply else 'Dry run: nothing is written.'}", flush=True)
+
+    async def one(spec: str, client: Any) -> None:
+        system, _, ident = spec.partition(":")
+        async with gate:
+            if args.apply:
+                with cache.session() as db:
+                    have = db.execute("SELECT 1 FROM employers WHERE ats = ? AND identifier = ?", (system, ident)).fetchone()
+                if have:
+                    print(f"  HAVE  {spec}  already in the saved lists", flush=True)
+                    return
+            res, err = None, ""
             for attempt in (1, 2):  # one retry: a read that fails once (a busy site) often works a few seconds later
                 try:
                     res = await read_employer(system, ident, client, throttle)
@@ -267,26 +274,27 @@ async def _add(args: argparse.Namespace) -> int:
                     if attempt == 1:
                         await asyncio.sleep(8)
             if res is None:
-                skipped += 1
-                print(f"  SKIP  {spec}  could not be read ({err})")
-                continue
+                tally["skipped"] += 1
+                print(f"  SKIP  {spec}  could not be read ({err})", flush=True)
+                return
             ok, why = add_decision(system, ident, res.postings, args)
             if not ok:
-                skipped += 1
-                print(f"  SKIP  {spec}  {why}")
-                continue
+                tally["skipped"] += 1
+                print(f"  SKIP  {spec}  {why}", flush=True)
+                return
             if args.apply:
                 eid, created = cache.upsert_employer(system, ident, res.name or "", args.source)
                 if created:
                     cache.apply_refresh(eid, res.postings, now_ts(), 6.0, res.complete)
-                    added.append((eid, spec))
-                    print(f"  ADDED {spec}  {why}")
-                else:
-                    print(f"  HAVE  {spec}  already in the saved lists")
+                tally["added"] += 1
+                print(f"  ADDED {spec}  {why}", flush=True)
             else:
-                added.append((0, spec))
-                print(f"  ADD   {spec}  {why}")
-    print(f"\n{len(added)} {'added' if args.apply else 'would be added'}, {skipped} skipped.")
+                tally["added"] += 1
+                print(f"  ADD   {spec}  {why}", flush=True)
+
+    async with make_client() as client:
+        await asyncio.gather(*(one(s, client) for s in specs))
+    print(f"\n{tally['added']} {'added' if args.apply else 'would be added'}, {tally['skipped']} skipped.", flush=True)
     if args.apply:
         # employers whose lists stopped at Workday's old 2,000-job cutoff are read again so the rest of their jobs come in
         with cache.session() as db:
@@ -296,8 +304,8 @@ async def _add(args: argparse.Namespace) -> int:
         if capped:
             from app.services.jobcache import service
 
-            print(f"Reading {len(capped)} large Workday employer(s) again to pick up jobs past the old 2,000 cutoff ...")
-            print(service.run_refresh(only_ids=capped, limit=len(capped), seed=False))
+            print(f"Reading {len(capped)} large Workday employer(s) again to pick up jobs past the old 2,000 cutoff ...", flush=True)
+            print(service.run_refresh(only_ids=capped, limit=len(capped), seed=False), flush=True)
     return 0
 
 
@@ -450,6 +458,7 @@ def main() -> None:
     ad.add_argument("--include", action="append", help="add any employer whose address contains this text without the place check (repeatable)")
     ad.add_argument("--skip", action="append", help="leave out any employer whose address contains this text (repeatable)")
     ad.add_argument("--source", default="curated")
+    ad.add_argument("--parallel", type=int, default=6, help="employers read at the same time (each is a different website)")
     pr = sub.add_parser("probe")
     pr.add_argument("--from-file", help="a file of specs, one per line (what 'eval_search gaps --write-probes' writes)")
     pr.add_argument("employers", nargs="*", help="system:identifier, e.g. 'workday:bilh.wd1.myworkdayjobs.com|bilh|external'")

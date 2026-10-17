@@ -1158,7 +1158,7 @@ async def test_add_command_applies_the_standing_rule(tmp_path, monkeypatch):
     monkeypatch.setattr(cache_tools, "read_employer", fake)
     f = tmp_path / "p.txt"
     f.write_text("'greenhouse:good'  # a\n'greenhouse:abroad'\n'greenhouse:tiny'\n'greenhouse:staffing'\n")
-    ns = lambda apply: argparse.Namespace(from_file=str(f), apply=apply, min_jobs=10, min_us=60, skip=["staffing"], include=None, source="curated")
+    ns = lambda apply: argparse.Namespace(from_file=str(f), apply=apply, min_jobs=10, min_us=60, skip=["staffing"], include=None, source="curated", parallel=3)
     assert await cache_tools._add(ns(False)) == 0
     assert JobCache().list_employers() == []                     # a dry run writes nothing
     assert await cache_tools._add(ns(True)) == 0

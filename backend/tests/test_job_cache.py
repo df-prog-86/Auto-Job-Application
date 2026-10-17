@@ -1136,7 +1136,7 @@ def test_probe_row_summarizes_an_employer_on_one_line():
     ps = [PostingIn(ext_id="1", title="Revenue Cycle Analyst", url="u1", location="Boston, MA"),
           PostingIn(ext_id="2", title="Gardener", url="u2", location="London, United Kingdom")]
     row = cache_tools.probe_row("greenhouse:acme", ps, True, [])
-    assert "jobs 2" in row and "US 50%" in row and "focus-title 1" in row and "PARTIAL" not in row
+    assert "jobs 2" in row and "US 50%" in row and "foreign 50%" in row and "focus-title 1" in row and "PARTIAL" not in row
     assert "PARTIAL" in cache_tools.probe_row("greenhouse:acme", ps, False, ["note"])
 
 
@@ -1158,10 +1158,18 @@ async def test_add_command_applies_the_standing_rule(tmp_path, monkeypatch):
     monkeypatch.setattr(cache_tools, "read_employer", fake)
     f = tmp_path / "p.txt"
     f.write_text("'greenhouse:good'  # a\n'greenhouse:abroad'\n'greenhouse:tiny'\n'greenhouse:staffing'\n")
-    ns = lambda apply: argparse.Namespace(from_file=str(f), apply=apply, min_jobs=10, min_us=60, skip=["staffing"], source="curated")
+    ns = lambda apply: argparse.Namespace(from_file=str(f), apply=apply, min_jobs=10, min_us=60, skip=["staffing"], include=None, source="curated")
     assert await cache_tools._add(ns(False)) == 0
     assert JobCache().list_employers() == []                     # a dry run writes nothing
     assert await cache_tools._add(ns(True)) == 0
     got = JobCache().list_employers()
     assert [e["identifier"] for e in got] == ["good"] and got[0]["source"] == "curated"
     assert JobCache().counts()["postings"] == 12
+
+
+def test_place_text_is_told_apart_by_state_name_country_or_neither():
+    from scripts import cache_tools as c
+
+    assert [c.location_kind(x) for x in ["Boston, Massachusetts", "Boston-MA", "Remote US", "United States of America : Remote", "London, KY"]] == ["us"] * 5
+    assert [c.location_kind(x) for x in ["London, United Kingdom", "Remote Poland", "Singapore, Singapore", "Toronto, Ontario, Canada"]] == ["foreign"] * 4
+    assert [c.location_kind(x) for x in ["Main Campus", "2 Locations", None, "Remote"]] == ["unknown"] * 4

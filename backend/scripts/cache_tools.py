@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -149,22 +150,45 @@ _FOCUS = ("revenue cycle", "billing", "coding", "denial", "claims", "collections
           "payer", "consult", "healthcare", "health care", "clinical", "nurse")
 
 
+_FOREIGN = re.compile(
+    r"\b(canada|united kingdom|uk|england|scotland|wales|ireland|india|china|japan|germany|france|spain|italy|netherlands|poland|mexico|brazil|"
+    r"argentina|australia|new zealand|singapore|hong kong|philippines|israel|korea|taiwan|vietnam|thailand|malaysia|indonesia|south africa|egypt|"
+    r"saudi arabia|uae|emirates|turkey|sweden|norway|denmark|finland|belgium|switzerland|austria|portugal|czech|czechia|romania|hungary|colombia|"
+    r"chile|peru|costa rica|ontario|quebec|british columbia|alberta|london|paris|dublin|toronto|vancouver|bangalore|bengaluru|mumbai|pune|hyderabad|"
+    r"chennai|gurgaon|gurugram|noida|sydney|melbourne|tokyo|shanghai|beijing|manila|warsaw|krakow|berlin|munich|amsterdam|madrid|barcelona|milan|"
+    r"rome|zurich|stockholm|copenhagen|oslo|apac|emea|latam)\b", re.I)
+
+
+def location_kind(loc: str | None) -> str:
+    """'us', 'foreign' or 'unknown' for one posting's place text. A US state (short or full name) or "United States" wins over a foreign-looking name."""
+    from app.services.jobcache.text import STATE_BY_NAME, US_STATES, fold
+
+    loc = loc or ""
+    low = fold(loc)
+    if (
+        "united states" in low or re.search(r"\bUSA?\b", loc)
+        or any(tok in US_STATES for tok in re.findall(r"(?<![A-Za-z])[A-Z]{2}(?![A-Za-z])", loc))
+        or any(re.search(rf"\b{re.escape(name)}\b", low) for name in STATE_BY_NAME)
+    ):
+        return "us"
+    return "foreign" if _FOREIGN.search(loc) else "unknown"
+
+
+def us_stats(postings: list) -> tuple[int, int]:
+    """(percent clearly US, percent clearly foreign); the rest could not be told from the place text (a hospital campus name, say)."""
+    kinds = [location_kind(p.location) for p in postings]
+    n = max(len(kinds), 1)
+    return kinds.count("us") * 100 // n, kinds.count("foreign") * 100 // n
+
+
 def probe_row(spec: str, postings: list, complete: bool, notes: list[str]) -> str:
-    """One line per employer: how many jobs, how many look US based, how many match the focus words, and sample titles."""
-    import re
-
-    from app.services.jobcache.text import US_STATES
-
-    def is_us(loc: str | None) -> bool:
-        loc = loc or ""
-        return "united states" in loc.lower() or "usa" in loc.lower() or any(t in US_STATES for t in re.findall(r"\b[A-Z]{2}\b", loc))
-
+    """One line per employer: how many jobs, how many look US based or foreign, how many match the focus words, and sample titles."""
     n = len(postings)
-    us = sum(1 for p in postings if is_us(p.location))
+    us, foreign = us_stats(postings)
     focus = sum(1 for p in postings if any(w in (p.title or "").lower() for w in _FOCUS))
     sample = " ; ".join(p.title for p in postings[:2])
     flag = "" if complete else " PARTIAL"
-    return f"{spec} | jobs {n}{flag} | US {us * 100 // max(n, 1)}% | focus-title {focus} | {sample[:110]}" + (f" | {'; '.join(notes)}" if notes else "")
+    return f"{spec} | jobs {n}{flag} | US {us}% | foreign {foreign}% | focus-title {focus} | {sample[:110]}" + (f" | {'; '.join(notes)}" if notes else "")
 
 
 async def _probe(args: argparse.Namespace) -> int:
@@ -192,23 +216,30 @@ async def _probe(args: argparse.Namespace) -> int:
 
 
 def add_decision(system: str, ident: str, postings: list, args: argparse.Namespace) -> tuple[bool, str]:
-    """The standing rule for adding an employer: reads cleanly, enough jobs, mostly US, not a staffing agency, not on the skip list."""
+    """
+    The standing rule for adding an employer: reads cleanly, enough jobs, not mostly foreign, not a staffing agency, not on the skip
+    list. Places that cannot be told (a hospital campus name) are not held against it. An employer you name with --include skips
+    the place check.
+    """
     from app.services.jobcache.agency import is_agency
     from app.services.jobcache.store import guess_name
 
-    row = probe_row(f"{system}:{ident}", postings, True, [])
     n = len(postings)
-    us = int(row.split("| US ")[1].split("%")[0])
+    us, foreign = us_stats(postings)
     name = guess_name(system, ident)
-    if any(s.lower() in f"{system}:{ident}".lower() for s in (args.skip or [])):
+    key = f"{system}:{ident}".lower()
+    if any(s.lower() in key for s in (args.skip or [])):
         return False, "on the skip list"
     if n < args.min_jobs:
         return False, f"only {n} jobs (rule: at least {args.min_jobs})"
-    if us < args.min_us:
-        return False, f"only {us}% US jobs (rule: at least {args.min_us}%)"
+    included = any(s.lower() in key for s in (getattr(args, "include", None) or []))
+    if not included and foreign > 100 - args.min_us:
+        return False, f"{foreign}% of jobs are outside the US (rule: at most {100 - args.min_us}%)"
+    if not included and us < 10 and foreign > 20:
+        return False, f"only {us}% clearly US and {foreign}% outside the US"
     if is_agency(name):
         return False, "looks like a staffing agency"
-    return True, f"{n} jobs, {us}% US"
+    return True, f"{n} jobs, {us}% US, {foreign}% outside the US" + (", named by you" if included else "")
 
 
 async def _add(args: argparse.Namespace) -> int:
@@ -223,11 +254,18 @@ async def _add(args: argparse.Namespace) -> int:
     async with make_client() as client:
         for spec in specs:
             system, _, ident = spec.partition(":")
-            try:
-                res = await read_employer(system, ident, client, throttle)
-            except Exception as exc:
+            res = None
+            for attempt in (1, 2):  # one retry: a read that fails once (a busy site) often works a few seconds later
+                try:
+                    res = await read_employer(system, ident, client, throttle)
+                    break
+                except Exception as exc:
+                    err = type(exc).__name__
+                    if attempt == 1:
+                        await asyncio.sleep(8)
+            if res is None:
                 skipped += 1
-                print(f"  SKIP  {spec}  could not be read ({type(exc).__name__})")
+                print(f"  SKIP  {spec}  could not be read ({err})")
                 continue
             ok, why = add_decision(system, ident, res.postings, args)
             if not ok:
@@ -318,6 +356,7 @@ def main() -> None:
     ad.add_argument("--apply", action="store_true", help="actually add them (without this it only shows what it would do)")
     ad.add_argument("--min-jobs", type=int, default=10)
     ad.add_argument("--min-us", type=int, default=60)
+    ad.add_argument("--include", action="append", help="add any employer whose address contains this text without the place check (repeatable)")
     ad.add_argument("--skip", action="append", help="leave out any employer whose address contains this text (repeatable)")
     ad.add_argument("--source", default="curated")
     pr = sub.add_parser("probe")

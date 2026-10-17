@@ -343,6 +343,41 @@ def parse_num_pages(text: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def urls_from_cdx(text: str) -> tuple[list[str], int]:
+    """Addresses in a Common Crawl answer (one JSON object per line). A line that is cut off or broken is skipped, not fatal; returns (addresses, lines skipped)."""
+    import json
+
+    urls: list[str] = []
+    bad = 0
+    for line in (text or "").splitlines():
+        if not line.startswith("{"):
+            continue
+        try:
+            urls.append(json.loads(line)["url"])
+        except (ValueError, KeyError, TypeError):
+            bad += 1
+    return urls, bad
+
+
+async def _cc_get(url: str, *, timeout: float, tries: int = 4):
+    """Asks Common Crawl, waiting longer between tries when it says it is busy (HTTP 429/5xx) or the connection drops. Returns (response or None, note)."""
+    from app.services.safe_fetch import safe_get
+
+    note = ""
+    for n in range(tries):
+        try:
+            r = await safe_get(url, timeout=timeout, max_bytes=12_000_000)
+            if r.status_code == 200:
+                return r, ""
+            note = f"HTTP {r.status_code}"
+            if r.status_code not in (429, 500, 502, 503, 504):
+                break
+        except Exception as exc:
+            note = type(exc).__name__
+        await asyncio.sleep(4 * (2**n))
+    return None, note
+
+
 def boards_from_urls(urls: list[str], system: str, known: set[str]) -> list[str]:
     """Distinct employer boards named by these addresses on one hiring system, as 'system:name' lines, minus those already read."""
     from app.services.jobcache.readers import employer_ref
@@ -378,6 +413,11 @@ async def _discover(args: argparse.Namespace) -> int:
     print(f"Using crawl {info[0].get('id')}.")
     rng = random.Random(args.seed)
     lines: list[str] = []
+    before: set[str] = set()
+    for prev in args.exclude or []:
+        pp = Path(prev).expanduser()
+        if pp.exists():
+            before |= {ln.strip().strip("'") for ln in pp.read_text(encoding="utf-8").splitlines() if ln.strip()}
     for system in systems:
         known: set[str] = set()
         if path.exists():
@@ -385,26 +425,31 @@ async def _discover(args: argparse.Namespace) -> int:
             known = {r[0] for r in con.execute("SELECT identifier FROM employers WHERE ats = ?", (system,))}
             con.close()
         urls: list[str] = []
+        asked = failed = skipped = 0
         for host in _BOARD_HOSTS[system]:
             q = f"url={host[2:]}&matchType=domain" if host.startswith("*.") else f"url={host}/*"
-            try:
-                r = await safe_get(f"{api}?{q}&output=json&showNumPages=true", timeout=60)
-                pages = parse_num_pages(r.text)
-                if not pages:
-                    print(f"  {system} {host}: no page count (answer began: {r.text[:80]!r}); reading the first page only")
-            except Exception as exc:
-                print(f"  {system} {host}: could not ask ({type(exc).__name__})")
-                continue
+            r, note = await _cc_get(f"{api}?{q}&output=json&showNumPages=true", timeout=60)
+            pages = parse_num_pages(r.text) if r is not None else 0
+            if r is None:
+                print(f"  {system} {host}: could not ask ({note}); reading the first page only")
+            elif not pages:
+                print(f"  {system} {host}: no page count (answer began: {r.text[:80]!r}); reading the first page only")
             picks = rng.sample(range(pages), min(args.pages, pages)) if pages else [0]
             for pg in picks:
-                try:
-                    r = await safe_get(f"{api}?{q}&output=json&fl=url&filter=status:200&page={pg}", timeout=90)
-                    urls += [json.loads(line)["url"] for line in r.text.splitlines() if line.startswith("{")]
-                except Exception as exc:
-                    print(f"    {system} page {pg}: could not ask ({type(exc).__name__})")
+                asked += 1
+                r, note = await _cc_get(f"{api}?{q}&output=json&fl=url&filter=status:200&page={pg}", timeout=120)
+                if r is None:
+                    failed += 1
+                    print(f"    {system} page {pg}: gave up ({note})")
+                else:
+                    got, bad = urls_from_cdx(r.text)
+                    urls += got
+                    skipped += bad
                 await asyncio.sleep(1.5)  # a polite gap between questions
-        found = boards_from_urls(urls, system, known)[: args.limit]
-        print(f"  {system}: {len(urls)} addresses seen, {len(found)} new boards ({len(known)} already read)")
+        found = [b for b in boards_from_urls(urls, system, known) if b not in before]
+        if args.limit:
+            found = found[: args.limit]
+        print(f"  {system}: {len(urls)} addresses seen, {len(found)} new boards ({len(known)} already read); questions {asked}, failed {failed}, broken lines skipped {skipped}")
         lines += [f"'{spec}'\n" for spec in found]
     Path(args.out).expanduser().write_text("".join(lines), encoding="utf-8")
     print(f"\n{len(lines)} new boards written to {args.out}. Nothing was added; check them with: cache_tools add --from-file {args.out}")
@@ -469,7 +514,8 @@ def main() -> None:
     dc.add_argument("--system", required=True, help="greenhouse, lever, ashby, smartrecruiters, workable, jobvite, bamboohr, breezy, jazzhr, pinpoint (comma separated) or all")
     dc.add_argument("--db")
     dc.add_argument("--pages", type=int, default=6, help="random index pages to read per address")
-    dc.add_argument("--limit", type=int, default=300, help="most boards to write")
+    dc.add_argument("--limit", type=int, default=300, help="most boards to write per hiring system (0 = no limit)")
+    dc.add_argument("--exclude", action="append", help="a file from an earlier discover run; boards in it are left out so each run finds new ones (repeatable)")
     dc.add_argument("--seed", type=int, default=1)
     dc.add_argument("--out", default="/tmp/discovered.txt")
     ad = sub.add_parser("add")

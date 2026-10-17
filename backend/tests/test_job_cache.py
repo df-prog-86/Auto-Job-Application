@@ -1194,3 +1194,12 @@ def test_parse_num_pages():
     assert parse_num_pages("Number of pages: 7") == 7
     assert parse_num_pages("<html>Too many requests</html>") == 0
     assert parse_num_pages("") == 0
+
+
+def test_urls_from_cdx_skips_broken_lines():
+    from scripts.cache_tools import urls_from_cdx
+
+    text = '{"url": "https://a.bamboohr.com/careers"}\n{"url": "https://b.bamboohr.com/care'
+    got, bad = urls_from_cdx(text)
+    assert got == ["https://a.bamboohr.com/careers"] and bad == 1
+    assert urls_from_cdx("")[0] == []

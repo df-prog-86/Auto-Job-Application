@@ -1138,3 +1138,30 @@ def test_probe_row_summarizes_an_employer_on_one_line():
     row = cache_tools.probe_row("greenhouse:acme", ps, True, [])
     assert "jobs 2" in row and "US 50%" in row and "focus-title 1" in row and "PARTIAL" not in row
     assert "PARTIAL" in cache_tools.probe_row("greenhouse:acme", ps, False, ["note"])
+
+
+async def test_add_command_applies_the_standing_rule(tmp_path, monkeypatch):
+    import argparse
+
+    from app.services.jobcache.store import JobCache, PostingIn
+    from scripts import cache_tools
+
+    monkeypatch.setattr(cache_tools.settings, "JOB_CACHE_PATH", str(tmp_path / "live.db"))
+    big = [PostingIn(ext_id=str(i), title=f"Analyst {i}", url=f"https://job-boards.greenhouse.io/x/jobs/{i}", location="Boston, MA") for i in range(12)]
+    abroad = [PostingIn(ext_id=str(i), title=f"Analyst {i}", url=f"https://job-boards.greenhouse.io/y/jobs/{i}", location="London, United Kingdom") for i in range(12)]
+
+    async def fake(system, ident, client, throttle):
+        from app.services.jobcache.readers import ReadResult
+
+        return ReadResult({"good": big, "abroad": abroad, "tiny": big[:3], "staffing": big}[ident])
+
+    monkeypatch.setattr(cache_tools, "read_employer", fake)
+    f = tmp_path / "p.txt"
+    f.write_text("'greenhouse:good'  # a\n'greenhouse:abroad'\n'greenhouse:tiny'\n'greenhouse:staffing'\n")
+    ns = lambda apply: argparse.Namespace(from_file=str(f), apply=apply, min_jobs=10, min_us=60, skip=["staffing"], source="curated")
+    assert await cache_tools._add(ns(False)) == 0
+    assert JobCache().list_employers() == []                     # a dry run writes nothing
+    assert await cache_tools._add(ns(True)) == 0
+    got = JobCache().list_employers()
+    assert [e["identifier"] for e in got] == ["good"] and got[0]["source"] == "curated"
+    assert JobCache().counts()["postings"] == 12

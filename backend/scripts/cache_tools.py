@@ -11,6 +11,9 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
   python -m scripts.cache_tools probe 'workday:HOST|TENANT|SITE' ...
                                                           # reads those employers' public job lists and prints counts and sample titles.
                                                           # Saves nothing; this is how a candidate is checked before it is added.
+  python -m scripts.cache_tools add --from-file FILE [--apply] [--skip TEXT]
+                                                          # adds the employers in FILE that pass the standing rule (reads cleanly, enough jobs,
+                                                          # mostly US, not an agency) and reads them. Dry run unless --apply. Stop the app first.
   python -m scripts.cache_tools sites [--db PATH] [--max-hosts 60]
                                                           # asks Common Crawl's public web index which OTHER career sites each Workday
                                                           # employer we already read has (one company often runs several). Read only:
@@ -188,6 +191,75 @@ async def _probe(args: argparse.Namespace) -> int:
     return 0
 
 
+def add_decision(system: str, ident: str, postings: list, args: argparse.Namespace) -> tuple[bool, str]:
+    """The standing rule for adding an employer: reads cleanly, enough jobs, mostly US, not a staffing agency, not on the skip list."""
+    from app.services.jobcache.agency import is_agency
+    from app.services.jobcache.store import guess_name
+
+    row = probe_row(f"{system}:{ident}", postings, True, [])
+    n = len(postings)
+    us = int(row.split("| US ")[1].split("%")[0])
+    name = guess_name(system, ident)
+    if any(s.lower() in f"{system}:{ident}".lower() for s in (args.skip or [])):
+        return False, "on the skip list"
+    if n < args.min_jobs:
+        return False, f"only {n} jobs (rule: at least {args.min_jobs})"
+    if us < args.min_us:
+        return False, f"only {us}% US jobs (rule: at least {args.min_us}%)"
+    if is_agency(name):
+        return False, "looks like a staffing agency"
+    return True, f"{n} jobs, {us}% US"
+
+
+async def _add(args: argparse.Namespace) -> int:
+    """Adds employers that pass the standing rule to the saved lists and reads them. Without --apply nothing is written."""
+    specs = [ln.split("#")[0].strip().strip("'") for ln in Path(args.from_file).read_text().splitlines() if ln.split("#")[0].strip()]
+    cache = JobCache()
+    throttle = Throttle()
+    added: list[tuple[int, str]] = []
+    skipped = 0
+    print(f"{len(specs)} employers to check. Rule: at least {args.min_jobs} jobs, at least {args.min_us}% US, not a staffing agency. "
+          f"{'WRITING to the saved lists.' if args.apply else 'Dry run: nothing is written.'}")
+    async with make_client() as client:
+        for spec in specs:
+            system, _, ident = spec.partition(":")
+            try:
+                res = await read_employer(system, ident, client, throttle)
+            except Exception as exc:
+                skipped += 1
+                print(f"  SKIP  {spec}  could not be read ({type(exc).__name__})")
+                continue
+            ok, why = add_decision(system, ident, res.postings, args)
+            if not ok:
+                skipped += 1
+                print(f"  SKIP  {spec}  {why}")
+                continue
+            if args.apply:
+                eid, created = cache.upsert_employer(system, ident, res.name or "", args.source)
+                if created:
+                    cache.apply_refresh(eid, res.postings, now_ts(), 6.0, res.complete)
+                    added.append((eid, spec))
+                    print(f"  ADDED {spec}  {why}")
+                else:
+                    print(f"  HAVE  {spec}  already in the saved lists")
+            else:
+                added.append((0, spec))
+                print(f"  ADD   {spec}  {why}")
+    print(f"\n{len(added)} {'added' if args.apply else 'would be added'}, {skipped} skipped.")
+    if args.apply:
+        # employers whose lists stopped at Workday's old 2,000-job cutoff are read again so the rest of their jobs come in
+        with cache.session() as db:
+            capped = [r["id"] for r in db.execute(
+                "SELECT e.id FROM employers e WHERE e.ats = 'workday' AND e.enabled = 1 AND "
+                "(SELECT COUNT(*) FROM postings p WHERE p.employer_id = e.id AND p.closed_at IS NULL) = 2000")]
+        if capped:
+            from app.services.jobcache import service
+
+            print(f"Reading {len(capped)} large Workday employer(s) again to pick up jobs past the old 2,000 cutoff ...")
+            print(service.run_refresh(only_ids=capped, limit=len(capped), seed=False))
+    return 0
+
+
 async def _sites(args: argparse.Namespace) -> int:
     import json
 
@@ -241,12 +313,21 @@ def main() -> None:
     s = sub.add_parser("sites")
     s.add_argument("--db")
     s.add_argument("--max-hosts", type=int, default=60)
+    ad = sub.add_parser("add")
+    ad.add_argument("--from-file", required=True)
+    ad.add_argument("--apply", action="store_true", help="actually add them (without this it only shows what it would do)")
+    ad.add_argument("--min-jobs", type=int, default=10)
+    ad.add_argument("--min-us", type=int, default=60)
+    ad.add_argument("--skip", action="append", help="leave out any employer whose address contains this text (repeatable)")
+    ad.add_argument("--source", default="curated")
     pr = sub.add_parser("probe")
     pr.add_argument("--from-file", help="a file of specs, one per line (what 'eval_search gaps --write-probes' writes)")
     pr.add_argument("employers", nargs="*", help="system:identifier, e.g. 'workday:bilh.wd1.myworkdayjobs.com|bilh|external'")
     pr.add_argument("--samples", type=int, default=8, help="(no longer used)")
     pr.add_argument("--out", help="also save the table to this file")
     args = p.parse_args()
+    if args.cmd == "add":
+        sys.exit(asyncio.run(_add(args)))
     if args.cmd == "probe":
         sys.exit(asyncio.run(_probe(args)))
     if args.cmd == "sites":

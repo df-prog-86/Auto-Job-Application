@@ -423,6 +423,7 @@ async def _sites(args: argparse.Namespace) -> int:
 
 
 def main() -> None:
+    sys.stdout.reconfigure(line_buffering=True)  # show each line as it happens, even when piped to a file or tee
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("coverage")

@@ -527,6 +527,7 @@ def cmd_score(args: argparse.Namespace) -> int:
 
 
 def main() -> None:
+    sys.stdout.reconfigure(line_buffering=True)  # show each line as it happens, even when piped to a file or tee
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("snapshot", help="freeze a copy of the saved job lists")

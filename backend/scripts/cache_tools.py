@@ -265,14 +265,14 @@ async def _add(args: argparse.Namespace) -> int:
                     print(f"  HAVE  {spec}  already in the saved lists", flush=True)
                     return
             res, err = None, ""
-            for attempt in (1, 2):  # one retry: a read that fails once (a busy site) often works a few seconds later
+            for attempt in (1, 2, 3):  # a read that fails once (a busy site, a 504) often works a little later
                 try:
                     res = await read_employer(system, ident, client, throttle)
                     break
                 except Exception as exc:
-                    err = type(exc).__name__
-                    if attempt == 1:
-                        await asyncio.sleep(8)
+                    err = f"{type(exc).__name__}: {str(exc)[:70]}".strip(": ")
+                    if attempt < 3:
+                        await asyncio.sleep(6 if attempt == 1 else 20)
             if res is None:
                 tally["skipped"] += 1
                 print(f"  SKIP  {spec}  could not be read ({err})", flush=True)

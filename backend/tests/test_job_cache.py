@@ -1184,3 +1184,13 @@ def test_boards_from_urls_lists_new_boards_once_each():
         "https://boards.greenhouse.io/embed/job_board",
     ]
     assert cache_tools.boards_from_urls(urls, "greenhouse", {"known"}) == ["greenhouse:acme", "greenhouse:newco"]
+
+
+def test_parse_num_pages():
+    from scripts.cache_tools import parse_num_pages
+
+    assert parse_num_pages('{"pages": 12, "pageSize": 5}') == 12
+    assert parse_num_pages("12") == 12
+    assert parse_num_pages("Number of pages: 7") == 7
+    assert parse_num_pages("<html>Too many requests</html>") == 0
+    assert parse_num_pages("") == 0

@@ -323,6 +323,26 @@ _BOARD_HOSTS = {  # where each system's public job-board addresses live; "*.x.co
 }
 
 
+def parse_num_pages(text: str) -> int:
+    """How many index pages Common Crawl says a search has. Accepts its JSON line, or a bare number; 0 when it says neither."""
+    import json
+    import re
+
+    head = (text or "").strip().splitlines()[:1]
+    if not head:
+        return 0
+    try:
+        got = json.loads(head[0])
+        if isinstance(got, dict):
+            return int(got.get("pages", 0) or 0)
+        if isinstance(got, int):
+            return got
+    except ValueError:
+        pass
+    m = re.search(r"pages\D{0,6}(\d+)", head[0], re.I) or re.fullmatch(r"\s*(\d+)\s*", head[0])
+    return int(m.group(1)) if m else 0
+
+
 def boards_from_urls(urls: list[str], system: str, known: set[str]) -> list[str]:
     """Distinct employer boards named by these addresses on one hiring system, as 'system:name' lines, minus those already read."""
     from app.services.jobcache.readers import employer_ref
@@ -369,11 +389,13 @@ async def _discover(args: argparse.Namespace) -> int:
             q = f"url={host[2:]}&matchType=domain" if host.startswith("*.") else f"url={host}/*"
             try:
                 r = await safe_get(f"{api}?{q}&output=json&showNumPages=true", timeout=60)
-                pages = int(json.loads(r.text.splitlines()[0]).get("pages", 0))
+                pages = parse_num_pages(r.text)
+                if not pages:
+                    print(f"  {system} {host}: no page count (answer began: {r.text[:80]!r}); reading the first page only")
             except Exception as exc:
                 print(f"  {system} {host}: could not ask ({type(exc).__name__})")
                 continue
-            picks = rng.sample(range(pages), min(args.pages, pages)) if pages else []
+            picks = rng.sample(range(pages), min(args.pages, pages)) if pages else [0]
             for pg in picks:
                 try:
                     r = await safe_get(f"{api}?{q}&output=json&fl=url&filter=status:200&page={pg}", timeout=90)

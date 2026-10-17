@@ -14,7 +14,7 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
   python -m scripts.cache_tools add --from-file FILE [--apply] [--skip TEXT]
                                                           # adds the employers in FILE that pass the standing rule (reads cleanly, enough jobs,
                                                           # mostly US, not an agency) and reads them. Dry run unless --apply. Stop the app first.
-  python -m scripts.cache_tools discover --system greenhouse|lever|ashby [--pages 6] [--limit 300] [--out FILE]
+  python -m scripts.cache_tools discover --system greenhouse,lever,...|all [--pages 6] [--limit 300] [--out FILE]
                                                           # asks Common Crawl for employer boards we do not read yet and writes them to FILE.
                                                           # Read only; check them afterwards with 'add --from-file FILE' (a dry run).
   python -m scripts.cache_tools sites [--db PATH] [--max-hosts 60]
@@ -301,10 +301,17 @@ async def _add(args: argparse.Namespace) -> int:
     return 0
 
 
-_BOARD_HOSTS = {
+_BOARD_HOSTS = {  # where each system's public job-board addresses live; "*.x.com" means every subdomain
     "greenhouse": ("boards.greenhouse.io", "job-boards.greenhouse.io"),
     "lever": ("jobs.lever.co",),
     "ashby": ("jobs.ashbyhq.com",),
+    "smartrecruiters": ("jobs.smartrecruiters.com",),
+    "workable": ("apply.workable.com",),
+    "jobvite": ("jobs.jobvite.com",),
+    "bamboohr": ("*.bamboohr.com",),
+    "breezy": ("*.breezy.hr",),
+    "jazzhr": ("*.applytojob.com",),
+    "pinpoint": ("*.pinpointhq.com",),
 }
 
 
@@ -328,40 +335,49 @@ async def _discover(args: argparse.Namespace) -> int:
 
     from app.services.safe_fetch import safe_get
 
+    systems = sorted(_BOARD_HOSTS) if args.system == "all" else [s.strip() for s in args.system.split(",")]
+    bad = [s for s in systems if s not in _BOARD_HOSTS]
+    if bad:
+        print(f"Not a system I can look for: {', '.join(bad)}. Choose from: {', '.join(sorted(_BOARD_HOSTS))}, or all.")
+        return 1
     path = Path(args.db or settings.JOB_CACHE_PATH)
-    known: set[str] = set()
-    if path.exists():
-        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-        known = {r[0] for r in con.execute("SELECT identifier FROM employers WHERE ats = ?", (args.system,))}
-        con.close()
     try:
         info = json.loads((await safe_get("https://index.commoncrawl.org/collinfo.json", timeout=30)).text)
         api = info[0]["cdx-api"]
     except Exception as exc:
         print(f"Could not reach Common Crawl's index ({exc}). Nothing was changed.")
         return 1
-    print(f"Using crawl {info[0].get('id')}. Looking for {args.system} boards we do not read yet ({len(known)} already read).")
+    print(f"Using crawl {info[0].get('id')}.")
     rng = random.Random(args.seed)
-    urls: list[str] = []
-    for host in _BOARD_HOSTS[args.system]:
-        try:
-            r = await safe_get(f"{api}?url={host}/*&output=json&showNumPages=true", timeout=60)
-            pages = int(json.loads(r.text.splitlines()[0]).get("pages", 0))
-        except Exception as exc:
-            print(f"  {host}: could not ask ({type(exc).__name__})")
-            continue
-        picks = rng.sample(range(pages), min(args.pages, pages)) if pages else []
-        print(f"  {host}: {pages} index pages; reading {len(picks)} random ones")
-        for pg in picks:
+    lines: list[str] = []
+    for system in systems:
+        known: set[str] = set()
+        if path.exists():
+            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            known = {r[0] for r in con.execute("SELECT identifier FROM employers WHERE ats = ?", (system,))}
+            con.close()
+        urls: list[str] = []
+        for host in _BOARD_HOSTS[system]:
+            q = f"url={host[2:]}&matchType=domain" if host.startswith("*.") else f"url={host}/*"
             try:
-                r = await safe_get(f"{api}?url={host}/*&output=json&fl=url&filter=status:200&page={pg}", timeout=90)
-                urls += [json.loads(line)["url"] for line in r.text.splitlines() if line.startswith("{")]
+                r = await safe_get(f"{api}?{q}&output=json&showNumPages=true", timeout=60)
+                pages = int(json.loads(r.text.splitlines()[0]).get("pages", 0))
             except Exception as exc:
-                print(f"    page {pg}: could not ask ({type(exc).__name__})")
-            await asyncio.sleep(1.5)  # a polite gap between questions
-    found = boards_from_urls(urls, args.system, known)[: args.limit]
-    Path(args.out).expanduser().write_text("".join(f"'{spec}'\n" for spec in found), encoding="utf-8")
-    print(f"\n{len(urls)} addresses seen; {len(found)} new boards written to {args.out}. Nothing was added; check them with: cache_tools add --from-file {args.out}")
+                print(f"  {system} {host}: could not ask ({type(exc).__name__})")
+                continue
+            picks = rng.sample(range(pages), min(args.pages, pages)) if pages else []
+            for pg in picks:
+                try:
+                    r = await safe_get(f"{api}?{q}&output=json&fl=url&filter=status:200&page={pg}", timeout=90)
+                    urls += [json.loads(line)["url"] for line in r.text.splitlines() if line.startswith("{")]
+                except Exception as exc:
+                    print(f"    {system} page {pg}: could not ask ({type(exc).__name__})")
+                await asyncio.sleep(1.5)  # a polite gap between questions
+        found = boards_from_urls(urls, system, known)[: args.limit]
+        print(f"  {system}: {len(urls)} addresses seen, {len(found)} new boards ({len(known)} already read)")
+        lines += [f"'{spec}'\n" for spec in found]
+    Path(args.out).expanduser().write_text("".join(lines), encoding="utf-8")
+    print(f"\n{len(lines)} new boards written to {args.out}. Nothing was added; check them with: cache_tools add --from-file {args.out}")
     return 0
 
 
@@ -419,7 +435,7 @@ def main() -> None:
     s.add_argument("--db")
     s.add_argument("--max-hosts", type=int, default=60)
     dc = sub.add_parser("discover")
-    dc.add_argument("--system", choices=sorted(_BOARD_HOSTS), required=True)
+    dc.add_argument("--system", required=True, help="greenhouse, lever, ashby, smartrecruiters, workable, jobvite, bamboohr, breezy, jazzhr, pinpoint (comma separated) or all")
     dc.add_argument("--db")
     dc.add_argument("--pages", type=int, default=6, help="random index pages to read per address")
     dc.add_argument("--limit", type=int, default=300, help="most boards to write")

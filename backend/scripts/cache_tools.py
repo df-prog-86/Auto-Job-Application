@@ -14,6 +14,9 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
   python -m scripts.cache_tools add --from-file FILE [--apply] [--skip TEXT]
                                                           # adds the employers in FILE that pass the standing rule (reads cleanly, enough jobs,
                                                           # mostly US, not an agency) and reads them. Dry run unless --apply. Stop the app first.
+  python -m scripts.cache_tools discover --system greenhouse|lever|ashby [--pages 6] [--limit 300] [--out FILE]
+                                                          # asks Common Crawl for employer boards we do not read yet and writes them to FILE.
+                                                          # Read only; check them afterwards with 'add --from-file FILE' (a dry run).
   python -m scripts.cache_tools sites [--db PATH] [--max-hosts 60]
                                                           # asks Common Crawl's public web index which OTHER career sites each Workday
                                                           # employer we already read has (one company often runs several). Read only:
@@ -298,6 +301,70 @@ async def _add(args: argparse.Namespace) -> int:
     return 0
 
 
+_BOARD_HOSTS = {
+    "greenhouse": ("boards.greenhouse.io", "job-boards.greenhouse.io"),
+    "lever": ("jobs.lever.co",),
+    "ashby": ("jobs.ashbyhq.com",),
+}
+
+
+def boards_from_urls(urls: list[str], system: str, known: set[str]) -> list[str]:
+    """Distinct employer boards named by these addresses on one hiring system, as 'system:name' lines, minus those already read."""
+    from app.services.jobcache.readers import employer_ref
+
+    have = {k.lower() for k in known}
+    seen: dict[str, str] = {}
+    for u in urls:
+        ref = employer_ref(u)
+        if ref and ref[0] == system and ref[1].lower() not in have:
+            seen.setdefault(ref[1].lower(), f"{system}:{ref[1]}")
+    return sorted(seen.values())
+
+
+async def _discover(args: argparse.Namespace) -> int:
+    """Asks Common Crawl for employer boards we do not read yet and writes them to a file for 'add' to check. Read only."""
+    import json
+    import random
+
+    from app.services.safe_fetch import safe_get
+
+    path = Path(args.db or settings.JOB_CACHE_PATH)
+    known: set[str] = set()
+    if path.exists():
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        known = {r[0] for r in con.execute("SELECT identifier FROM employers WHERE ats = ?", (args.system,))}
+        con.close()
+    try:
+        info = json.loads((await safe_get("https://index.commoncrawl.org/collinfo.json", timeout=30)).text)
+        api = info[0]["cdx-api"]
+    except Exception as exc:
+        print(f"Could not reach Common Crawl's index ({exc}). Nothing was changed.")
+        return 1
+    print(f"Using crawl {info[0].get('id')}. Looking for {args.system} boards we do not read yet ({len(known)} already read).")
+    rng = random.Random(args.seed)
+    urls: list[str] = []
+    for host in _BOARD_HOSTS[args.system]:
+        try:
+            r = await safe_get(f"{api}?url={host}/*&output=json&showNumPages=true", timeout=60)
+            pages = int(json.loads(r.text.splitlines()[0]).get("pages", 0))
+        except Exception as exc:
+            print(f"  {host}: could not ask ({type(exc).__name__})")
+            continue
+        picks = rng.sample(range(pages), min(args.pages, pages)) if pages else []
+        print(f"  {host}: {pages} index pages; reading {len(picks)} random ones")
+        for pg in picks:
+            try:
+                r = await safe_get(f"{api}?url={host}/*&output=json&fl=url&filter=status:200&page={pg}", timeout=90)
+                urls += [json.loads(line)["url"] for line in r.text.splitlines() if line.startswith("{")]
+            except Exception as exc:
+                print(f"    page {pg}: could not ask ({type(exc).__name__})")
+            await asyncio.sleep(1.5)  # a polite gap between questions
+    found = boards_from_urls(urls, args.system, known)[: args.limit]
+    Path(args.out).expanduser().write_text("".join(f"'{spec}'\n" for spec in found), encoding="utf-8")
+    print(f"\n{len(urls)} addresses seen; {len(found)} new boards written to {args.out}. Nothing was added; check them with: cache_tools add --from-file {args.out}")
+    return 0
+
+
 async def _sites(args: argparse.Namespace) -> int:
     import json
 
@@ -351,6 +418,13 @@ def main() -> None:
     s = sub.add_parser("sites")
     s.add_argument("--db")
     s.add_argument("--max-hosts", type=int, default=60)
+    dc = sub.add_parser("discover")
+    dc.add_argument("--system", choices=sorted(_BOARD_HOSTS), required=True)
+    dc.add_argument("--db")
+    dc.add_argument("--pages", type=int, default=6, help="random index pages to read per address")
+    dc.add_argument("--limit", type=int, default=300, help="most boards to write")
+    dc.add_argument("--seed", type=int, default=1)
+    dc.add_argument("--out", default="/tmp/discovered.txt")
     ad = sub.add_parser("add")
     ad.add_argument("--from-file", required=True)
     ad.add_argument("--apply", action="store_true", help="actually add them (without this it only shows what it would do)")
@@ -365,6 +439,8 @@ def main() -> None:
     pr.add_argument("--samples", type=int, default=8, help="(no longer used)")
     pr.add_argument("--out", help="also save the table to this file")
     args = p.parse_args()
+    if args.cmd == "discover":
+        sys.exit(asyncio.run(_discover(args)))
     if args.cmd == "add":
         sys.exit(asyncio.run(_add(args)))
     if args.cmd == "probe":

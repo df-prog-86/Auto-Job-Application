@@ -1173,3 +1173,14 @@ def test_place_text_is_told_apart_by_state_name_country_or_neither():
     assert [c.location_kind(x) for x in ["Boston, Massachusetts", "Boston-MA", "Remote US", "United States of America : Remote", "London, KY"]] == ["us"] * 5
     assert [c.location_kind(x) for x in ["London, United Kingdom", "Remote Poland", "Singapore, Singapore", "Toronto, Ontario, Canada"]] == ["foreign"] * 4
     assert [c.location_kind(x) for x in ["Main Campus", "2 Locations", None, "Remote"]] == ["unknown"] * 4
+
+
+def test_boards_from_urls_lists_new_boards_once_each():
+    from scripts import cache_tools
+
+    urls = [
+        "https://boards.greenhouse.io/acme/jobs/1", "https://job-boards.greenhouse.io/Acme/jobs/2",
+        "https://boards.greenhouse.io/newco/jobs/9", "https://boards.greenhouse.io/known", "https://jobs.lever.co/other/1",
+        "https://boards.greenhouse.io/embed/job_board",
+    ]
+    assert cache_tools.boards_from_urls(urls, "greenhouse", {"known"}) == ["greenhouse:acme", "greenhouse:newco"]

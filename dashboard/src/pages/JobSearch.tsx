@@ -1,15 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 import { api, ApiError } from "@/api/client";
 import { ChipInput } from "@/components/ChipInput";
 import { MenuItem, MoreMenu } from "@/components/MoreMenu";
 import { SuggestInput } from "@/components/Suggest";
-import { PageHeader } from "@/components/PageHeader";
-import { CoverageCard, EmployersPanel } from "@/components/JobSources";
-import { FitPill, MatchPanel, scoreColor } from "@/components/match";
-import { Button, Card, Ring } from "@/components/ui";
+import { EmployersPanel } from "@/components/JobSources";
+import { scoreColor, scoreLabel } from "@/components/match";
+import { Ring } from "@/components/ui";
 import { autofillSite } from "@/lib/autofill";
 import { formatPosted } from "@/lib/jobText";
 import type { CoverageOut, JobSearchCriteria, JobSearchResultOut } from "@/types/api";
@@ -23,12 +23,6 @@ import {
   toApiCriteria,
 } from "@/lib/searchCriteria";
 import type { SavedCriteria, SavedSearch } from "@/lib/searchCriteria";
-
-const labelClass = "mb-1.5 block text-xs font-bold text-[#5a5570]";
-const fieldClass =
-  "w-full rounded-xl border border-[#8f88bb] bg-white px-3.5 py-2.5 text-[13px] text-ink-900 placeholder:text-[#6a6585] focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200";
-const selectPill =
-  "rounded-full border border-[#8f88bb] bg-white px-3.5 py-2.5 text-[13px] font-bold text-brand-700 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200";
 
 function errorText(e: unknown): string {
   if (e instanceof ApiError) return e.message;
@@ -80,7 +74,7 @@ function sortResults(list: JobSearchResultOut[], by: SortBy): JobSearchResultOut
   });
 }
 
-type Notice = { kind: "found" | "info" | "added"; text: string };
+type Notice = { kind: "info" | "added"; text: string; jobId?: number };
 
 export function JobSearch() {
   const qc = useQueryClient();
@@ -97,7 +91,10 @@ export function JobSearch() {
   const [requireSalary, setRequireSalary] = useState(saved.requireSalary ?? false);
   const [within, setWithin] = useState<JobSearchCriteria["posted_within_days"]>(saved.within ?? 0);
   const [count, setCount] = useState(saved.count ?? 10);
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [savedOpen, setSavedOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [lastRun, setLastRun] = useState<{ found: number } | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [autofillOnly, setAutofillOnly] = useState(false);
@@ -107,7 +104,6 @@ export function JobSearch() {
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [coverage, setCoverage] = useState<CoverageOut | null>(null);
   const [moreAvailable, setMoreAvailable] = useState(0);
-  const [moreCapped, setMoreCapped] = useState(false);
   const lastCriteria = useRef<JobSearchCriteria | null>(null);
 
   const results = useQuery({ queryKey: ["job-search-results"], queryFn: api.listSearchResults });
@@ -129,13 +125,6 @@ export function JobSearch() {
   });
   const current = buildCriteria(titles, keywords, exclude);
   const activeSaved = savedList.find((s) => sameCriteria(s.criteria, current));
-
-  const moreCount =
-    (targetSalary.trim() ? 1 : 0) +
-    (requireSalary ? 1 : 0) +
-    (keywords.length > 0 || keywordDraft.trim() ? 1 : 0) +
-    (exclude.length > 0 || excludeDraft.trim() ? 1 : 0) +
-    (count !== 10 ? 1 : 0);
 
   /** Turns anything still typed into chips so the search and the saved copy match what is on screen. */
   const settle = () => {
@@ -166,14 +155,11 @@ export function JobSearch() {
     onSuccess: (r) => {
       setCoverage(r.coverage ?? null);
       setMoreAvailable(r.more_available ?? 0);
-      setMoreCapped(r.more_capped ?? false);
       void qc.invalidateQueries({ queryKey: ["job-employers"] });
+      setLastRun({ found: r.found });
       setNotice(
         r.found > 0
-          ? {
-              kind: "found",
-              text: `Found ${r.found} new ${r.found === 1 ? "match" : "matches"}.${r.skipped ? ` ${r.skipped} skipped (already in your jobs, already shown, no longer open, or not a real posting link).` : ""}`,
-            }
+          ? null
           : {
               kind: "info",
               text: `No new matches. ${r.skipped ? `${r.skipped} skipped because you already have them, removed them, or they are no longer open.` : "Try broader words."}`,
@@ -190,38 +176,17 @@ export function JobSearch() {
     onSuccess: (r) => {
       if (r.coverage) setCoverage(r.coverage);
       setMoreAvailable(r.more_available ?? 0);
-      setMoreCapped(r.more_capped ?? false);
-      setNotice(
-        r.found > 0
-          ? { kind: "found", text: `Added ${r.found} more ${r.found === 1 ? "match" : "matches"} from the saved employer lists.` }
-          : { kind: "info", text: "No more matches in the saved employer lists. Search again to check the web too." },
-      );
+      setNotice(r.found > 0 ? null : { kind: "info", text: "No more matches in the saved employer lists. Search again to check the web too." });
       void qc.invalidateQueries({ queryKey: ["job-search-results"] });
     },
   });
 
-  const navigate = useNavigate();
-  const [toast, setToast] = useState<{ jobId: number; title: string } | null>(null);
-  const toastHovered = useRef(false);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const armToast = () => {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => {
-      if (toastHovered.current) armToast();
-      else setToast(null);
-    }, 3000);
-  };
-  useEffect(() => () => {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-  }, []);
-
   const add = useMutation({
     mutationFn: (id: number) => api.addSearchResult(id),
     onSuccess: (r) => {
-      setToast({ jobId: r.job.id, title: r.job.title });
-      armToast();
       setNotice({
         kind: "added",
+        jobId: r.job.id,
         text: r.from_summary
           ? `Added "${r.job.title}" to Jobs, using the search summary because the posting page couldn't be read. Open the posting to check the details.`
           : `Added "${r.job.title}" to Jobs.`,
@@ -375,353 +340,182 @@ export function JobSearch() {
   const canSearch = withDraft(titles, titleDraft).join(", ").length >= 2 && !search.isPending;
   const canSave = withDraft(titles, titleDraft).length > 0 && !activeSaved;
 
+  // The job shown on the right. Falls back to the first one when the chosen job is gone (added or hidden).
+  const selected = shown.find((r) => r.id === selectedId) ?? shown[0] ?? null;
+
+  // Filters in use, shown as pills under the search bar. The place lives in the search bar itself.
+  const pills = filterChips.filter((c) => c.key !== "loc");
+
+  /** The one line above the results: what was searched and how many matches there are. */
+  let status = "";
+  if (search.isPending) {
+    status = "Searching your saved employer lists and the web. This can take up to a minute.";
+  } else if (coverage && coverage.employers > 0) {
+    const n = coverage.matches + (lastRun?.found ?? 0);
+    const matches = coverage.matches_capped ? `${n.toLocaleString("en-US")}+` : n.toLocaleString("en-US");
+    status = `${matches} ${n === 1 && !coverage.matches_capped ? "match" : "matches"} from ${coverage.postings.toLocaleString("en-US")} jobs at ${coverage.employers.toLocaleString("en-US")} employers.`;
+    if (lastRun && lastRun.found > 0) status += ` ${lastRun.found} new from the web and saved lists are ready to review.`;
+  } else if (items.length > 0) {
+    status = `${items.length} ${items.length === 1 ? "match" : "matches"} to review.`;
+  }
+
+  const openFilters = () => setFiltersOpen(true);
+
   return (
-    <div className="space-y-5">
-      {toast && (
-        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center p-6">
-          <div
-            className="added-toast pointer-events-auto flex items-center gap-5 rounded-2xl bg-[rgba(28,27,58,0.82)] py-4 pl-6 pr-4 text-[15px] text-white shadow-lg backdrop-blur"
-            role="status"
-            onMouseEnter={() => (toastHovered.current = true)}
-            onMouseLeave={() => (toastHovered.current = false)}
-          >
-            <span>Added to Jobs</span>
-            <button
-              type="button"
-              className="rounded-full bg-white px-5 py-2.5 text-sm font-bold text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-white/60"
-              onClick={() => {
-                const id = toast.jobId;
-                setToast(null);
-                navigate(`/jobs?highlight=${id}`);
-              }}
-            >
-              Go to job listing
-            </button>
+    <div className="space-y-4">
+      <h1 className="text-[28px] font-bold leading-tight tracking-tight text-ink-900">Job Search</h1>
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (canSearch) search.mutate();
+        }}
+        className="flex flex-wrap items-center gap-2 rounded-[20px] border border-[#e9e6f4] bg-white p-2.5 shadow-[0_1px_2px_rgba(31,27,46,0.05),0_10px_28px_rgba(75,50,184,0.07)]"
+      >
+        <div className="flex min-w-[260px] flex-[1_1_340px] items-center gap-2 px-2.5 py-1">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-[18px] w-[18px] shrink-0 text-ink-500" aria-hidden="true">
+            <circle cx="11" cy="11" r="6.5" />
+            <path d="M16 16l4 4" />
+          </svg>
+          <div className="min-w-0 flex-1">
+            <ChipInput
+              variant="title"
+              label="Job titles"
+              values={titles}
+              onChange={setTitles}
+              draft={titleDraft}
+              onDraft={setTitleDraft}
+              placeholder="Job titles, like project manager"
+              maxLength={100}
+              suggest="title"
+            />
           </div>
         </div>
-      )}
-      <PageHeader
-        title="Job Search"
-        description="Tell us what you want and we search employers' job lists and the web for matching openings. Nothing is added to Jobs until you click Add to jobs."
-      />
-
-      <Card className="overflow-hidden border border-[#e9e6f4] !shadow-[0_-6px_18px_rgba(60,50,120,0.08),0_1px_2px_rgba(31,27,46,0.08),0_12px_32px_rgba(60,50,120,0.12)]">
-        {(savedList.length > 0 || canSave) && (
-          <div className="flex flex-wrap items-center gap-2 border-b border-[#ebe8f6] bg-[#f9f8fd] px-5 py-3">
-            <span className="mr-1 text-xs font-extrabold text-[#5a5570]">Saved searches</span>
-            {savedList.map((s) => {
-              const on = activeSaved?.name === s.name;
-              return (
-                <span
-                  key={s.name}
-                  className={`inline-flex items-center rounded-full border text-xs font-bold ${
-                    on ? "border-brand-500 bg-brand-500 text-white" : "border-[#cfc8ee] bg-white text-ink-700"
-                  }`}
-                >
-                  <button type="button" onClick={() => loadSavedSearch(s)} className="py-1.5 pl-3 pr-1.5" aria-pressed={on}>
-                    {s.name}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Forget saved search ${s.name}`}
-                    onClick={() => deleteSavedSearch(s.name)}
-                    className={`mr-1.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-extrabold ${
-                      on ? "hover:bg-white/25" : "text-ink-500 hover:bg-brand-50"
-                    }`}
-                  >
-                    &#10005;
-                  </button>
-                </span>
-              );
-            })}
-            {canSave && (
-              <button
-                type="button"
-                onClick={saveThisSearch}
-                className="ml-auto text-xs font-bold text-brand-600 hover:text-brand-700 hover:underline"
-              >
-                + Save this search
-              </button>
-            )}
-          </div>
-        )}
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (canSearch) search.mutate();
-          }}
+        <div className="hidden h-7 w-px bg-[#e9e6f4] sm:block" />
+        <div className="relative flex min-w-[200px] flex-[0_1_260px] items-center">
+          <label htmlFor="js-location" className="sr-only">
+            Location
+          </label>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="pointer-events-none absolute left-3 h-[18px] w-[18px] text-ink-500" aria-hidden="true">
+            <path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z" />
+            <circle cx="12" cy="9.5" r="2.5" />
+          </svg>
+          <SuggestInput
+            id="js-location"
+            value={location}
+            onChange={setLocation}
+            kind="place"
+            placeholder="City, state, or United States"
+            maxLength={200}
+            className="w-full rounded-xl border border-transparent bg-transparent py-2.5 pl-10 pr-3 text-[14px] text-ink-900 placeholder:text-ink-400 hover:border-[#ddd8f3] focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={!canSearch}
+          className={`h-[46px] rounded-xl bg-brand-500 px-7 text-[15px] font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50 ${search.isPending ? "ai-working" : ""}`}
         >
-          <div className="flex flex-wrap items-center gap-3 bg-gradient-to-b from-[#f8f6ff] to-[#fefeff] px-5 py-3.5">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              className="h-5 w-5 shrink-0 text-brand-500"
-              aria-hidden="true"
-            >
-              <circle cx="11" cy="11" r="6.5" />
-              <path d="M16 16l4 4" />
+          {search.isPending ? "Searching..." : "Search"}
+        </button>
+      </form>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {pills.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={openFilters}
+            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-brand-500 bg-brand-100 pl-3.5 pr-3 text-[13px] font-semibold text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-200"
+          >
+            {c.text}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+              <path d="M6 9l6 6 6-6" />
             </svg>
-            <div className="min-w-[260px] flex-1">
-              <ChipInput
-                variant="title"
-                label="Job titles"
-                values={titles}
-                onChange={setTitles}
-                draft={titleDraft}
-                onDraft={setTitleDraft}
-                placeholder="Job titles, like project manager"
-                maxLength={100}
-                suggest="title"
-              />
-            </div>
-            <Button type="submit" variant="primary" className={`px-6 py-3 ${search.isPending ? "ai-working" : ""}`} disabled={!canSearch}>
-              {search.isPending ? "Searching..." : "Search"}
-            </Button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5 border-t border-[#ebe8f6] bg-[#f9f8fd] px-4 py-3 sm:pl-5">
-            <div className="relative min-w-[200px] flex-1">
-              <label htmlFor="js-location" className="sr-only">
-                Location
-              </label>
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5a5570]"
-                aria-hidden="true"
-              >
-                <path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z" />
-                <circle cx="12" cy="9.5" r="2.5" />
-              </svg>
-              <SuggestInput
-                id="js-location"
-                value={location}
-                onChange={setLocation}
-                kind="place"
-                placeholder="City, state, or United States"
-                maxLength={200}
-                className="w-full rounded-full border border-[#8f88bb] bg-white py-2.5 pl-10 pr-4 text-[13px] text-ink-900 placeholder:text-[#6a6585] focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
-              />
-            </div>
-            <select
-              aria-label="Work type"
-              className={selectPill}
-              value={workType}
-              onChange={(e) => setWorkType(e.target.value as JobSearchCriteria["work_type"])}
-            >
-              <option value="any">Any work type</option>
-              <option value="remote">Remote</option>
-              <option value="hybrid">Hybrid</option>
-              <option value="onsite">On site</option>
-            </select>
-            <select
-              aria-label="Posted within"
-              className={selectPill}
-              value={within}
-              onChange={(e) => setWithin(Number(e.target.value) as JobSearchCriteria["posted_within_days"])}
-            >
-              <option value={0}>Posted any time</option>
-              <option value={7}>Last 7 days</option>
-              <option value={14}>Last 14 days</option>
-              <option value={30}>Last 30 days</option>
-            </select>
-            <button
-              type="button"
-              onClick={() => setMoreOpen((v) => !v)}
-              aria-expanded={moreOpen}
-              className="ml-auto inline-flex items-center gap-1.5 text-[13px] font-bold text-brand-600 hover:text-brand-700"
-            >
-              {moreOpen ? "Fewer filters" : "More filters"}
-              {moreCount > 0 && (
-                <span className="rounded-full bg-brand-500 px-1.5 text-[11px] text-white">{moreCount}</span>
-              )}
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-3 w-3"
-                aria-hidden="true"
-              >
-                <path d={moreOpen ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"} />
-              </svg>
-            </button>
-          </div>
-
-          {moreOpen && (
-            <div className="grid gap-x-7 gap-y-5 border-t border-[#ebe8f6] bg-white px-5 py-4 md:grid-cols-2">
-              <div>
-                <label className={labelClass} htmlFor="js-salary">
-                  Salary minimum (yearly)
-                </label>
-                <input
-                  id="js-salary"
-                  className={`${fieldClass} max-w-[220px]`}
-                  inputMode="numeric"
-                  value={targetSalary}
-                  onChange={(e) => setTargetSalary(e.target.value)}
-                  placeholder="80000"
-                />
-                <p className="mt-1.5 text-xs text-ink-500">The pay range midpoint must be at least this. Higher is fine.</p>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <label className={labelClass} htmlFor="js-count">
-                    How many results
-                  </label>
-                  <select
-                    id="js-count"
-                    className={`${fieldClass} max-w-[220px]`}
-                    value={count}
-                    onChange={(e) => setCount(Number(e.target.value))}
-                  >
-                    {[5, 10, 15].map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={requireSalary}
-                    aria-labelledby="js-require-salary"
-                    onClick={() => setRequireSalary((v) => !v)}
-                    className={`relative h-[22px] w-[38px] shrink-0 rounded-full transition ${
-                      requireSalary ? "bg-brand-500" : "bg-[#cfc8ee]"
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-[3px] h-4 w-4 rounded-full bg-white shadow transition-all ${
-                        requireSalary ? "left-[19px]" : "left-[3px]"
-                      }`}
-                    />
-                  </button>
-                  <span id="js-require-salary" className="text-[13px] font-semibold text-ink-700">
-                    Only show jobs that post their salary
-                  </span>
-                </div>
-              </div>
-              <div>
-                <span className={labelClass}>Keywords (optional)</span>
-                <ChipInput
-                  label="Keywords"
-                  values={keywords}
-                  onChange={setKeywords}
-                  draft={keywordDraft}
-                  onDraft={setKeywordDraft}
-                  placeholder="healthcare, Agile, SaaS"
-                  suggest="keyword"
-                />
-              </div>
-              <div>
-                <span className={labelClass}>Leave out these companies (optional)</span>
-                <ChipInput
-                  label="Companies to leave out"
-                  values={exclude}
-                  onChange={setExclude}
-                  draft={excludeDraft}
-                  onDraft={setExcludeDraft}
-                  placeholder="Add a company"
-                />
-              </div>
-            </div>
-          )}
-
-          {filterChips.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 border-t border-[#ebe8f6] bg-white px-5 py-3">
-              <span className="mr-1 text-xs font-extrabold text-[#5a5570]">Filters in use</span>
-              {filterChips.map((c) => (
-                <span
-                  key={c.key}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-[#d4cef4] bg-white py-1 pl-3 pr-1.5 text-xs font-bold text-ink-900"
-                >
-                  {c.text}
-                  <button
-                    type="button"
-                    aria-label={`Clear ${c.text}`}
-                    onClick={c.clear}
-                    className="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-extrabold text-ink-500 hover:bg-brand-50"
-                  >
-                    &#10005;
-                  </button>
-                </span>
-              ))}
-              <button type="button" onClick={clearFilters} className="ml-1 text-xs font-bold text-brand-600 hover:text-brand-700 hover:underline">
-                Clear all
-              </button>
-            </div>
-          )}
-
-          <p className="flex items-center gap-2 border-t border-[#ebe8f6] bg-white px-5 py-2.5 text-xs text-ink-500">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              className="h-3.5 w-3.5 shrink-0"
-              aria-hidden="true"
-            >
-              <rect x="5" y="11" width="14" height="9" rx="2" />
-              <path d="M8 11V8a4 4 0 018 0v3" />
+          </button>
+        ))}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((v) => !v)}
+            aria-expanded={filtersOpen}
+            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[#ddd8f3] bg-white px-3.5 text-[13px] font-semibold text-ink-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-[15px] w-[15px]" aria-hidden="true">
+              <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
+              <circle cx="16" cy="7" r="2" />
+              <circle cx="8" cy="17" r="2" />
             </svg>
-            Only the words above are sent. Nothing from your profile. The web part of a search costs a small amount; the saved employer lists are free.
-          </p>
-        </form>
-      </Card>
+            All filters
+          </button>
+          {filtersOpen && (
+            <FiltersPopover
+              onClose={() => setFiltersOpen(false)}
+              workType={workType}
+              setWorkType={setWorkType}
+              within={within}
+              setWithin={setWithin}
+              keywords={keywords}
+              setKeywords={setKeywords}
+              keywordDraft={keywordDraft}
+              setKeywordDraft={setKeywordDraft}
+              exclude={exclude}
+              setExclude={setExclude}
+              excludeDraft={excludeDraft}
+              setExcludeDraft={setExcludeDraft}
+              targetSalary={targetSalary}
+              setTargetSalary={setTargetSalary}
+              requireSalary={requireSalary}
+              setRequireSalary={setRequireSalary}
+              count={count}
+              setCount={setCount}
+              onClear={clearFilters}
+            />
+          )}
+        </div>
+        {pills.length > 0 && (
+          <button type="button" onClick={clearFilters} className="h-9 px-1.5 text-[13px] font-semibold text-brand-600 hover:text-brand-700 hover:underline">
+            Clear all
+          </button>
+        )}
+        <span className="flex-1" />
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setSavedOpen((v) => !v)}
+            aria-expanded={savedOpen}
+            className="inline-flex h-9 items-center gap-2 rounded-full border border-[#ddd8f3] bg-white px-3 text-[13px] font-semibold text-ink-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]" aria-hidden="true">
+              <path d="M7 4h10v16l-5-4-5 4z" />
+            </svg>
+            {activeSaved ? `Saved searches: ${activeSaved.name}` : "Saved searches"}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+          {savedOpen && (
+            <SavedMenu
+              onClose={() => setSavedOpen(false)}
+              list={savedList}
+              activeName={activeSaved?.name}
+              canSave={canSave}
+              onLoad={(s) => {
+                loadSavedSearch(s);
+                setSavedOpen(false);
+              }}
+              onForget={deleteSavedSearch}
+              onSave={() => {
+                saveThisSearch();
+                setSavedOpen(false);
+              }}
+            />
+          )}
+        </div>
+      </div>
 
-      {search.isPending && (
-        <p className="animate-pulse text-sm text-ink-500" role="status">
-          Searching saved employer lists and the web. This can take up to a minute.
-        </p>
-      )}
       {search.isError && (
         <p className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700" role="alert">
           {errorText(search.error)}
-        </p>
-      )}
-
-      {notice && (
-        <p
-          className={`flex items-center gap-2.5 rounded-2xl px-4 py-3 text-[13px] font-bold ${
-            notice.kind === "found" ? "bg-[#e8f6ee] text-[#17603f]" : "bg-brand-50 text-brand-700"
-          }`}
-          role="status"
-        >
-          {notice.kind === "found" && (
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-[18px] w-[18px] shrink-0"
-              aria-hidden="true"
-            >
-              <path d="M5 12.5l4.5 4.5L19 7.5" />
-            </svg>
-          )}
-          <span>
-            {notice.text}{" "}
-            {notice.kind === "added" && (
-              <Link to="/jobs" className="underline">
-                Go to Jobs
-              </Link>
-            )}
-          </span>
         </p>
       )}
       {showMore.isError && (
@@ -729,72 +523,83 @@ export function JobSearch() {
           {errorText(showMore.error)}
         </p>
       )}
-      {coverage && coverage.employers > 0 && <CoverageCard coverage={coverage} />}
       {(add.isError || remove.isError || bulkError) && (
         <p className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700" role="alert">
           {bulkError ?? errorText(add.error ?? remove.error)}
         </p>
       )}
 
+      {notice && (
+        <div
+          role="status"
+          className={`flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl px-4 py-2.5 text-sm font-semibold ${
+            notice.kind === "added" ? "bg-[#e8f6ee] text-[#17603f]" : "bg-brand-50 text-brand-700"
+          }`}
+        >
+          <span>{notice.text}</span>
+          {notice.kind === "added" && (
+            <Link to={notice.jobId ? `/jobs?highlight=${notice.jobId}` : "/jobs"} className="underline">
+              Go to job listing
+            </Link>
+          )}
+          <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)} className="ml-auto px-2 text-lg leading-none">
+            &#215;
+          </button>
+        </div>
+      )}
+
       {results.isLoading ? (
         <p className="text-sm text-ink-500">Loading...</p>
       ) : items.length === 0 ? (
-        <Card className="p-10 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-500">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="h-7 w-7" aria-hidden="true">
-              <circle cx="11" cy="11" r="6.5" />
-              <path d="M16 16l4 4" />
-            </svg>
-          </div>
-          <h2 className="text-base font-bold text-ink-900">No matches yet</h2>
-          <p className="mt-1 text-sm text-ink-500">Add a job title above and click Search.</p>
-        </Card>
+        <div className="rounded-[20px] border border-[#e9e6f4] bg-white p-10 text-center shadow-[0_1px_2px_rgba(31,27,46,0.05),0_10px_28px_rgba(75,50,184,0.07)]">
+          {search.isPending ? (
+            <p className="animate-pulse text-sm font-semibold text-brand-700" role="status">
+              {status}
+            </p>
+          ) : (
+            <>
+              <h2 className="text-base font-bold text-ink-900">No matches yet</h2>
+              <p className="mt-1 text-sm text-ink-500">Add a job title above and click Search.</p>
+            </>
+          )}
+        </div>
       ) : (
-        <section className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-extrabold text-ink-900">
-              {items.length} {items.length === 1 ? "match" : "matches"} to review
-            </h2>
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="flex items-center gap-2 text-xs font-bold text-[#5a5570]">
-                Sort
+        <div className="grid items-start gap-x-5 gap-y-3 lg:grid-cols-[minmax(0,480px)_minmax(0,1fr)]">
+          <div className="flex items-center justify-between gap-4 lg:col-span-2">
+            <p role="status" className="flex min-w-0 flex-1 items-center gap-2 px-1 text-[13px] font-semibold text-brand-700">
+              {search.isPending ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="h-[15px] w-[15px] shrink-0 animate-spin" aria-hidden="true">
+                  <path d="M12 3a9 9 0 019 9" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px] shrink-0" aria-hidden="true">
+                  <path d="M5 12.5l4.5 4.5L19 7.5" />
+                </svg>
+              )}
+              <span>{status}</span>
+            </p>
+            <div className="flex shrink-0 items-center gap-1">
+              <label className="flex items-center gap-1 text-[13px] font-semibold text-ink-700">
+                Sort:
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value === "resume" ? "resume" : e.target.value === "newest" ? "newest" : "search")}
-                  className="rounded-full border border-[#8f88bb] bg-white px-3.5 py-2 text-[13px] font-bold text-brand-700 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
+                  className="cursor-pointer rounded-lg bg-transparent py-1 pl-1 pr-1 text-[13px] font-semibold text-ink-900 focus:outline-none focus:ring-2 focus:ring-brand-200"
                 >
-                  <option value="search">Best search match</option>
+                  <option value="search">Best match</option>
                   <option value="resume">Best resume match</option>
-                  <option value="newest">Newest posted</option>
+                  <option value="newest">Newest</option>
                 </select>
               </label>
-              {anyAutofill && (
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={autofillOnly}
-                    aria-labelledby="js-autofill-only"
-                    onClick={() => setAutofillOnly((v) => !v)}
-                    className={`relative h-[19px] w-[32px] shrink-0 rounded-full transition ${
-                      autofillOnly ? "bg-brand-500" : "bg-[#cfc8ee]"
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-[3px] h-[13px] w-[13px] rounded-full bg-white shadow transition-all ${
-                        autofillOnly ? "left-[16px]" : "left-[3px]"
-                      }`}
-                    />
-                  </button>
-                  <span id="js-autofill-only" className="text-xs font-bold text-[#5a5570]">
-                    Autofill ready only
-                  </span>
-                </div>
-              )}
               <MoreMenu>
                 <MenuItem onClick={() => void scoreAll()} disabled={unscored.length === 0 || scoringAll !== null}>
-                  {unscored.length > 0 ? `Score all (${unscored.length})` : "Score all"}
+                  {unscored.length > 0 ? `Check all against my resume (${unscored.length})` : "Check all against my resume"}
                 </MenuItem>
+                {anyAutofill && (
+                  <MenuItem onClick={() => setAutofillOnly((v) => !v)}>
+                    {autofillOnly ? "Show all jobs" : "Show only autofill ready"}
+                  </MenuItem>
+                )}
                 <MenuItem danger onClick={() => setConfirmClear(true)}>
                   Clear all
                 </MenuItem>
@@ -803,58 +608,73 @@ export function JobSearch() {
           </div>
 
           {confirmClear && (
-            <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800">
+            <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800 lg:col-span-2">
               Remove all {items.length} matches?
               <span className="flex gap-2">
-                <Button size="sm" variant="danger" onClick={() => clear.mutate()} disabled={clear.isPending}>
+                <button
+                  type="button"
+                  onClick={() => clear.mutate()}
+                  disabled={clear.isPending}
+                  className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50"
+                >
                   Yes, remove all
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setConfirmClear(false)}>
+                </button>
+                <button type="button" onClick={() => setConfirmClear(false)} className="rounded-lg px-3 py-1.5 text-xs font-bold text-red-800 hover:bg-red-100">
                   Keep
-                </Button>
+                </button>
               </span>
             </div>
           )}
           {scoringAll && (
-            <p className="animate-pulse text-xs text-ink-500" role="status">
-              Scoring {Math.min(scoringAll.done + 1, scoringAll.total)} of {scoringAll.total}. This can take a few minutes.
+            <p className="animate-pulse px-1 text-xs text-ink-500 lg:col-span-2" role="status">
+              Checking {Math.min(scoringAll.done + 1, scoringAll.total)} of {scoringAll.total} against your resume. This can take a few minutes.
             </p>
           )}
 
-          {shown.length === 0 ? (
-            <p className="text-sm text-ink-500">
-              None of these can be autofilled. Turn off "Autofill ready only" to see all {items.length}.
-            </p>
-          ) : (
-            <ul className="space-y-3.5">
-              {shown.map((r) => (
-                <ResultCard
-                  key={r.id}
-                  r={r}
-                  busy={busyId === r.id || scoringAll !== null || hiding}
-                  scoring={score.isPending && score.variables === r.id}
-                  problem={score.isError && score.variables === r.id ? errorText(score.error) : undefined}
-                  onScore={() => score.mutate(r.id)}
-                  onAdd={() => add.mutate(r.id)}
-                  onRemove={() => remove.mutate(r.id)}
-                  onHideCompany={() => hideCompany(r)}
-                  onHideTitle={() => hideTitle(r)}
-                />
-              ))}
-            </ul>
-          )}
-          {moreAvailable > 0 && (
-            <div className="flex flex-col items-center gap-1.5 pt-1">
-              <Button variant="primary" onClick={() => showMore.mutate()} disabled={showMore.isPending}>
-                {showMore.isPending ? "Looking..." : `Show ${Math.min(count, moreAvailable)} more results`}
-              </Button>
-              <p className="text-xs text-ink-500">
-                {moreAvailable.toLocaleString("en-US")}
-                {moreCapped ? "+" : ""} more fit your search. Results you removed stay hidden.
+          <div
+            className="overflow-y-auto overscroll-contain rounded-[20px] border border-[#e9e6f4] bg-white shadow-[0_1px_2px_rgba(31,27,46,0.05),0_10px_28px_rgba(75,50,184,0.07)]"
+            style={{ maxHeight: "max(480px, calc(100vh - 300px))", scrollbarWidth: "thin", scrollbarColor: "#ddd8f3 transparent" }}
+          >
+            {shown.length === 0 ? (
+              <p className="p-5 text-sm text-ink-500">
+                None of these can be autofilled. Choose "Show all jobs" in the menu above to see all {items.length}.
               </p>
-            </div>
+            ) : (
+              <ul>
+                {shown.map((r) => (
+                  <ResultRow key={r.id} r={r} selected={selected?.id === r.id} onPick={() => setSelectedId(r.id)} />
+                ))}
+              </ul>
+            )}
+            {moreAvailable > 0 && (
+              <div className="border-t border-[#ebe8f6] p-4 text-center">
+                <button
+                  type="button"
+                  onClick={() => showMore.mutate()}
+                  disabled={showMore.isPending}
+                  className="h-10 rounded-xl border border-[#ddd8f3] bg-white px-5 text-sm font-semibold text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50"
+                >
+                  {showMore.isPending ? "Looking..." : `Show ${Math.min(count, moreAvailable)} more results`}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {selected && (
+            <JobDetail
+              key={selected.id}
+              r={selected}
+              busy={busyId === selected.id || scoringAll !== null || hiding}
+              scoring={score.isPending && score.variables === selected.id}
+              problem={score.isError && score.variables === selected.id ? errorText(score.error) : undefined}
+              onScore={() => score.mutate(selected.id)}
+              onAdd={() => add.mutate(selected.id)}
+              onRemove={() => remove.mutate(selected.id)}
+              onHideCompany={() => hideCompany(selected)}
+              onHideTitle={() => hideTitle(selected)}
+            />
           )}
-        </section>
+        </div>
       )}
 
       <EmployersPanel />
@@ -862,7 +682,86 @@ export function JobSearch() {
   );
 }
 
-function ResultCard({
+const CARD =
+  "rounded-[20px] border border-[#e9e6f4] bg-white shadow-[0_1px_2px_rgba(31,27,46,0.05),0_10px_28px_rgba(75,50,184,0.07)]";
+
+/** "Today", "Yesterday", "5 days ago", or the date for older postings. */
+function agoText(date?: string | null): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(date ?? "");
+  if (!m) return "Date not listed";
+  const then = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const now = new Date();
+  const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - then.getTime()) / 86_400_000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days < 31) return `${days} days ago`;
+  return formatPosted(date) ?? "Date not listed";
+}
+
+const WORK_NAMES: Record<string, string> = { remote: "Remote", hybrid: "Hybrid", onsite: "On site" };
+
+/** How well the posting fits the search, in words and a color. Never shown as a number. */
+function fitWord(score: number | null | undefined): { word: string; color: string } {
+  if (score == null) return { word: "Possible match", color: "#6b6a88" };
+  if (score >= 0.75) return { word: "Strong match", color: "#17603f" };
+  if (score >= 0.55) return { word: "Good match", color: "#8a5a12" };
+  return { word: "Possible match", color: "#6b6a88" };
+}
+
+function BoltIcon({ className = "h-3 w-3" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M13 2L4 14h6l-1 8 9-12h-6z" />
+    </svg>
+  );
+}
+
+function ResultRow({ r, selected, onPick }: { r: JobSearchResultOut; selected: boolean; onPick: () => void }) {
+  const fit = fitWord(r.fit_score);
+  const meta = [r.location, r.work_type ? (WORK_NAMES[r.work_type] ?? r.work_type) : null, r.salary_text].filter(Boolean).join(" | ");
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onPick}
+        aria-pressed={selected}
+        className={`block w-full border-b border-[#ebe8f6] px-5 py-4 text-left transition last:border-b-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400 ${
+          selected ? "bg-brand-50 shadow-[inset_3px_0_0_#5b57f5]" : "hover:bg-[#faf9ff]"
+        }`}
+      >
+        <span className="block text-[15px] font-semibold text-ink-900">{r.title}</span>
+        <span className="mt-0.5 block text-[14px] text-ink-700">{r.company}</span>
+        {meta && <span className="mt-1 block text-[13px] text-ink-500">{meta}</span>}
+        <span className="mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[13px] font-semibold">
+          <span className="inline-flex items-center gap-1.5" style={{ color: fit.color }}>
+            <span className="h-[7px] w-[7px] rounded-full" style={{ backgroundColor: fit.color }} aria-hidden="true" />
+            {fit.word}
+          </span>
+          {autofillSite(r.url) && (
+            <span className="inline-flex items-center gap-1 text-[#17603f]">
+              <BoltIcon className="h-3 w-3" />
+              Autofill ready
+            </span>
+          )}
+          <span className="ml-auto whitespace-nowrap font-medium text-ink-500">{agoText(r.posted_at)}</span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function Fact({ icon, children }: { icon: string; children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-[7px]">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#6b6a88" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]" aria-hidden="true">
+        <path d={icon} />
+      </svg>
+      {children}
+    </span>
+  );
+}
+
+function JobDetail({
   r,
   busy,
   scoring,
@@ -876,7 +775,7 @@ function ResultCard({
   r: JobSearchResultOut;
   busy: boolean;
   scoring: boolean;
-  /** Why the last attempt to score this one failed, such as a closed posting. */
+  /** Why the last attempt to check this one failed, such as a closed posting. */
   problem?: string;
   onScore: () => void;
   onAdd: () => void;
@@ -884,154 +783,352 @@ function ResultCard({
   onHideCompany: () => void;
   onHideTitle: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const posted = formatPosted(r.posted_at);
-  const site = autofillSite(r.url);
+  const autofill = autofillSite(r.url) !== null;
   // A score that came only from the one-line summary is not shown; it would look surer than it is.
   const score = r.match_from_page === false ? null : (r.match_score ?? null);
-  const edge = score === null ? "#e3dff3" : scoreColor(score);
-  // The plain-words line says how the posting fits the search. It is not a grade, so it is never shown as a number.
-  const noteTone = r.fit_score == null ? "text-ink-500" : r.fit_score >= 0.75 ? "text-[#0e6b4c]" : "text-[#8a5a12]";
+  const gaps = (r.match_gaps ?? []).slice(0, 3);
   return (
-    <li>
-      <Card className="flex">
-        <div className="w-[5px] shrink-0 rounded-l-2xl" style={{ backgroundColor: edge }} aria-hidden="true" />
-        <div className="min-w-0 flex-1 p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <h3 className="text-lg font-bold leading-snug text-ink-900">{r.title}</h3>
-              {r.company && <div className="mt-0.5 text-sm font-semibold text-ink-500">{r.company}</div>}
-              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-500">
-                {r.location && (
-                  <span className="inline-flex items-center gap-1.5">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      className="h-3.5 w-3.5"
-                      aria-hidden="true"
-                    >
-                      <path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z" />
-                      <circle cx="12" cy="9.5" r="2.5" />
-                    </svg>
-                    {r.location}
-                  </span>
-                )}
-                {r.work_type && <span className="capitalize">{r.work_type}</span>}
-                {r.salary_text && <span>{r.salary_text}</span>}
-                <span className={posted ? "" : "text-ink-400"}>{posted ? `Posted ${posted}` : "Posted date not listed"}</span>
-              </div>
-              {r.fit_note && <div className={`mt-1.5 text-xs font-bold ${noteTone}`}>{r.fit_note}</div>}
-            </div>
-            <div className="flex shrink-0 items-center gap-2.5">
-              {!r.grounded && (
-                <span className="rounded-full bg-[#fff4dc] px-3 py-1 text-xs font-bold text-[#8a5a00]">Link not verified</span>
-              )}
-              {score !== null ? (
-                <div className="flex items-center gap-3">
-                  <div className="hidden flex-col items-end gap-1 sm:flex">
-                    <FitPill score={score} />
-                    <span className="text-[11px] text-ink-500">match with your resume</span>
-                  </div>
-                  <Ring value={score} size={58} stroke={6} color={scoreColor(score)}>
-                    <span className="text-sm font-bold text-ink-900">{Math.round(score * 100)}</span>
-                  </Ring>
-                </div>
-              ) : (
-                <Button size="sm" variant="primary" className={scoring ? "ai-working" : ""} onClick={onScore} disabled={busy}>
-                  {scoring ? "Scoring..." : "Score"}
-                </Button>
-              )}
-            </div>
+    <div className={`${CARD} flex min-w-0 flex-col gap-6 px-6 pb-8 pt-7 sm:px-8 lg:sticky lg:top-4`}>
+      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
+        <div className="flex min-w-[240px] flex-1 flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2">
+            <h2 className="text-2xl font-bold leading-tight tracking-tight text-ink-900">{r.title}</h2>
+            {autofill && (
+              <span className="inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-full bg-[#e8f6ee] px-3 text-[13px] font-semibold text-[#17603f]">
+                <BoltIcon className="h-[13px] w-[13px]" />
+                Autofill ready
+              </span>
+            )}
           </div>
+          {r.company && <div className="text-base font-semibold text-ink-700">{r.company}</div>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <a
+            href={r.url}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="inline-flex h-11 items-center rounded-xl border border-[#ddd8f3] px-5 text-[15px] font-semibold text-ink-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200"
+          >
+            View posting
+          </a>
+          <MoreMenu wide>
+            {score !== null && (
+              <MenuItem onClick={onScore} disabled={busy}>
+                Check against my resume again
+              </MenuItem>
+            )}
+            <MenuItem onClick={onRemove} disabled={busy}>
+              Not interested: hide this job
+            </MenuItem>
+            {r.company && (
+              <MenuItem onClick={onHideCompany} disabled={busy}>
+                Hide all from {r.company}
+              </MenuItem>
+            )}
+            <MenuItem onClick={onHideTitle} disabled={busy}>
+              Hide jobs titled "{r.title}"
+            </MenuItem>
+          </MoreMenu>
+          <button
+            type="button"
+            onClick={onAdd}
+            disabled={busy}
+            className="h-11 rounded-xl bg-brand-500 px-[26px] text-[15px] font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50"
+          >
+            {busy && !scoring ? "Working..." : "Add to jobs"}
+          </button>
+        </div>
+      </div>
 
-          {r.summary && (
-            <p
-              className="mt-3 text-sm leading-relaxed text-ink-700"
-              style={{ display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}
-            >
-              {r.summary}
-            </p>
+      <div className="flex flex-wrap items-center gap-x-[26px] gap-y-1.5 border-y border-[#ebe8f6] py-2.5 text-sm font-semibold text-ink-900">
+        <Fact icon="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z M12 7a2.5 2.5 0 100 5 2.5 2.5 0 000-5">{r.location || "Location not listed"}</Fact>
+        <Fact icon="M4 9h16v10H4z M9 9V6h6v3">{r.work_type ? (WORK_NAMES[r.work_type] ?? r.work_type) : "Work type not stated"}</Fact>
+        <Fact icon="M12 4a8 8 0 100 16 8 8 0 000-16z M12 8v8 M14.5 9.5h-3.2a1.5 1.5 0 000 3h1.4a1.5 1.5 0 010 3H9.5">{r.salary_text || "Pay not listed"}</Fact>
+        <Fact icon="M12 4a8 8 0 100 16 8 8 0 000-16z M12 8v4l3 2">{posted ? `Posted ${posted}` : "Posted date not listed"}</Fact>
+      </div>
+
+      {!r.grounded && (
+        <div className="rounded-xl bg-[#fff4dc] px-4 py-3 text-sm text-[#8a5a00]">
+          Found on the web. We could not open this link to confirm the job is still open, so check it before you apply.
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-start gap-7">
+        <div className="flex min-w-0 flex-[1_1_340px] flex-col gap-5">
+          {r.fit_note && (
+            <section className="flex flex-col gap-1.5">
+              <h3 className="text-[15px] font-bold text-ink-900">Why it fits your search</h3>
+              <p className="text-sm leading-relaxed text-ink-700">{r.fit_note}</p>
+            </section>
           )}
-          {!r.grounded && (
-            <p className="mt-3 rounded-xl bg-[#fff4dc] px-3.5 py-2.5 text-[13px] leading-relaxed text-[#8a5a00]">
-              Found on the web. We could not open this link to confirm the job is still open, so check it before you apply.
+          <section className="flex flex-col gap-1.5">
+            <h3 className="text-[15px] font-bold text-ink-900">About the role</h3>
+            <p className="text-sm leading-relaxed text-ink-700">
+              {r.summary || "No description was saved for this posting. Open it to read the full details."}
             </p>
+          </section>
+        </div>
+
+        <div className="flex min-w-[260px] flex-[0_1_320px] flex-col gap-3.5 rounded-2xl border border-[#e9e6f4] bg-[#f9f8fd] p-[18px]">
+          <h3 className="text-[15px] font-bold text-ink-900">Resume match</h3>
+          {score !== null ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-3.5">
+                <Ring value={score} size={64} stroke={7} color={scoreColor(score)}>
+                  <span className="text-lg font-bold text-ink-900">{Math.round(score * 100)}</span>
+                </Ring>
+                <div className="text-base font-semibold text-ink-900">{scoreLabel(score)}</div>
+              </div>
+              {r.match_summary && <p className="text-sm leading-relaxed text-ink-700">{r.match_summary}</p>}
+              {gaps.length > 0 && <p className="text-sm leading-relaxed text-ink-500">Not on your resume: {gaps.join(", ")}</p>}
+            </div>
+          ) : (
+            <div className="flex flex-col items-start gap-2.5">
+              <p className="text-sm text-ink-500">
+                {scoring ? "Reading the posting and comparing it with your resume. This can take up to a minute." : "Reads the full posting and compares it with your resume. Takes up to a minute."}
+              </p>
+              <button
+                type="button"
+                onClick={onScore}
+                disabled={busy}
+                className={`h-10 rounded-[10px] border border-brand-500 bg-white px-[18px] text-sm font-semibold text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50 ${scoring ? "ai-working" : ""}`}
+              >
+                {scoring ? "Checking..." : "Check against my resume"}
+              </button>
+            </div>
           )}
           {problem && !scoring && (
-            <p className="mt-3 rounded-xl bg-[#fff4dc] px-3.5 py-2.5 text-[13px] text-[#8a5a00]" role="alert">
+            <p className="rounded-xl bg-[#fff4dc] px-3 py-2 text-[13px] text-[#8a5a00]" role="alert">
               {problem}
             </p>
           )}
-          {scoring && (
-            <p className="mt-3 animate-pulse text-xs text-ink-500">
-              Reading the posting and comparing it with your resume. This can take up to a minute.
-            </p>
-          )}
-
-          {open && score !== null && (
-            <div className="mt-4">
-              <MatchPanel score={score} summary={r.match_summary} gaps={r.match_gaps ?? []} />
-            </div>
-          )}
-
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <Button variant="primary" onClick={onAdd} disabled={busy}>
-                {busy && !scoring ? "Working..." : "Add to jobs"}
-              </Button>
-              <a
-                href={r.url}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="text-[13px] font-bold text-brand-600 hover:text-brand-700 hover:underline"
-              >
-                View posting
-              </a>
-              {site && (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#e8f6ee] px-3 py-1 text-xs font-bold text-[#17603f]">
-                  <svg viewBox="0 0 24 24" fill="currentColor" className="h-3 w-3" aria-hidden="true">
-                    <path d="M13 2L4 14h6l-1 8 9-12h-6z" />
-                  </svg>
-                  Autofill ready on {site}
-                </span>
-              )}
-            </div>
-            <div className="ml-auto flex items-center gap-3">
-              {score !== null && (
-                <button
-                  type="button"
-                  onClick={() => setOpen((v) => !v)}
-                  aria-expanded={open}
-                  className="text-[13px] font-bold text-brand-600 hover:text-brand-700 hover:underline"
-                >
-                  {open ? "Hide details" : "Show more details"}
-                </button>
-              )}
-              <MoreMenu wide>
-                {score !== null && (
-                  <MenuItem onClick={onScore} disabled={busy}>
-                    Score again
-                  </MenuItem>
-                )}
-                <MenuItem onClick={onRemove} disabled={busy}>
-                  Not interested: hide this job
-                </MenuItem>
-                {r.company && (
-                  <MenuItem onClick={onHideCompany} disabled={busy}>
-                    Hide all from {r.company}
-                  </MenuItem>
-                )}
-                <MenuItem onClick={onHideTitle} disabled={busy}>
-                  Hide jobs titled "{r.title}"
-                </MenuItem>
-              </MoreMenu>
-            </div>
-          </div>
         </div>
-      </Card>
-    </li>
+      </div>
+    </div>
+  );
+}
+
+function useClickAway(onClose: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const down = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", down);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", down);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [onClose]);
+  return ref;
+}
+
+function Segmented<T extends string | number>({
+  label,
+  options,
+  value,
+  onPick,
+}: {
+  label: string;
+  options: { value: T; label: string }[];
+  value: T;
+  onPick: (v: T) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-sm font-semibold text-ink-900">{label}</span>
+      <div className="flex flex-wrap gap-0.5 self-start rounded-xl bg-brand-50 p-1" role="group" aria-label={label}>
+        {options.map((o) => {
+          const on = o.value === value;
+          return (
+            <button
+              key={String(o.value)}
+              type="button"
+              aria-pressed={on}
+              onClick={() => onPick(o.value)}
+              className={`h-9 rounded-lg px-3.5 text-[13px] font-semibold transition ${
+                on ? "bg-white text-brand-700 shadow-[0_1px_3px_rgba(31,27,46,0.12)]" : "text-ink-700 hover:text-brand-700"
+              }`}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const inputCls =
+  "h-[42px] w-full rounded-[10px] border border-[#ddd8f3] bg-white px-3.5 text-sm text-ink-900 placeholder:text-ink-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200";
+
+function FiltersPopover(p: {
+  onClose: () => void;
+  workType: JobSearchCriteria["work_type"];
+  setWorkType: (v: JobSearchCriteria["work_type"]) => void;
+  within: JobSearchCriteria["posted_within_days"];
+  setWithin: (v: JobSearchCriteria["posted_within_days"]) => void;
+  keywords: string[];
+  setKeywords: (v: string[]) => void;
+  keywordDraft: string;
+  setKeywordDraft: (v: string) => void;
+  exclude: string[];
+  setExclude: (v: string[]) => void;
+  excludeDraft: string;
+  setExcludeDraft: (v: string) => void;
+  targetSalary: string;
+  setTargetSalary: (v: string) => void;
+  requireSalary: boolean;
+  setRequireSalary: (v: boolean) => void;
+  count: number;
+  setCount: (v: number) => void;
+  onClear: () => void;
+}) {
+  const ref = useClickAway(p.onClose);
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="All filters"
+      className="absolute left-0 top-11 z-30 flex max-h-[80vh] w-[520px] max-w-[calc(100vw-48px)] flex-col gap-[22px] overflow-y-auto rounded-[20px] border border-[#e9e6f4] bg-white p-6 shadow-[0_12px_32px_rgba(75,50,184,0.18)]"
+    >
+      <Segmented
+        label="Work type"
+        value={p.workType as string}
+        onPick={(v) => p.setWorkType(v as JobSearchCriteria["work_type"])}
+        options={[
+          { value: "any", label: "Any" },
+          { value: "remote", label: "Remote" },
+          { value: "hybrid", label: "Hybrid" },
+          { value: "onsite", label: "On site" },
+        ]}
+      />
+      <Segmented
+        label="Posted"
+        value={p.within as number}
+        onPick={(v) => p.setWithin(v as JobSearchCriteria["posted_within_days"])}
+        options={[
+          { value: 0, label: "Any time" },
+          { value: 7, label: "7 days" },
+          { value: 14, label: "14 days" },
+          { value: 30, label: "30 days" },
+        ]}
+      />
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-semibold text-ink-900">Keywords</span>
+        <ChipInput
+          label="Keywords"
+          values={p.keywords}
+          onChange={p.setKeywords}
+          draft={p.keywordDraft}
+          onDraft={p.setKeywordDraft}
+          placeholder="denials, Epic, Medicare"
+          suggest="keyword"
+        />
+      </div>
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-semibold text-ink-900">Leave out companies</span>
+        <ChipInput
+          label="Companies to leave out"
+          values={p.exclude}
+          onChange={p.setExclude}
+          draft={p.excludeDraft}
+          onDraft={p.setExcludeDraft}
+          placeholder="Add a company"
+        />
+      </div>
+      <div className="flex flex-col gap-2">
+        <label htmlFor="js-salary" className="text-sm font-semibold text-ink-900">
+          Pay you are aiming for
+        </label>
+        <input id="js-salary" className={inputCls} inputMode="numeric" value={p.targetSalary} onChange={(e) => p.setTargetSalary(e.target.value)} placeholder="$85,000" />
+        <label className="flex items-center gap-2.5 text-sm text-ink-700">
+          <input
+            type="checkbox"
+            checked={p.requireSalary}
+            onChange={(e) => p.setRequireSalary(e.target.checked)}
+            className="h-[18px] w-[18px] accent-[#5b57f5]"
+          />
+          Only jobs that post their pay
+        </label>
+      </div>
+      <Segmented
+        label="Results per search"
+        value={p.count}
+        onPick={p.setCount}
+        options={[
+          { value: 5, label: "5" },
+          { value: 10, label: "10" },
+          { value: 15, label: "15" },
+        ]}
+      />
+      <div className="flex items-center justify-between border-t border-[#ebe8f6] pt-[18px]">
+        <button type="button" onClick={p.onClear} className="py-2 text-sm font-semibold text-brand-600 hover:text-brand-700 hover:underline">
+          Clear all
+        </button>
+        <button
+          type="button"
+          onClick={p.onClose}
+          className="h-11 rounded-xl bg-brand-500 px-7 text-[15px] font-semibold text-white hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-200"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SavedMenu({
+  onClose,
+  list,
+  activeName,
+  canSave,
+  onLoad,
+  onForget,
+  onSave,
+}: {
+  onClose: () => void;
+  list: SavedSearch[];
+  activeName?: string;
+  canSave: boolean;
+  onLoad: (s: SavedSearch) => void;
+  onForget: (name: string) => void;
+  onSave: () => void;
+}) {
+  const ref = useClickAway(onClose);
+  return (
+    <div ref={ref} className="absolute right-0 top-11 z-30 w-72 rounded-2xl border border-[#e9e6f4] bg-white p-1.5 shadow-[0_12px_32px_rgba(75,50,184,0.18)]">
+      {list.length === 0 && <p className="px-3 py-2 text-sm text-ink-500">No saved searches yet.</p>}
+      {list.map((s) => (
+        <div key={s.name} className="flex items-center rounded-xl hover:bg-brand-50">
+          <button
+            type="button"
+            onClick={() => onLoad(s)}
+            aria-pressed={activeName === s.name}
+            className={`min-w-0 flex-1 truncate px-3 py-2 text-left text-sm font-medium ${activeName === s.name ? "text-brand-700" : "text-ink-700"}`}
+          >
+            {s.name}
+          </button>
+          <button
+            type="button"
+            aria-label={`Forget saved search ${s.name}`}
+            onClick={() => onForget(s.name)}
+            className="mr-1 flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-ink-500 hover:bg-white"
+          >
+            &#10005;
+          </button>
+        </div>
+      ))}
+      {canSave && (
+        <button type="button" onClick={onSave} className="mt-1 block w-full rounded-xl border-t border-[#ebe8f6] px-3 py-2 text-left text-sm font-semibold text-brand-600 hover:bg-brand-50">
+          + Save this search
+        </button>
+      )}
+    </div>
   );
 }

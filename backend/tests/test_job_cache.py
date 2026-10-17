@@ -1127,3 +1127,14 @@ def test_workday_slices_find_nested_filters():
     data = {"facets": [{"facetParameter": "locationMainGroup", "values": [{"facetParameter": "locations", "values": [{"id": "x", "count": 3}]}]},
                        {"facetParameter": "timeType", "values": [{"id": "ft", "count": 9}]}]}
     assert readers.workday_slices(data) == [("locations", [("x", 3)]), ("timeType", [("ft", 9)])]
+
+
+def test_probe_row_summarizes_an_employer_on_one_line():
+    from app.services.jobcache.store import PostingIn
+    from scripts import cache_tools
+
+    ps = [PostingIn(ext_id="1", title="Revenue Cycle Analyst", url="u1", location="Boston, MA"),
+          PostingIn(ext_id="2", title="Gardener", url="u2", location="London, United Kingdom")]
+    row = cache_tools.probe_row("greenhouse:acme", ps, True, [])
+    assert "jobs 2" in row and "US 50%" in row and "focus-title 1" in row and "PARTIAL" not in row
+    assert "PARTIAL" in cache_tools.probe_row("greenhouse:acme", ps, False, ["note"])

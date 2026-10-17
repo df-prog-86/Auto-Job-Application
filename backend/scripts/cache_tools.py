@@ -142,25 +142,49 @@ def sites_from_urls(urls: list[str], known: set[str]) -> dict[str, int]:
     return found
 
 
+_FOCUS = ("revenue cycle", "billing", "coding", "denial", "claims", "collections", "patient access", "patient financial", "reimbursement",
+          "payer", "consult", "healthcare", "health care", "clinical", "nurse")
+
+
+def probe_row(spec: str, postings: list, complete: bool, notes: list[str]) -> str:
+    """One line per employer: how many jobs, how many look US based, how many match the focus words, and sample titles."""
+    import re
+
+    from app.services.jobcache.text import US_STATES
+
+    def is_us(loc: str | None) -> bool:
+        loc = loc or ""
+        return "united states" in loc.lower() or "usa" in loc.lower() or any(t in US_STATES for t in re.findall(r"\b[A-Z]{2}\b", loc))
+
+    n = len(postings)
+    us = sum(1 for p in postings if is_us(p.location))
+    focus = sum(1 for p in postings if any(w in (p.title or "").lower() for w in _FOCUS))
+    sample = " ; ".join(p.title for p in postings[:2])
+    flag = "" if complete else " PARTIAL"
+    return f"{spec} | jobs {n}{flag} | US {us * 100 // max(n, 1)}% | focus-title {focus} | {sample[:110]}" + (f" | {'; '.join(notes)}" if notes else "")
+
+
 async def _probe(args: argparse.Namespace) -> int:
-    """Reads each named employer's public job list the way the app does and prints what is there. Saves nothing anywhere."""
+    """Reads each named employer's public job list the way the app does and prints one line each. Saves nothing in the job lists."""
     throttle = Throttle()
     specs = list(args.employers)
     if args.from_file:
         specs += [ln.split("#")[0].strip().strip("'") for ln in Path(args.from_file).read_text().splitlines() if ln.split("#")[0].strip()]
+    rows: list[str] = []
     async with make_client() as client:
         for spec in specs:
             system, _, ident = spec.partition(":")
             try:
                 res = await read_employer(system, ident, client, throttle)
+                row = probe_row(spec, res.postings, res.complete, res.notes)
             except Exception as exc:
-                print(f"\n{spec}\n   could not be read: {type(exc).__name__}: {str(exc)[:120]}")
-                continue
-            ps = res.postings
-            print(f"\n{spec}\n   {len(ps)} open postings{'' if res.complete else ' (only part of a very large list was read)'}" + (f"; {'; '.join(res.notes)}" if res.notes else ""))
-            for p in ps[: args.samples]:
-                print(f"   - {p.title} | {p.location or 'no place'}")
-    print("\nNothing was saved. These are only reads of the employers' public job lists.")
+                row = f"{spec} | COULD NOT BE READ: {type(exc).__name__}: {str(exc)[:100]}"
+            rows.append(row)
+            print(row, flush=True)
+    if args.out:
+        Path(args.out).expanduser().write_text("\n".join(rows) + "\n", encoding="utf-8")
+        print(f"\nThe table was also saved to {args.out}. You can attach that file to the chat.")
+    print("Nothing was added to the saved lists. These are only reads of the employers' public job lists.")
     return 0
 
 
@@ -220,7 +244,8 @@ def main() -> None:
     pr = sub.add_parser("probe")
     pr.add_argument("--from-file", help="a file of specs, one per line (what 'eval_search gaps --write-probes' writes)")
     pr.add_argument("employers", nargs="*", help="system:identifier, e.g. 'workday:bilh.wd1.myworkdayjobs.com|bilh|external'")
-    pr.add_argument("--samples", type=int, default=8)
+    pr.add_argument("--samples", type=int, default=8, help="(no longer used)")
+    pr.add_argument("--out", help="also save the table to this file")
     args = p.parse_args()
     if args.cmd == "probe":
         sys.exit(asyncio.run(_probe(args)))

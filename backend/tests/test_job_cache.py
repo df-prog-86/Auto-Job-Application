@@ -1203,3 +1203,18 @@ def test_urls_from_cdx_skips_broken_lines():
     got, bad = urls_from_cdx(text)
     assert got == ["https://a.bamboohr.com/careers"] and bad == 1
     assert urls_from_cdx("")[0] == []
+
+
+def test_already_judged_reads_earlier_output(tmp_path):
+    from scripts.cache_tools import _already_judged
+
+    f = tmp_path / "out.txt"
+    f.write_text(
+        "5 employers to check.\n"
+        "  ADD   workable:acme  120 jobs\n"
+        "  SKIP  bamboohr:foo  too few jobs\n"
+        "  SKIP  jazzhr:bar  could not be read (ReadTimeout)\n"
+        "  HAVE  lever:baz  already in the saved lists\n"
+        "\n1 would be added, 2 skipped.\n"
+    )
+    assert _already_judged([str(f)]) == {"workable:acme", "bamboohr:foo", "lever:baz"}

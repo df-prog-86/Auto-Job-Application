@@ -11,7 +11,7 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
   python -m scripts.cache_tools probe 'workday:HOST|TENANT|SITE' ...
                                                           # reads those employers' public job lists and prints counts and sample titles.
                                                           # Saves nothing; this is how a candidate is checked before it is added.
-  python -m scripts.cache_tools add --from-file FILE [--apply] [--skip TEXT]
+  python -m scripts.cache_tools add --from-file FILE [--apply] [--skip TEXT] [--resume-from EARLIER_OUTPUT] [--parallel N]
                                                           # adds the employers in FILE that pass the standing rule (reads cleanly, enough jobs,
                                                           # mostly US, not an agency) and reads them. Dry run unless --apply. Stop the app first.
   python -m scripts.cache_tools discover --system greenhouse,lever,...|all [--pages 6] [--limit 300] [--out FILE]
@@ -245,9 +245,28 @@ def add_decision(system: str, ident: str, postings: list, args: argparse.Namespa
     return True, f"{n} jobs, {us}% US, {foreign}% outside the US" + (", named by you" if included else "")
 
 
+def _already_judged(paths: list[str]) -> set[str]:
+    """Employers an earlier `add` run already decided on, read from its saved output. A read that failed is not counted, so it is tried again."""
+    out: set[str] = set()
+    for path in paths:
+        for line in Path(path).read_text(errors="ignore").splitlines():
+            parts = line.split(None, 2)
+            if len(parts) < 2 or parts[0] not in ("ADD", "ADDED", "HAVE", "SKIP"):
+                continue
+            if parts[0] == "SKIP" and len(parts) > 2 and parts[2].startswith("could not be read"):
+                continue
+            out.add(parts[1])
+    return out
+
+
 async def _add(args: argparse.Namespace) -> int:
     """Adds employers that pass the standing rule to the saved lists and reads them. Without --apply nothing is written."""
     specs = [ln.split("#")[0].strip().strip("'") for ln in Path(args.from_file).read_text().splitlines() if ln.split("#")[0].strip()]
+    done = _already_judged(getattr(args, "resume_from", None) or [])
+    if done:
+        before = len(specs)
+        specs = [x for x in specs if x not in done]
+        print(f"Resuming: {before - len(specs)} employers already judged in the earlier output are skipped; {len(specs)} left.", flush=True)
     cache = JobCache()
     throttle = Throttle()  # keeps a polite gap per website; each employer is its own website, so several can be read at once
     gate = asyncio.Semaphore(getattr(args, "parallel", 6))
@@ -524,6 +543,7 @@ def main() -> None:
     ad.add_argument("--min-jobs", type=int, default=10)
     ad.add_argument("--min-us", type=int, default=60)
     ad.add_argument("--include", action="append", help="add any employer whose address contains this text without the place check (repeatable)")
+    ad.add_argument("--resume-from", action="append", metavar="FILE", help="an earlier output of this command; employers already judged there are not checked again (repeatable)")
     ad.add_argument("--skip", action="append", help="leave out any employer whose address contains this text (repeatable)")
     ad.add_argument("--source", default="curated")
     ad.add_argument("--parallel", type=int, default=6, help="employers read at the same time (each is a different website)")

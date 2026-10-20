@@ -27,7 +27,7 @@ from app.services.jobcache.text import fold, parse_location_query, place_ref
 log = logging.getLogger("job_cache")
 
 SYSTEM_LABELS = {"workday": "Workday", "greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "smartrecruiters": "SmartRecruiters",
-    "breezy": "Breezy HR", "workable": "Workable", "bamboohr": "BambooHR", "pinpoint": "Pinpoint", "jazzhr": "JazzHR", "jobvite": "Jobvite", "oracle": "Oracle Cloud", "icims": "iCIMS", "taleo": "Taleo", "phenom": "Phenom", "successfactors": "SuccessFactors", "dayforce": "Dayforce", "kpmg": "KPMG careers site", "deloitte": "Deloitte careers site", "talentbrew": "TalentBrew careers site",
+    "breezy": "Breezy HR", "workable": "Workable", "bamboohr": "BambooHR", "pinpoint": "Pinpoint", "jazzhr": "JazzHR", "jobvite": "Jobvite", "oracle": "Oracle Cloud", "icims": "iCIMS", "taleo": "Taleo", "phenom": "Phenom", "successfactors": "SuccessFactors", "dayforce": "Dayforce", "kpmg": "KPMG careers site", "deloitte": "Deloitte careers site", "talentbrew": "TalentBrew careers site", "jibe": "Jibe careers site",
 }
 CONCURRENT_EMPLOYERS = 4
 PRIORITY_HOURS, REGULAR_HOURS = 6.0, 24.0

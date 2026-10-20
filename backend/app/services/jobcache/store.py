@@ -640,6 +640,7 @@ OTHER_NAMES = {
     ("kpmg", "www.kpmguscareers.com"): "KPMG",
     ("deloitte", "apply.deloitte.com"): "Deloitte",
     ("talentbrew", "careers.unitedhealthgroup.com"): "UnitedHealth Group",
+    ("jibe", "careers.amd.com"): "AMD",
 }
 
 

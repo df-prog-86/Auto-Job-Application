@@ -1491,3 +1491,24 @@ def test_add_keeps_mostly_foreign_employer_with_many_us_jobs():
     ok, why = add_decision("workday", "x.wd1.myworkdayjobs.com|x|S", mk(30, 70), a)
     assert ok and "named by you" not in why
     assert not add_decision("workday", "x.wd1.myworkdayjobs.com|x|S", mk(8, 70), a)[0]
+
+
+JIBE_PAGE = {"totalCount": 1287, "jobs": [
+    {"data": {"slug": "93698", "req_id": "93698", "title": "Senior Graphics Machine Learning Engineer", "city": "Munich", "state": None, "country": "Germany",
+              "country_code": "DE", "posted_date": "2026-10-20T13:08:00+0000", "description": "<p>Build things.</p>", "tags2": ["EUR 78,680.00/Yr."]}},
+    {"data": {"slug": "93001", "req_id": "93001", "title": "Sr. Director Payroll", "city": "Austin", "state": "Texas", "country": "United States",
+              "country_code": "US", "posted_date": "2026-10-19T09:00:00+0000", "description": "<p>Run payroll.</p>", "tags2": ["USD $176,400.00/Yr."]}},
+]}
+
+
+def test_jibe_parse_and_link():
+    from app.services.jobcache import readers
+    got, total = readers.parse_jibe(JIBE_PAGE, "careers.amd.com")
+    assert total == 1287 and [g.ext_id for g in got] == ["93698", "93001"]
+    assert got[0].location == "Munich, Germany"
+    assert got[1].location == "Austin, Texas, United States"
+    assert got[1].url == "https://careers.amd.com/careers-home/jobs/93001?lang=en-us"
+    assert got[1].description == "Run payroll."
+    assert got[1].pay_text and "176" in got[1].pay_text
+    assert readers.parse_jibe({"jobs": []}, "x") == ([], None)
+    assert readers.employer_ref("https://careers.amd.com/jobs") == ("jibe", "careers.amd.com")

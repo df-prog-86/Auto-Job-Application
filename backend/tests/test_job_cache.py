@@ -1614,7 +1614,7 @@ def test_workday_names_the_places_behind_a_three_locations_listing():
     from app.services.discovery.ats import workday_info
 
     info = workday_info(200, {"jobPostingInfo": {"location": "Boston, MA", "additionalLocations": ["Quincy, MA", "Boston, MA", "Salem, MA", "Lynn, MA"], "startDate": "2026-10-01"}})
-    assert info.places == "Boston, MA; Quincy, MA; Salem, MA +1 more"
+    assert info.places == "Boston, MA; Quincy, MA; Salem, MA; Lynn, MA"  # every place is kept (the display shortens it)
 
 
 async def test_web_finds_are_ranked_into_the_list_by_their_match_not_added_at_the_end():
@@ -1864,3 +1864,22 @@ def test_a_city_search_is_a_filter_for_the_city_and_its_area_only():
     assert ok("2 Locations") and ok("New Mexico")  # no town named: kept only to be checked when the job is opened
     nationwide = matcher.build_plan(SimpleNamespace(titles="chef", location="United States", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
     assert matcher.place_ok(nationwide, "Albuquerque, NM", None) and matcher.place_ok(nationwide, "Remote - US", "remote")
+
+
+def test_a_long_list_of_places_leads_with_the_place_searched():
+    places = "Wesley Chapel, FL; Pace, FL; Tampa, FL; Orlando, FL; Jacksonville, FL"
+    led = text.lead_with_place(places, ["jacksonville"])
+    assert text.tidy_place(led).startswith("Jacksonville, FL") and "+2 more" in text.tidy_place(led)
+    assert text.lead_with_place("Boston, MA", ["boston"]) == "Boston, MA" and text.lead_with_place(places, []) == places
+
+
+def test_a_refresh_keeps_the_real_places_found_for_a_multi_location_job(tmp_path, monkeypatch):
+    monkeypatch.setattr(service.settings, "JOB_CACHE_PATH", str(tmp_path / "w.db"))
+    cache = JobCache()
+    eid, _ = cache.upsert_employer("workday", "h.wd1.myworkdayjobs.com|h|Careers", "Hospital", "search")
+    row = PostingIn(ext_id="/job/a/x_R1", title="Revenue Cycle Manager", location="3 Locations", url="https://h.wd1.myworkdayjobs.com/en-US/Careers/job/a/x_R1")
+    cache.apply_refresh(eid, [row], 1000)
+    assert cache.set_location(row.url, "Boston, MA; Quincy, MA; Salem, MA")
+    cache.apply_refresh(eid, [row], 2000)  # the list still says "3 Locations"
+    with cache.session() as db:
+        assert db.execute("SELECT location FROM postings WHERE ext_id = ?", (row.ext_id,)).fetchone()["location"] == "Boston, MA; Quincy, MA; Salem, MA"

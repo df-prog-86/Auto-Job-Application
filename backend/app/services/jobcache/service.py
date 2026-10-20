@@ -23,7 +23,7 @@ from app.services.jobcache import geo, matcher, onet
 from app.services.jobcache.keys import loose_keys, url_key
 from app.services.jobcache.readers import SYSTEMS, ReaderError, Throttle, employer_ref, make_client, read_employer
 from app.services.jobcache.store import JobCache, now_ts
-from app.services.jobcache.text import fold, parse_location_query, place_ref
+from app.services.jobcache.text import fold, is_vague_place, parse_location_query, place_ref
 
 log = logging.getLogger("job_cache")
 
@@ -319,6 +319,7 @@ async def ranked_items(criteria: Any) -> list[dict[str, Any]]:
         except Exception:
             log.exception("job search: could not read the descriptions of partly matching jobs")
     items = collapse_listings(out.items)
+    items = await resolve_vague_places(criteria, items, extra, places)
     for item in items:  # the description note only tells copies of one job apart: its opening is enough, and keeps the kept lists small
         if item.get("_desc"):
             item["_desc"] = item["_desc"][:600]
@@ -326,6 +327,47 @@ async def ranked_items(criteria: Any) -> list[dict[str, Any]]:
     for old in sorted(_RANKED, key=lambda k: _RANKED[k][0])[: max(len(_RANKED) - RANKED_KEEP, 0)]:
         _RANKED.pop(old, None)
     return items
+
+
+RESOLVE_PLACES_MAX = 60  # multi-location jobs opened per new search: the best-ranked first
+RESOLVE_PLACES_SECONDS = 12.0
+
+
+async def resolve_vague_places(criteria: Any, items: list[dict[str, Any]], extra_titles: list[str] | None, extra_places: list[str] | None) -> list[dict[str, Any]]:
+    """
+    A job whose list says only "3 Locations" is opened (the best-ranked ones, with a time limit) to learn where it really is. The real
+    places are saved, so it happens once per job. A job that turns out to be somewhere else leaves the list, so the match count is true.
+    """
+    from app.services.discovery import web_search
+
+    plan = matcher.build_plan(criteria, extra_titles, extra_places)
+    if plan.work_type == "remote" or plan.loc.empty or plan.loc.nationwide or not (plan.loc.cities or plan.loc.states):
+        return items
+    vague = [i for i in items if is_vague_place(i.get("location"))]
+    vague.sort(key=lambda i: -(i.get("fit") or 0.0))
+    todo = vague[:RESOLVE_PLACES_MAX]
+    if not todo:
+        return items
+    before = {id(i): i.get("location") for i in todo}
+    try:
+        await asyncio.wait_for(web_search.enrich_from_ats(todo), timeout=RESOLVE_PLACES_SECONDS)
+    except Exception:  # a slow or unreachable hiring system: those jobs stay as they were and are checked when their page opens
+        log.warning("job search: could not open every multi-location job in time")
+    cache = JobCache()
+    gone: set[int] = set()
+    for item in todo:
+        if item.get("ats_live") is False:
+            gone.add(id(item))
+            continue
+        loc = item.get("location")
+        if loc and loc != before[id(item)] and not is_vague_place(loc):
+            await asyncio.to_thread(cache.set_location, item["url"], loc)
+            if not matcher.place_ok(plan, loc, item.get("work_type")):
+                gone.add(id(item))
+    for item in todo:  # the opened pages told their dates and pay too: the next steps need not ask again
+        item.pop("ats_checked", None)
+        item.pop("ats_live", None)
+    return [i for i in items if id(i) not in gone]
 
 
 async def drop_from_ranked(criteria: Any, urls: set[str]) -> None:

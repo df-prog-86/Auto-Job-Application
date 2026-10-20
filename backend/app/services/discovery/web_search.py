@@ -998,7 +998,7 @@ async def _check_page(criteria: JobSearchIn, plan: Any, available: list[dict[str
     page is full.
     """
     from app.services.jobcache import matcher
-    from app.services.jobcache.text import is_vague_place
+    from app.services.jobcache.text import is_vague_place, lead_with_place
 
     kept: list[dict[str, Any]] = []
     rejected: list[str] = []
@@ -1010,6 +1010,9 @@ async def _check_page(criteria: JobSearchIn, plan: Any, available: list[dict[str
         batch = [dict(i) for i in available[pos : pos + need + (2 if _round == 0 else need)]]
         pos += len(batch)
         batch_urls = [i["url"] for i in batch]
+        wanted = [*plan.loc.cities, *(c for c, _s in plan.loc.near)]
+        for i in batch:  # a long list of places is shortened to three below: the place searched goes first so it is never the one hidden
+            i["location"] = lead_with_place(i.get("location"), wanted)
         tidy_items(batch)
         items = merge_twin_postings(merge_same_jobs(_dedupe_by_address(batch)))
         items, _gone = await enrich_from_ats(items)

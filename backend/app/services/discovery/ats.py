@@ -92,7 +92,14 @@ def workday_info(status: int, data: Any) -> AtsInfo:
     live = False if info.get("canApply") is False else True
     names = [info.get("location"), *(info.get("additionalLocations") or [])]
     cities = list(dict.fromkeys(n.strip() for n in names if isinstance(n, str) and n.strip()))
-    places = "; ".join(cities[:3]) + (f" +{len(cities) - 3} more" if len(cities) > 3 else "") if cities else None
+    places = None
+    if cities:  # every place, as far as it fits the saved field (display shortens it); the search needs the whole list
+        kept: list[str] = []
+        for c in cities:
+            if len("; ".join([*kept, c])) > 290:
+                break
+            kept.append(c)
+        places = "; ".join(kept)
     return AtsInfo(live=live, posted=posted, pay=extract_pay_text(info.get("jobDescription")), checked=True, places=places)
 
 

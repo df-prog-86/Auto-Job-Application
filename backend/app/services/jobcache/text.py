@@ -466,6 +466,15 @@ def clean_company(name: str | None) -> str:
     return out
 
 
+def lead_with_place(location: str | None, wanted: list[str]) -> str | None:
+    """A list of places with the ones the search asked for first, so shortening it to three ("A; B; C +4 more") never hides the place searched."""
+    if not location or ";" not in location or not wanted:
+        return location
+    parts = [p.strip() for p in location.split(";") if p.strip()]
+    hit = lambda part: any(f" {w} " in f" {fold(part)} " for w in wanted)
+    return "; ".join(sorted(parts, key=lambda p: 0 if hit(p) else 1))
+
+
 _CITY_DASH_STATE = re.compile(r"^([A-Za-z][A-Za-z .'\u2019]+)-([A-Z]{2})$")
 
 

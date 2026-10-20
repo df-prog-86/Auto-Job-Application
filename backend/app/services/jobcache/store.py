@@ -25,6 +25,7 @@ from typing import Any
 
 from app.config import settings
 from app.services.jobcache.agency import is_agency
+from app.services.jobcache.text import is_vague_place
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS employers (
@@ -380,10 +381,13 @@ class JobCache:
                         desc_add.append((int(cur.lastrowid), desc_lead(p.description)))
                     result.new += 1
                     continue
+                new_loc = p.location
+                if row["location"] and is_vague_place(new_loc) and not is_vague_place(row["location"]):
+                    new_loc = row["location"]  # the list only says "3 Locations": keep the real places found when the posting was opened
                 db.execute(
                     "UPDATE postings SET title = ?, location = ?, work_type = COALESCE(?, work_type), pay_text = COALESCE(?, pay_text), "
                     "pay_mid = COALESCE(?, pay_mid), posted_at = COALESCE(?, posted_at), url = ?, last_seen = ?, closed_at = NULL WHERE id = ?",
-                    (p.title[:300], (p.location or None) and p.location[:300], p.work_type, p.pay_text, p.pay_mid, posted, p.url[:1000], now, row["id"]),
+                    (p.title[:300], (new_loc or None) and new_loc[:300], p.work_type, p.pay_text, p.pay_mid, posted, p.url[:1000], now, row["id"]),
                 )
                 if fingerprint and fingerprint != row["desc_hash"]:  # the text is saved again only when it is new or has changed
                     db.execute("UPDATE postings SET description_z = ?, desc_hash = ? WHERE id = ?", (blob, fingerprint, row["id"]))
@@ -392,10 +396,10 @@ class JobCache:
                         desc_add.append((row["id"], desc_lead(p.description)))
                 if agency is not None and agency != row["agency"]:
                     db.execute("UPDATE postings SET agency = ? WHERE id = ?", (agency, row["id"]))
-                changed = row["title"] != p.title[:300] or (row["location"] or "") != (p.location or "")[:300]
+                changed = row["title"] != p.title[:300] or (row["location"] or "") != (new_loc or "")[:300]
                 if row["closed_at"] is not None or changed:
                     fts_del.append(row["id"])
-                    fts_add.append((row["id"], p.title[:300], company, (p.location or "")[:300]))
+                    fts_add.append((row["id"], p.title[:300], company, (new_loc or "")[:300]))
             gone = [r["id"] for k, r in existing.items() if close_missing and k not in seen and r["closed_at"] is None]
             if gone:
                 db.executemany("UPDATE postings SET closed_at = ? WHERE id = ?", [(now, i) for i in gone])
@@ -412,6 +416,22 @@ class JobCache:
                 (now, now, now + int(interval_hours * 3600), open_now, employer_id),
             )
         return result
+
+    def set_location(self, url: str, location: str) -> bool:
+        """Saves the real places of an open posting whose list only said "3 Locations" (and keeps the place index in step). False if not found."""
+        location = (location or "").strip()[:300]
+        if not location:
+            return False
+        with self.session() as db:
+            row = db.execute(
+                "SELECT p.id, p.title, e.name AS company FROM postings p JOIN employers e ON e.id = p.employer_id WHERE p.url = ? AND p.closed_at IS NULL LIMIT 1", (url,)
+            ).fetchone()
+            if not row:
+                return False
+            db.execute("UPDATE postings SET location = ? WHERE id = ?", (location, row["id"]))
+            self._fts_delete(db, [row["id"]])
+            self._fts_insert(db, [(row["id"], row["title"], row["company"], location)])
+        return True
 
     def cleanup(self, now: int | None = None) -> int:
         """Deletes postings that have been closed for a month, then the oldest closed ones if the copy is over its size limit."""

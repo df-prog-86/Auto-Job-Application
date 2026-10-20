@@ -17,6 +17,8 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
   python -m scripts.cache_tools discover --system greenhouse,lever,...|all [--pages 6] [--limit 300] [--out FILE]
                                                           # asks Common Crawl for employer boards we do not read yet and writes them to FILE.
                                                           # Read only; check them afterwards with 'add --from-file FILE' (a dry run).
+  python -m scripts.cache_tools recheck --system smartrecruiters
+                                                          # reads that system's employers again now, so saved jobs get corrected details after a fix.
   python -m scripts.cache_tools usshare [--disable | --restore]
                                                           # lists employers whose jobs are mostly outside the US. --disable turns them off (reversible).
   python -m scripts.cache_tools reindex [--db PATH]
@@ -181,7 +183,9 @@ def location_kind(loc: str | None) -> str:
         or any(re.search(rf"\b{re.escape(name)}\b", low) for name in STATE_BY_NAME)
     ):
         return "us"
-    return "foreign" if _FOREIGN.search(loc) else "unknown"
+    from app.services.jobcache.text import _NON_US
+
+    return "foreign" if _FOREIGN.search(loc) or any(f" {c} " in f" {low} " for c in _NON_US) else "unknown"
 
 
 def us_stats(postings: list) -> tuple[int, int]:
@@ -543,6 +547,21 @@ def cmd_industry(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_recheck(args: argparse.Namespace) -> int:
+    """Reads the named hiring system's employers again now (used after a reader fix), so saved jobs get the corrected details."""
+    from app.services.jobcache import service
+
+    cache = JobCache()
+    with cache.session() as db:
+        ids = [r["id"] for r in db.execute("SELECT id FROM employers WHERE enabled = 1 AND ats = ?", (args.system,))]
+    if not ids:
+        print(f"No enabled employers on {args.system}.")
+        return 0
+    print(f"Reading {len(ids)} {args.system} employers again ...", flush=True)
+    print(service.run_refresh(only_ids=ids, limit=len(ids), seed=False), flush=True)
+    return 0
+
+
 US_OFF_NOTE = "turned off: mostly outside the US"
 
 
@@ -630,6 +649,8 @@ def main() -> None:
     ad.add_argument("--skip", action="append", help="leave out any employer whose address contains this text (repeatable)")
     ad.add_argument("--source", default="curated")
     ad.add_argument("--parallel", type=int, default=6, help="employers read at the same time (each is a different website)")
+    rc = sub.add_parser("recheck")
+    rc.add_argument("--system", required=True, help="hiring system to read again, e.g. smartrecruiters")
     us = sub.add_parser("usshare")
     us.add_argument("--max-us", type=int, default=30, help="employers with a smaller share of clearly US jobs than this are listed")
     us.add_argument("--min-foreign", type=int, default=50, help="and at least this share clearly outside the US")
@@ -650,6 +671,8 @@ def main() -> None:
         sys.exit(asyncio.run(_discover(args)))
     if args.cmd == "add":
         sys.exit(asyncio.run(_add(args)))
+    if args.cmd == "recheck":
+        sys.exit(cmd_recheck(args))
     if args.cmd == "usshare":
         sys.exit(cmd_usshare(args))
     if args.cmd == "reindex":

@@ -668,7 +668,7 @@ def test_smartrecruiters_postings_are_parsed():
     assert first.url == "https://jobs.smartrecruiters.com/Acme/7001-revenue-cycle-manager"
     assert first.location == "Boston, MA" and first.posted_at == dt.date(2026, 10, 1) and first.work_type is None
     assert remote.location == "Remote" and remote.work_type == "remote"
-    assert abroad.location == "Toronto, ON, CA"
+    assert abroad.location == "Toronto, ON, Canada"  # the country is written out, since "CA" is also California
 
 
 def test_smartrecruiters_reader_pages_through_the_list_and_reports_the_company_name():
@@ -1342,3 +1342,36 @@ def test_usshare_lists_and_turns_off_foreign_employers(tmp_path, monkeypatch):
     cache_tools.cmd_usshare(argparse.Namespace(**{**ns, "restore": True}))
     with cache.session() as db:
         assert db.execute("SELECT COUNT(*) FROM employers WHERE enabled = 1").fetchone()[0] == 2
+
+
+def test_smartrecruiters_country_codes_are_not_read_as_us_states():
+    from app.services.jobcache.readers import parse_smartrecruiters
+    from app.services.jobcache.text import location_fit, parse_location_query
+
+    def loc(city, region, country):
+        data = {"content": [{"id": "1", "name": "Nurse", "location": {"city": city, "region": region, "country": country}}]}
+        return parse_smartrecruiters(data, "x")[0].location
+
+    assert loc("Toronto", "ON", "ca") == "Toronto, ON, Canada"
+    assert loc("Hyderabad", "", "in") == "Hyderabad, India"
+    assert loc("Bogota", "", "co") == "Bogota, Colombia"
+    assert loc("Casablanca", "", "ma") == "Casablanca, Morocco"
+    assert loc("Erie", "PA", "us") == "Erie, PA"  # a US posting is written as before
+    california = parse_location_query("California")
+    assert location_fit(california, loc("Toronto", "ON", "ca"), None) == 0.0
+    assert location_fit(california, "Fresno, CA", None) == 1.0
+    assert location_fit(parse_location_query("Indiana"), loc("Hyderabad", "", "in"), None) == 0.0
+
+
+def test_united_states_search_means_anywhere_in_the_us():
+    from app.services.jobcache.text import location_fit, parse_location_query
+
+    q = parse_location_query("United States")
+    assert q.nationwide and not q.cities and not q.states
+    assert location_fit(q, "Boston, MA", None) == 1.0
+    assert location_fit(q, "Austin, Texas", None) == 1.0
+    assert location_fit(q, "Remote", "remote") == 0.9
+    assert location_fit(q, "Berlin, Germany", None) == 0.0
+    assert location_fit(q, "Athens, Greece", None) == 0.0
+    assert location_fit(q, "Springfield", None) == 0.5  # says nothing: kept to be checked, as for any search
+    assert not parse_location_query("Boston, MA").nationwide

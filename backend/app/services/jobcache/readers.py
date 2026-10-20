@@ -399,6 +399,27 @@ async def _read_workday(identifier: str, client: httpx.AsyncClient, throttle: Th
 
 # ---- SmartRecruiters ----------------------------------------------------------------------------------------------
 
+ISO_COUNTRIES = {
+    "AD": "Andorra", "AE": "United Arab Emirates", "AF": "Afghanistan", "AL": "Albania", "AM": "Armenia", "AO": "Angola", "AR": "Argentina",
+    "AT": "Austria", "AU": "Australia", "AZ": "Azerbaijan", "BA": "Bosnia", "BD": "Bangladesh", "BE": "Belgium", "BG": "Bulgaria",
+    "BH": "Bahrain", "BM": "Bermuda", "BO": "Bolivia", "BR": "Brazil", "BS": "Bahamas", "BY": "Belarus", "CA": "Canada",
+    "CH": "Switzerland", "CI": "Ivory Coast", "CL": "Chile", "CM": "Cameroon", "CN": "China", "CO": "Colombia", "CR": "Costa Rica",
+    "CY": "Cyprus", "CZ": "Czech Republic", "DE": "Germany", "DK": "Denmark", "DO": "Dominican Republic", "DZ": "Algeria",
+    "EC": "Ecuador", "EE": "Estonia", "EG": "Egypt", "ES": "Spain", "ET": "Ethiopia", "FI": "Finland", "FR": "France",
+    "GB": "United Kingdom", "UK": "United Kingdom", "GE": "Republic of Georgia", "GH": "Ghana", "GR": "Greece", "GT": "Guatemala",
+    "HK": "Hong Kong", "HN": "Honduras", "HR": "Croatia", "HU": "Hungary", "ID": "Indonesia", "IE": "Ireland", "IL": "Israel",
+    "IN": "India", "IQ": "Iraq", "IR": "Iran", "IS": "Iceland", "IT": "Italy", "JM": "Jamaica", "JO": "Jordan", "JP": "Japan",
+    "KE": "Kenya", "KR": "South Korea", "KW": "Kuwait", "KZ": "Kazakhstan", "LB": "Lebanon", "LK": "Sri Lanka", "LT": "Lithuania",
+    "LU": "Luxembourg", "LV": "Latvia", "MA": "Morocco", "MD": "Moldova", "ME": "Montenegro", "MK": "North Macedonia", "MT": "Malta",
+    "MX": "Mexico", "MY": "Malaysia", "NG": "Nigeria", "NI": "Nicaragua", "NL": "Netherlands", "NO": "Norway", "NP": "Nepal",
+    "NZ": "New Zealand", "OM": "Oman", "PA": "Panama", "PE": "Peru", "PH": "Philippines", "PK": "Pakistan", "PL": "Poland",
+    "PT": "Portugal", "PY": "Paraguay", "QA": "Qatar", "RO": "Romania", "RS": "Serbia", "RU": "Russia", "SA": "Saudi Arabia",
+    "SE": "Sweden", "SG": "Singapore", "SI": "Slovenia", "SK": "Slovakia", "SN": "Senegal", "SV": "El Salvador", "TH": "Thailand",
+    "TN": "Tunisia", "TR": "Turkey", "TT": "Trinidad", "TW": "Taiwan", "TZ": "Tanzania", "UA": "Ukraine", "UG": "Uganda",
+    "UY": "Uruguay", "UZ": "Uzbekistan", "VE": "Venezuela", "VN": "Vietnam", "ZA": "South Africa",
+}  # two-letter country codes written out, because "CA", "IN", "CO" and "MA" are also US state codes
+
+
 def parse_smartrecruiters(data: Any, identifier: str) -> list[PostingIn]:
     """SmartRecruiters' public Posting API: {"totalFound": n, "content": [{id, name, releasedDate, location: {city, region, country, remote}, company}]}."""
     out: list[PostingIn] = []
@@ -407,7 +428,7 @@ def parse_smartrecruiters(data: Any, identifier: str) -> list[PostingIn]:
             continue
         loc_obj = j.get("location") if isinstance(j.get("location"), dict) else {}
         city, region, country = (str(loc_obj.get(k) or "").strip() for k in ("city", "region", "country"))
-        parts = [city, region] if country.lower() in ("us", "usa", "") else [city, region, country.upper()]
+        parts = [city, region] if country.lower() in ("us", "usa", "") else [city, region, ISO_COUNTRIES.get(country.upper(), country.upper())]
         loc = ", ".join(p for p in parts if p) or ("Remote" if loc_obj.get("remote") is True else None)
         declared = "remote" if loc_obj.get("remote") is True else "hybrid" if loc_obj.get("hybrid") is True else None
         company = j.get("company") if isinstance(j.get("company"), dict) else {}

@@ -231,12 +231,21 @@ _NON_US = (
     "argentina", "colombia", "portugal", "sweden", "romania", "ukraine", "costa rica", "south africa", "nigeria", "egypt",
     "pakistan", "bangladesh", "vietnam", "indonesia", "turkey", "switzerland", "denmark", "norway", "finland", "belgium",
     "emea", "apac", "latam", "europe", "uk",
+    "greece", "malta", "lithuania", "latvia", "estonia", "hungary", "czechia", "czech republic", "slovakia", "slovenia", "croatia",
+    "serbia", "bulgaria", "austria", "russia", "luxembourg", "iceland", "cyprus", "morocco", "tunisia", "algeria", "kenya", "ghana",
+    "ethiopia", "tanzania", "uganda", "senegal", "ivory coast", "saudi arabia", "united arab emirates", "uae", "qatar", "kuwait",
+    "bahrain", "oman", "jordan", "lebanon", "iraq", "iran", "peru", "chile", "uruguay", "paraguay", "bolivia", "ecuador", "venezuela",
+    "panama", "guatemala", "honduras", "el salvador", "nicaragua", "dominican republic", "jamaica", "trinidad", "bahamas", "bermuda",
+    "thailand", "malaysia", "south korea", "korea", "taiwan", "hong kong", "new zealand", "sri lanka", "nepal", "kazakhstan",
+    "uzbekistan", "turkiye", "republic of georgia", "armenia", "azerbaijan", "belarus", "moldova", "albania", "north macedonia",
+    "bosnia", "montenegro", "kosovo", "lithuania",
 )
 _UNKNOWN_PLACE = re.compile(r"\b(\d+\s+locations?|multiple locations?|various|several locations?|locations? vary|anywhere)\b", re.I)
 
 
 @dataclass
 class LocationQuery:
+    nationwide: bool = False  # "United States" with no city or state: anywhere in the US
     cities: list[str] = field(default_factory=list)
     states: set[str] = field(default_factory=set)
     remote: bool = False
@@ -269,7 +278,9 @@ def parse_location_query(text: str | None) -> LocationQuery:
             chunk = re.sub(rf"\b{name}\b", " ", chunk).strip()
         if chunk and chunk.upper() not in US_STATES and len(chunk) > 2:
             q.cities.append(re.sub(r"\s+", " ", chunk))
-    if not q.cities and not q.states and not q.remote:
+    if not q.cities and not q.states and re.search(r"\bunited states\b|\busa\b|\bus\b", folded):
+        q.nationwide = True
+    if not q.cities and not q.states and not q.remote and not q.nationwide:
         q.cities = [re.sub(r"\s+", " ", cleaned)] if cleaned.strip() else []
     return q
 
@@ -320,6 +331,9 @@ def location_fit(q: LocationQuery, location: str | None, work_type: str | None) 
     foreign = any(f" {c} " in folded for c in _NON_US) and not posting_states and " united states " not in folded and " usa " not in folded and " us " not in folded
     if foreign and (wanted_states or not q.cities):
         return 0.0
+    if q.nationwide:  # anywhere in the US: a US place counts fully, a place that says nothing is kept to be checked
+        us_place = bool(posting_states) or " united states " in folded or " usa " in folded
+        return 1.0 if us_place else (0.9 if remote_posting else 0.5)
     for city in q.cities:
         if f" {city} " in folded:
             if not wanted_states or not posting_states or wanted_states & posting_states:

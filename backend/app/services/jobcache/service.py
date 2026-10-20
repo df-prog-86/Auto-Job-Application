@@ -128,6 +128,8 @@ def collapse_listings(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for item in items:
         desc = _squash((item.get("_desc") or "")[:300])
+        if not desc and item.get("salary_text") and title_without_code(item.get("title")) != (item.get("title") or ""):
+            desc = "nodescription"  # no description saved: a title that carries a requisition code and the same pay and date is evidence enough
         if item.get("location") and item.get("posted_at") and desc:
             key = "|".join((_squash(item.get("company")), _squash(title_without_code(item.get("title"))), _squash(item["location"]),
                             _squash(item.get("salary_text")), str(item["posted_at"]), desc))

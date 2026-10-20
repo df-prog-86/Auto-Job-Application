@@ -1600,6 +1600,10 @@ def test_one_job_listed_twice_is_one_result_but_two_real_openings_stay_two():
     assert len(service.collapse_listings(same)) == 1
     other_team = [job("Senior Marketing Manager, Edge (SMM193)", "Lead edge product marketing for"), job("Senior Marketing Manager, Edge (SMM194)", "Run field events and")]
     assert len(service.collapse_listings(other_team)) == 2
+    no_text = [job("Senior Marketing Manager, Edge (SMM193)", ""), job("Senior Marketing Manager, Edge (SMM194)", "")]
+    assert len(service.collapse_listings(no_text)) == 1  # nothing saved to compare, but both carry a requisition code with the same pay and date
+    plain = [job("Nurse", ""), job("Nurse", "")]
+    assert len(service.collapse_listings(plain)) == 2  # no code and no text: could be two real openings
     other_place = [job("Nurse", "Care for patients on", "Boston, MA"), job("Nurse", "Care for patients on", "Quincy, MA")]
     assert len(service.collapse_listings(other_place)) == 2
 

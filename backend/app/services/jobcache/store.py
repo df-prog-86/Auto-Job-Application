@@ -639,6 +639,7 @@ OTHER_NAMES = {
     ("dayforce", "finthrive|candidateportal|en-us"): "FinThrive",
     ("kpmg", "www.kpmguscareers.com"): "KPMG",
     ("deloitte", "apply.deloitte.com"): "Deloitte",
+    ("talentbrew", "careers.unitedhealthgroup.com"): "UnitedHealth Group",
 }
 
 

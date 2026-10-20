@@ -26,15 +26,16 @@ from app.services.jobcache.text import html_to_text, is_vague_place, location_fr
 USER_AGENT = "JobAgent/1.0 (personal job search tool; reads public job lists)"
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
-SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle", "icims", "taleo", "phenom", "successfactors", "dayforce", "kpmg", "deloitte")
+SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle", "icims", "taleo", "phenom", "successfactors", "dayforce", "kpmg", "deloitte", "talentbrew")
 WORKDAY_PAGE = 20  # Workday returns at most 20 jobs per request
 WORKDAY_MAX_JOBS = 4000  # a very large employer is read up to this many jobs, newest first as Workday lists them (IQVIA hit the old 1,500 limit)
 SMARTRECRUITERS_PAGE = 100  # postings per request from the public Posting API
 SMARTRECRUITERS_MAX_JOBS = 2000
 _MIN_GAP = {
     "workday": 0.6, "greenhouse": 0.3, "lever": 0.3, "ashby": 0.3, "smartrecruiters": 0.4,
-    "breezy": 0.5, "workable": 0.5, "bamboohr": 0.5, "pinpoint": 0.5, "jazzhr": 0.8, "jobvite": 0.8, "oracle": 0.6, "icims": 1.0, "taleo": 1.0, "phenom": 0.6, "successfactors": 1.0, "dayforce": 0.6, "kpmg": 1.0, "deloitte": 1.0,
+    "breezy": 0.5, "workable": 0.5, "bamboohr": 0.5, "pinpoint": 0.5, "jazzhr": 0.8, "jobvite": 0.8, "oracle": 0.6, "icims": 1.0, "taleo": 1.0, "phenom": 0.6, "successfactors": 1.0, "dayforce": 0.6, "kpmg": 1.0, "deloitte": 1.0, "talentbrew": 1.0,
 }  # seconds between requests to one site
+TALENTBREW_SITES = {"careers.unitedhealthgroup.com"}  # TalentBrew (Radancy) career sites, each added by hand once it has been checked
 PHENOM_SITES = {"careers.bcg.com"}  # Phenom career sites differ in their settings, so each one is added by hand once it has been checked
 SUCCESSFACTORS_SITES = {"careers.ey.com"}  # EY lists the whole world; only its US jobs are read (see SUCCESSFACTORS_COUNTRY)
 SUCCESSFACTORS_COUNTRY = {"careers.ey.com": "US"}
@@ -127,6 +128,8 @@ def employer_ref(url: str) -> tuple[str, str] | None:
         q = parse_qs(parts.query or "")
         org, cws = (q.get("org") or [""])[0], (q.get("cws") or [""])[0]
         return ("taleo", f"{host}|{segs[0]}|{org}|{cws}") if org and cws else None
+    if host in TALENTBREW_SITES and segs and segs[0] in ("job", "search-jobs"):
+        return "talentbrew", host
     if host in PHENOM_SITES:
         return "phenom", host
     if host in SUCCESSFACTORS_SITES and segs and segs[0] == "ey":
@@ -166,7 +169,7 @@ def reader_url_allowed(url: str) -> bool:
         return False
     if any(bad in parts.path.lower() for bad in ("..", "%2e", "%2f", "%5c", "\\")) or any(c.isspace() for c in url):
         return False
-    return host in PHENOM_SITES or host in SUCCESSFACTORS_SITES or host.endswith(READER_HOST_SUFFIXES) or any(host == s[1:] for s in READER_HOST_SUFFIXES)
+    return host in PHENOM_SITES or host in TALENTBREW_SITES or host in SUCCESSFACTORS_SITES or host.endswith(READER_HOST_SUFFIXES) or any(host == s[1:] for s in READER_HOST_SUFFIXES)
 
 
 async def _request(client: httpx.AsyncClient, throttle: Throttle, system: str, method: str, url: str, text: bool = False, **kwargs: Any) -> Any:
@@ -1131,13 +1134,77 @@ async def _read_deloitte(identifier: str, client: httpx.AsyncClient, throttle: T
     return ReadResult(postings, complete=complete, notes=notes)
 
 
+# ---- TalentBrew / Radancy career sites (page reading) ---------------------------------------------------------------
+
+TALENTBREW_PAGE = 20
+TALENTBREW_MAX_PAGES = 400
+_TB_QUERY = (
+    "ActiveFacetID=0&CurrentPage={page}&RecordsPerPage=20&TotalContentResults=&Distance=50&RadiusUnitType=0&Keywords=&Location="
+    "&Latitude=&Longitude=&ShowRadius=False&IsPagination={pag}&CustomFacetName=&FacetTerm=&FacetType=0"
+    "&SearchResultsModuleName=Search+Results&SearchFiltersModuleName=Search+Filters&SortCriteria=0&SortDirection=0&SearchType=5"
+    "&PostalCode=&ResultsType=0&fc=&fl=&fcf=&afc=&afl=&afcf=&TotalContentPages=NaN"
+)
+
+
+def parse_talentbrew(data: Any, host: str) -> tuple[list[PostingIn], int | None]:
+    """A TalentBrew list answer ({"results": "<html>"} from /search-jobs/results): each opening is <a href="/job/<city>/<slug>/<org>/<id>">
+    with the title in an <h2>, then "job-location" and "job-worksetting" spans. Returns (postings, total jobs)."""
+    html = data.get("results") if isinstance(data, dict) else None
+    if not isinstance(html, str):
+        return [], None
+    total_m = re.search(r'data-total-job-results="(\d+)"', html)
+    out: list[PostingIn] = []
+    seen: set[str] = set()
+    for m in re.finditer(r'<li>\s*<a href="(/job/[^"]+/(\d+))"[^>]*>(.*?)</a>', html, re.S):
+        jid = m.group(2)
+        body = m.group(3)
+        title_m = re.search(r"<h2[^>]*>(.*?)</h2>", body, re.S)
+        title = _plain(title_m.group(1)) if title_m else ""
+        if not title or jid in seen:
+            continue
+        seen.add(jid)
+        places = [_plain(x) for x in re.findall(r'<span class="job-location[^"]*">(.*?)</span>', body, re.S)]
+        places = [x for x in places if x]
+        loc = "; ".join(places) or None
+        ws_m = re.search(r'<span class="job-info job-worksetting">(.*?)</span>', body, re.S)
+        declared = _plain(ws_m.group(1)) if ws_m else None
+        out.append(PostingIn(ext_id=jid, title=title, url=f"https://{host}{m.group(1)}", location=loc, work_type=work_type_from(declared, loc, title)))
+    return out, int(total_m.group(1)) if total_m else None
+
+
+async def _read_talentbrew(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    host = identifier.strip().lower()
+    if host not in TALENTBREW_SITES:
+        raise ReaderError("that careers site isn't one we read yet", gone=True)
+    postings: list[PostingIn] = []
+    seen: set[str] = set()
+    complete = False
+    for n in range(1, TALENTBREW_MAX_PAGES + 1):
+        # IsPagination=True asks for the job list only; the first answer carries a very large filter list we do not need.
+        url = f"https://{host}/search-jobs/results?" + _TB_QUERY.format(page=n, pag="True" if n > 1 else "False")
+        data = await _request(client, throttle, "talentbrew", "GET", url, headers={"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"})
+        found, total = parse_talentbrew(data, host)
+        if n == 1 and not found:
+            if isinstance(data, dict) and data.get("hasJobs") is False:
+                return ReadResult([], complete=True)
+            raise ReaderError("we couldn't make sense of that careers page")
+        new = [p for p in found if p.ext_id not in seen]
+        seen.update(p.ext_id for p in new)
+        postings.extend(new)
+        if not new or len(found) < TALENTBREW_PAGE or (total is not None and len(postings) >= total):
+            complete = True
+            break
+    notes = [] if complete else [f"read the first {len(postings)} jobs"]
+    return ReadResult(postings, complete=complete, notes=notes)
+
+
 # ---- entry point --------------------------------------------------------------------------------------------------
 
 _READERS = {"greenhouse": _read_greenhouse, "lever": _read_lever, "ashby": _read_ashby, "workday": _read_workday, "smartrecruiters": _read_smartrecruiters,
     "breezy": _read_breezy, "workable": _read_workable, "bamboohr": _read_bamboohr, "pinpoint": _read_pinpoint,
     "jazzhr": _read_jazzhr, "jobvite": _read_jobvite, "oracle": _read_oracle, "icims": _read_icims,
     "taleo": _read_taleo, "phenom": _read_phenom, "successfactors": _read_successfactors,
-    "dayforce": _read_dayforce, "kpmg": _read_kpmg, "deloitte": _read_deloitte,
+    "dayforce": _read_dayforce, "kpmg": _read_kpmg, "deloitte": _read_deloitte, "talentbrew": _read_talentbrew,
 }
 
 

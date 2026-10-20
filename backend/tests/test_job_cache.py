@@ -1434,3 +1434,30 @@ def test_deloitte_parse_and_link():
     assert got[0].url.endswith("/372165")
     assert readers.parse_deloitte("<html>nothing</html>") == []
     assert readers.employer_ref("https://apply.deloitte.com/en_US/careers/JobDetail/WMS-Consulting-Senior-Manager/372156") == ("deloitte", "apply.deloitte.com")
+
+
+TB_PAGE = {"results": """<section id="search-results" data-total-job-results="5590" data-total-pages="280"><section id="search-results-list"><ul>
+<li>
+<a href="/job/omaha/maternal-health-and-epsdt-coordinator-remote-in-nebraska/34088/102182073824" data-job-id="102182073824" class="brand-facet brand-facet__uhc">
+<div><h2>Maternal Health and EPSDT Coordinator, Remote in Nebraska</h2>
+ <span class="job-id job-info">2388715</span><span class="job-divider"> | </span>
+ <span class="job-location 1">Omaha, Nebraska</span><span class="job-divider"> | </span>
+ <span class="job-info job-worksetting">Remote</span></div></a>
+<button type="button" class="js-save-job-btn" data-job-id="102182073824"></button></li>
+<li>
+<a href="/job/nashville/rn-case-manager/34088/102182073792" data-job-id="102182073792"><div><h2>RN Case Manager</h2>
+ <span class="job-id job-info">2395676</span><span class="job-location 1">Nashville, Tennessee</span></div></a></li>
+</ul></section></section>""", "hasJobs": True, "hasContent": False}
+
+
+def test_talentbrew_parse_and_link():
+    from app.services.jobcache import readers
+    got, total = readers.parse_talentbrew(TB_PAGE, "careers.unitedhealthgroup.com")
+    assert total == 5590
+    assert [g.ext_id for g in got] == ["102182073824", "102182073792"]
+    assert got[0].title.startswith("Maternal Health") and got[0].location == "Omaha, Nebraska"
+    assert got[0].work_type == "remote"
+    assert got[1].url == "https://careers.unitedhealthgroup.com/job/nashville/rn-case-manager/34088/102182073792"
+    assert readers.parse_talentbrew({"results": "", "hasJobs": True}, "x") == ([], None)
+    assert readers.employer_ref("https://careers.unitedhealthgroup.com/job/minnetonka/healthcare-analytics-consultant/34088/101882693968") == ("talentbrew", "careers.unitedhealthgroup.com")
+    assert readers.reader_url_allowed("https://careers.unitedhealthgroup.com/search-jobs/results?CurrentPage=1")

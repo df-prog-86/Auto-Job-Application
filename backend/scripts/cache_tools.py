@@ -354,6 +354,9 @@ _BOARD_HOSTS = {  # where each system's public job-board addresses live; "*.x.co
     "breezy": ("*.breezy.hr",),
     "jazzhr": ("*.applytojob.com",),
     "pinpoint": ("*.pinpointhq.com",),
+    "workday": ("*.myworkdayjobs.com",),  # the large employers: hospitals, health systems, banks, consultancies
+    "icims": ("*.icims.com",),
+    "taleo": ("*.taleo.net",),  # only addresses that carry the career site's org and cws are usable, so expect fewer
 }
 
 
@@ -632,7 +635,7 @@ def main() -> None:
     s.add_argument("--db")
     s.add_argument("--max-hosts", type=int, default=60)
     dc = sub.add_parser("discover")
-    dc.add_argument("--system", required=True, help="greenhouse, lever, ashby, smartrecruiters, workable, jobvite, bamboohr, breezy, jazzhr, pinpoint (comma separated) or all")
+    dc.add_argument("--system", required=True, help="greenhouse, lever, ashby, smartrecruiters, workable, jobvite, bamboohr, breezy, jazzhr, pinpoint, workday, icims, taleo (comma separated) or all")
     dc.add_argument("--db")
     dc.add_argument("--pages", type=int, default=6, help="random index pages to read per address")
     dc.add_argument("--limit", type=int, default=300, help="most boards to write per hiring system (0 = no limit)")

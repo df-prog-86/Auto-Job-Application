@@ -17,6 +17,7 @@ from typing import Any
 
 from app.services.jobcache.text import (
     SENIORITY_ONLY,
+    STATE_BY_NAME,
     STOPWORDS,
     LocationQuery,
     all_stems,
@@ -335,6 +336,8 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
     lf = location_fit(loc, row.get("location"), wt)
     if lf <= 0.0:
         return None
+    if is_vague_place(row.get("location")) and title_names_other_state(plan, row["title"]):
+        return None  # no place listed, but the title says where ("Marine Biologist - Alaska"): not the place asked for
     mid = row.get("pay_mid")
     if mid is None and row.get("pay_text"):
         mid = pay_midpoint(row["pay_text"])  # saved before the pay could be read: read it now
@@ -356,6 +359,15 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
     if via_desc or desc_hit(plan, row.get("description")):
         fit += W_DESC
     return Scored(row=row, fit=round(min(fit, 1.0), 4), title_fit=tf, place_fit=lf, via_description=via_desc, needs_description=needs_text)
+
+
+def title_names_other_state(plan: Plan, title: str) -> bool:
+    """True when a title spells out a US state (not the one asked for) and the search names a place, e.g. "Marine Biologist - Alaska" in a Honolulu search."""
+    if plan.loc.empty or plan.loc.nationwide or not plan.loc.states:
+        return False
+    folded = f" {fold(title)} "
+    named = {abbr for name, abbr in STATE_BY_NAME.items() if f" {name} " in folded}
+    return bool(named) and not (named & plan.loc.states)
 
 
 def place_ok(plan: Plan, location: str | None, work_type: str | None) -> bool:

@@ -1843,3 +1843,11 @@ def test_a_found_name_must_fit_the_employers_own_address():
     assert ok("ASM Global", "asmglobal") and ok("Doherty Enterprises", "dohertyinc") and ok("PT Solutions", "ptsolutions")
     assert not ok("Legends Hospitality", "asmglobal") and not ok("JINYA Ramen Bar", "dohertyinc") and not ok("Gerber Payroll Services", "boydgroup")
     assert cache_tools.clean_found_name("Gerber Payroll Services, Inc.") == "Gerber Payroll Services"
+
+
+def test_a_job_with_no_place_whose_title_names_another_state_is_left_out():
+    plan = matcher.build_plan(SimpleNamespace(titles="marine biologist", location="Honolulu, HI", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
+    row = {"company": "X", "location": None, "work_type": None, "pay_mid": None, "pay_text": None, "posted_at": None, "url": "u", "description": None}
+    assert matcher.score_row(plan, {**row, "title": "Marine Biologist - Alaska"}) is None
+    assert matcher.score_row(plan, {**row, "title": "Marine Biologist - Hawaii"}) is not None
+    assert matcher.score_row(plan, {**row, "title": "Marine Biologist"}) is not None

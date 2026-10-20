@@ -360,6 +360,8 @@ export interface JobSearchCriteria {
   more?: boolean;
   /** For the page endpoint: which page of the saved-list matches to return. */
   page?: number;
+  /** The order of the whole list (the page count does not change with it). */
+  sort?: "search" | "newest" | "resume";
 }
 
 export interface JobSearchResultOut {

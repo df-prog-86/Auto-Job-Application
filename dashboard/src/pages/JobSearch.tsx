@@ -119,16 +119,18 @@ export function JobSearch() {
   const shown = sortResults(autofillOnly ? items.filter((r) => autofillSite(r.url)) : items, sortBy);
   // Pages of PAGE_SIZE. In "Best match" order the first page is the top of what is loaded and every later page is fetched from the
   // server on its own (so the last page is as quick as page 2). In any other order the pages are cut from what is already loaded.
-  const serverMode = sortBy === "search" && !autofillOnly;
+  const serverMode = !autofillOnly;
   const poolSize = serverMode ? (matchTotal ?? shown.length + moreAvailable) : shown.length;
   const totalPages = Math.max(1, Math.ceil(poolSize / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const firstPageIds = new Set(shown.slice(0, PAGE_SIZE).map((r) => r.id));
   const byId = new Map(items.map((r) => [r.id, r]));
-  const pageItems =
-    serverMode && currentPage > 1
-      ? (serverPages[currentPage] ?? []).map((id) => byId.get(id)).filter((r): r is JobSearchResultOut => !!r && !firstPageIds.has(r.id))
-      : shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  // In "Best match" order page 1 is what the search just found (the web results included); every other page, and every page in
+  // another order, is the server's cut of the whole list in that order.
+  const fromServer = serverMode && !(sortBy === "search" && currentPage === 1);
+  const pageItems = fromServer
+    ? (serverPages[currentPage] ?? []).map((id) => byId.get(id)).filter((r): r is JobSearchResultOut => !!r && (sortBy !== "search" || !firstPageIds.has(r.id)))
+    : shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   useEffect(() => {
     listRef.current?.scrollTo({ top: 0 });
   }, [currentPage]);
@@ -181,6 +183,11 @@ export function JobSearch() {
       setPage(1);
       setServerPages({});
       setMatchTotal(null);
+      // the number of pages comes from the server (and this warms its list), so it matches whichever order is chosen
+      api
+        .pageJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), count: PAGE_SIZE, page: 0 })
+        .then((t) => setMatchTotal(t.total))
+        .catch(() => undefined);
       void qc.invalidateQueries({ queryKey: ["job-employers"] });
       setLastRun({ found: r.found });
       setNotice(
@@ -198,8 +205,8 @@ export function JobSearch() {
 
   /** Opens a page of the saved-list matches: only that page's jobs are fetched, so any page opens quickly. No AI is used. */
   const openPage = useMutation({
-    mutationFn: ({ target }: { target: number }) =>
-      api.pageJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), count: PAGE_SIZE, page: target }),
+    mutationFn: ({ target, sort }: { target: number; sort: SortBy }) =>
+      api.pageJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), count: PAGE_SIZE, page: target, sort }),
     onSuccess: (r, v) => {
       // the jobs go straight into the list's data, so the page shows at once while the list refreshes behind it
       qc.setQueryData<JobSearchResultOut[]>(["job-search-results"], (old) => {
@@ -213,10 +220,18 @@ export function JobSearch() {
     },
   });
 
+  /** A new order re-sorts the whole list, so the pages are fetched again; the number of pages stays the same. */
+  const changeSort = (value: SortBy) => {
+    setSortBy(value);
+    setServerPages({});
+    setPage(1);
+    if (serverMode && value !== "search") openPage.mutate({ target: 1, sort: value });
+  };
+
   const goToPage = (target: number) => {
     if (openPage.isPending || target < 1 || target > totalPages || target === currentPage) return;
-    if (!serverMode || target === 1 || serverPages[target]) setPage(target);
-    else openPage.mutate({ target });
+    if (!serverMode || (sortBy === "search" && target === 1) || serverPages[target]) setPage(target);
+    else openPage.mutate({ target, sort: sortBy });
   };
 
   const add = useMutation({
@@ -618,7 +633,7 @@ export function JobSearch() {
                 Sort:
                 <select
                   value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value === "resume" ? "resume" : e.target.value === "newest" ? "newest" : "search")}
+                  onChange={(e) => changeSort(e.target.value === "resume" ? "resume" : e.target.value === "newest" ? "newest" : "search")}
                   className="cursor-pointer rounded-lg bg-transparent py-1 pl-1 pr-1 text-[13px] font-semibold text-ink-900 focus:outline-none focus:ring-2 focus:ring-brand-200"
                 >
                   <option value="search">Best match</option>

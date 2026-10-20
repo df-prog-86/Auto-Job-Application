@@ -134,14 +134,19 @@ async def search_page(payload: JobSearchIn, db: Session = Depends(get_db)) -> Jo
     One page of the saved-list matches (any page, quickly). The jobs shown are saved as results too, so adding, hiding and
     scoring work on them like any other result. Jobs already in Jobs or removed are left out.
     """
-    page = payload.page or 1
+    page = payload.page or 0
     known: set[str] = set()
     for (url,) in db.query(Job.canonical_application_url).all():
         known |= loose_keys(url)
     for (url,) in db.query(JobSearchResult.url).filter(JobSearchResult.status.in_(("removed", "added"))).all():
         known |= loose_keys(url)
     try:
-        items, total = await web_search.search_page(payload, known, (page - 1) * payload.count)
+        scores = {}
+        if payload.sort == "resume":
+            scores = {k: v for k, v in db.query(JobSearchResult.url_key, JobSearchResult.match_score).filter(JobSearchResult.match_score.isnot(None)).all()}
+        items, total = await web_search.search_page(
+            payload, known, max(page - 1, 0) * payload.count, sort=payload.sort, resume_scores=scores, count_only=(payload.page == 0)
+        )
     except (httpx.HTTPError, LLMError) as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="The search service didn't answer. Try again in a minute.") from exc
     rows: list[JobSearchResult] = []

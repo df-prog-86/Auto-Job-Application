@@ -961,7 +961,14 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
     )
 
 
-async def search_page(criteria: JobSearchIn, known_keys: set[str], offset: int) -> tuple[list[dict[str, Any]], int]:
+async def search_page(
+    criteria: JobSearchIn,
+    known_keys: set[str],
+    offset: int,
+    sort: str = "search",
+    resume_scores: dict[str, float] | None = None,
+    count_only: bool = False,
+) -> tuple[list[dict[str, Any]], int]:
     """
     One page of the saved-list matches: (the checked results at ranks offset..offset+count, how many matches there are in all).
     The ranked list is built once per search and reused, so any page, the last included, costs about as much as the first. Only
@@ -971,6 +978,12 @@ async def search_page(criteria: JobSearchIn, known_keys: set[str], offset: int) 
 
     ranked = await cache_service.ranked_items(criteria)
     available = [i for i in ranked if not (loose_keys(i["url"]) & known_keys)]
+    if count_only:
+        return [], len(available)
+    if sort == "newest":  # the whole list, newest first (no date last); equal dates keep their best-match order
+        available = sorted(available, key=lambda i: (i.get("posted_at") is None, -(i["posted_at"].toordinal() if i.get("posted_at") else 0)))
+    elif sort == "resume" and resume_scores:  # jobs already checked against the resume first, best score first; the rest in best-match order
+        available = sorted(available, key=lambda i: -(resume_scores.get(i["url_key"], -1.0)))
     chunk = [dict(i) for i in available[offset : offset + criteria.count]]
     if not chunk:
         return [], len(available)

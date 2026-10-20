@@ -1010,3 +1010,44 @@ def test_any_page_of_the_saved_matches_is_cut_from_one_ranked_list(monkeypatch):
     known = set(loose_keys(ranked[0]["url"]))
     items, total = asyncio.run(ws.search_page(c, known, 0))
     assert total == 24 and items[0]["title"].endswith(" 1")
+
+
+def test_sort_orders_the_whole_list_and_the_count_never_changes(monkeypatch):
+    import asyncio
+    import datetime as dt
+    from app.schemas.job_search import JobSearchIn
+    from app.services.discovery import web_search as ws
+    from app.services.jobcache import service as cache_service
+
+    days = [5, None, 1, 9, 3]
+    ranked = [
+        {"title": f"Analyst {i}", "company": "Acme Health", "location": "Boston, MA", "work_type": None, "salary_text": None,
+         "posted_at": (dt.date(2026, 10, 20) - dt.timedelta(days=d)) if d is not None else None, "summary": None,
+         "url": f"https://acme.wd1.myworkdayjobs.com/en-US/c/job/Boston/Analyst_R{i}", "url_key": f"k{i}", "grounded": True,
+         "fit": 0.9 - i / 100, "employer_id": 1, "read_at": None}
+        for i, d in enumerate(days)
+    ]
+
+    async def fake_ranked(criteria):
+        return ranked
+
+    async def keep(items, *a, **k):
+        return items, 0
+
+    async def no_titles(titles):
+        return []
+
+    monkeypatch.setattr(cache_service, "ranked_items", fake_ranked)
+    monkeypatch.setattr(cache_service, "expand_titles", no_titles)
+    for name in ("enrich_from_ats", "fill_posted_dates", "drop_closed"):
+        monkeypatch.setattr(ws, name, keep)
+    c = JobSearchIn(titles="analyst", count=10, page=1)
+    newest, total_newest = asyncio.run(ws.search_page(c, set(), 0, sort="newest"))
+    best, total_best = asyncio.run(ws.search_page(c, set(), 0, sort="search"))
+    assert total_newest == total_best == 5
+    assert [i["title"] for i in newest] == ["Analyst 2", "Analyst 4", "Analyst 0", "Analyst 3", "Analyst 1"]  # 1, 3, 5, 9 days ago, then no date
+    assert [i["title"] for i in best][0] == "Analyst 0"
+    _, counted = asyncio.run(ws.search_page(c, set(), 0, count_only=True))
+    assert counted == 5
+    scored, _ = asyncio.run(ws.search_page(c, set(), 0, sort="resume", resume_scores={"k3": 0.9, "k1": 0.4}))
+    assert [i["title"] for i in scored][:2] == ["Analyst 3", "Analyst 1"]

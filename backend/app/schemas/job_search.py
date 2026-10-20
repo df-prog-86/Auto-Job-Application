@@ -23,7 +23,8 @@ class JobSearchIn(BaseModel):
     # True for "Show more results": look only in the saved employer lists, which is instant and uses no AI.
     more: bool = False
     # For the page endpoint: which page of the saved-list matches to return (10 to a page).
-    page: int | None = Field(default=None, ge=1, le=5000)
+    page: int | None = Field(default=None, ge=0, le=5000)  # 0 = only count the matches
+    sort: Literal["search", "newest", "resume"] = "search"  # the order of the whole list, so the page count never changes with it
 
 
 class JobSearchResultOut(BaseModel):

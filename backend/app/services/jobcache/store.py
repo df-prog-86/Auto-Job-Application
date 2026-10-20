@@ -472,7 +472,7 @@ class JobCache:
         """True once the description index has been built for the postings already saved (see reindex_descriptions)."""
         return self.has_desc and self.meta_get(DESC_READY_KEY) == "1"
 
-    def postings_without_description(self, limit: int, per_employer: int, skip_systems: set[str] | None = None, employer_ids: list[int] | None = None) -> list[tuple[int, str]]:
+    def postings_without_description(self, limit: int, per_employer: int, skip_systems: set[str] | None = None, employer_ids: list[int] | None = None, only_systems: list[str] | None = None) -> list[tuple[int, str]]:
         """
         (id, link) of open postings that have no saved description and were not tried before: the busiest employers (the ones
         searches reach) first, newest postings first, and no more than `per_employer` from any one employer.
@@ -484,8 +484,9 @@ class JobCache:
                 "WHERE p.closed_at IS NULL AND e.enabled = 1 AND p.description_z IS NULL AND p.desc_hash IS NULL"
                 + (f" AND e.ats NOT IN ({marks})" if marks else "")
                 + (f" AND e.id IN ({','.join('?' for _ in employer_ids)})" if employer_ids else "")
+                + (f" AND e.ats IN ({','.join('?' for _ in only_systems)})" if only_systems else "")
                 + " ORDER BY e.hits DESC, p.first_seen DESC LIMIT ?",
-                [*(skip_systems or ()), *(employer_ids or ()), limit * 20],
+                [*(skip_systems or ()), *(employer_ids or ()), *(only_systems or ()), limit * 20],
             ).fetchall()
         taken: dict[int, int] = {}
         out: list[tuple[int, str]] = []

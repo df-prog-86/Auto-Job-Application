@@ -6,7 +6,9 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
   python -m scripts.cache_tools coverage --db PATH        # the same for another copy, such as the frozen test copy
   python -m scripts.cache_tools descriptions [--title 'revenue cycle']
                                                           # how many open postings have a saved description, by hiring system (read only)
-  python -m scripts.cache_tools fill [--limit 150]       # runs one batch of the gradual description fill now (reads a few postings per employer)
+  python -m scripts.cache_tools fill [--limit 150] [--system workday,icims] [--rounds 100] [--per-employer 15] [--pause 2]
+                                                          # runs the description fill now: one batch, or many in a row for an overnight catch-up.
+                                                          # Reads a few postings per employer per batch; safe to stop with Ctrl+C and to run again.
   python -m scripts.cache_tools reread --db PATH [--only greenhouse,lever]
                                                           # re-reads employers and fills in details on postings the copy ALREADY has.
                                                           # It adds no postings and closes none, so a before and after test stays fair.
@@ -128,7 +130,10 @@ def cmd_descriptions(args: argparse.Namespace) -> int:
 
 
 async def _fill(args: argparse.Namespace) -> int:
-    """Runs one batch of the gradual description fill now, so it can be seen working without waiting for a refresh."""
+    """
+    Runs the description fill now: one batch, or (with --rounds) many batches in a row for an overnight catch-up. Each batch reads a
+    few postings from many different employers, so no one site is read hard. Safe to stop with Ctrl+C and to run again.
+    """
     from app.services.jobcache import service
 
     cache = JobCache()
@@ -136,18 +141,36 @@ async def _fill(args: argparse.Namespace) -> int:
         again = cache.retry_unavailable([x.strip() for x in args.retry.split(",") if x.strip()] or None)
         print(f"{again} postings that could not be read before will be tried again.")
     skip = service.DESC_FILL_SYSTEMS_WITH_TEXT
+    only = [x.strip() for x in args.system.split(",") if x.strip()] if args.system else None
     waiting_before = cache.count_postings_without_description(skip)
-    todo = cache.postings_without_description(args.limit, service.DESC_FILL_PER_EMPLOYER, skip)
+    total_saved = total_tried = 0
     why: dict[str, int] = {}
-    saved = await service.read_missing_descriptions(todo, max_chars=service.DESC_FILL_CHARS, mark_failures=True, why=why)
-    print(f"Tried {len(todo)} postings: {saved} descriptions saved, {len(todo) - saved} could not be read (not tried again).")
+    seen: dict[str, dict[str, int]] = {}
+    try:
+        for n in range(1, max(args.rounds, 1) + 1):
+            todo = cache.postings_without_description(args.limit, args.per_employer, skip, None, only)
+            if not todo:
+                print("Nothing left to read for those systems.")
+                break
+            saved = await service.read_missing_descriptions(todo, max_chars=service.DESC_FILL_CHARS, mark_failures=True, why=why)
+            total_saved += saved
+            total_tried += len(todo)
+            for name, v in cache.description_outcomes([i for i, _u in todo]).items():
+                row = seen.setdefault(name, {"saved": 0, "unreadable": 0})
+                row["saved"] += v["saved"]
+                row["unreadable"] += v["unreadable"]
+            print(f"  batch {n}/{args.rounds}: tried {len(todo)}, saved {saved} (running total {total_saved})", flush=True)
+            await asyncio.sleep(args.pause)
+    except KeyboardInterrupt:
+        print("Stopped. What was saved is kept.")
+    print(f"Tried {total_tried} postings: {total_saved} descriptions saved, {total_tried - total_saved} could not be read (not tried again).")
     print(f"{'system':16}{'saved':>8}{'unreadable':>12}")
-    for ats_name, n in sorted(cache.description_outcomes([i for i, _u in todo]).items()):
-        print(f"{ats_name:16}{n['saved']:>8}{n['unreadable']:>12}")
+    for ats_name, v in sorted(seen.items()):
+        print(f"{ats_name:16}{v['saved']:>8}{v['unreadable']:>12}")
     if why:
         print("Why postings could not be read:")
-        for reason, n in sorted(why.items(), key=lambda kv: -kv[1]):
-            print(f"  {n:>4}  {reason}")
+        for reason, count in sorted(why.items(), key=lambda kv: -kv[1]):
+            print(f"  {count:>4}  {reason}")
     print(f"Postings still waiting for a description: {cache.count_postings_without_description(skip)} (was {waiting_before})")
     return 0
 
@@ -699,6 +722,10 @@ def main() -> None:
     d.add_argument("--title", help="only postings whose title holds these words, e.g. 'revenue cycle'")
     f = sub.add_parser("fill")
     f.add_argument("--limit", type=int, default=150, help="postings to read in this batch")
+    f.add_argument("--system", help="only these hiring systems, e.g. workday,icims,smartrecruiters")
+    f.add_argument("--rounds", type=int, default=1, help="how many batches to run in a row (for an overnight catch-up)")
+    f.add_argument("--per-employer", type=int, default=15, help="most postings read from one employer per batch")
+    f.add_argument("--pause", type=float, default=2.0, help="seconds to wait between batches")
     f.add_argument("--retry", help="comma separated hiring systems whose unreadable postings should be tried again, e.g. icims,smartrecruiters,workable")
     r = sub.add_parser("reread")
     r.add_argument("--db", required=True)

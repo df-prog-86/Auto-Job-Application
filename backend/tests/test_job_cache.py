@@ -1645,3 +1645,17 @@ def test_revenue_operations_is_not_revenue_cycle():
     plan = matcher.build_plan(SimpleNamespace(titles="revenue cycle manager", location="", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
     assert matcher.title_fit(plan, "Revenue Cycle Manager") > 0.9
     assert matcher.title_fit(plan, "Senior Revenue Operations Manager") < matcher.MIN_TITLE_FIT
+
+
+def test_the_description_decides_between_look_alike_titles():
+    plan = matcher.build_plan(SimpleNamespace(titles="revenue cycle manager", location="", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
+    rev = "Lead the revenue cycle team: claims, denials, payer contracts and patient accounts. " * 6
+    ops = "Own the CRM, pipeline forecasting and sales and marketing alignment for revenue growth. " * 6
+    base = {"company": "X", "location": "Boston, MA", "work_type": None, "posted_at": "2026-10-18", "pay_mid": None, "pay_text": None, "url": "u"}
+    score = lambda title, desc: matcher.score_row(plan, {**base, "title": title, "description": desc})
+    assert score("Revenue Operations Manager", ops) is None  # about sales operations: not shown
+    assert score("Revenue Operations Manager", rev) is not None  # the title is vague but the work is revenue cycle: shown
+    assert score("Revenue Cycle Manager", ops) is not None  # a title that matches exactly is never judged by its description
+    assert matcher.description_signal(plan, rev) == 1
+    assert matcher.description_signal(plan, ops) == -1
+    assert matcher.description_signal(plan, None) == 0 and matcher.description_signal(plan, "Short text.") == 0

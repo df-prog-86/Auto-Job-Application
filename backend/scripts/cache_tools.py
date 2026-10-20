@@ -4,6 +4,8 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
   cd backend
   python -m scripts.cache_tools coverage                  # how complete the saved lists are, by hiring system (read only)
   python -m scripts.cache_tools coverage --db PATH        # the same for another copy, such as the frozen test copy
+  python -m scripts.cache_tools descriptions [--title 'revenue cycle']
+                                                          # how many open postings have a saved description, by hiring system (read only)
   python -m scripts.cache_tools reread --db PATH [--only greenhouse,lever]
                                                           # re-reads employers and fills in details on postings the copy ALREADY has.
                                                           # It adds no postings and closes none, so a before and after test stays fair.
@@ -92,6 +94,35 @@ def cmd_coverage(args: argparse.Namespace) -> int:
         for c in cols:
             sums[c] += r[c] or 0
     print(f"{'ALL':16}{total:>8}" + "".join(f"{sums[c] / total:>15.0%} " for c in cols) + f"{sum(placed.values()) / total:>15.0%} ")
+    return 0
+
+
+def cmd_descriptions(args: argparse.Namespace) -> int:
+    """How many open postings have a saved description, by hiring system (read only). --title narrows it to titles holding those words."""
+    path = Path(args.db or settings.JOB_CACHE_PATH)
+    if not path.exists():
+        print(f"No saved job lists at {path}.")
+        return 1
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    where, params = "p.closed_at IS NULL AND e.enabled = 1", []
+    for word in (args.title or "").split():
+        where += " AND p.title LIKE ?"
+        params.append(f"%{word}%")
+    rows = conn.execute(
+        "SELECT e.ats AS ats, COUNT(*) AS n, SUM(CASE WHEN p.description_z IS NOT NULL THEN 1 ELSE 0 END) AS withd "
+        f"FROM postings p JOIN employers e ON e.id = p.employer_id WHERE {where} GROUP BY e.ats ORDER BY n DESC",
+        params,
+    ).fetchall()
+    label = f' with "{args.title}" in the title' if args.title else ""
+    print(f"Open postings{label}, and how many have a saved description ({path})")
+    print(f"{'system':16}{'postings':>10}{'with description':>20}{'share':>9}")
+    total = with_d = 0
+    for r in rows:
+        total += r["n"]
+        with_d += r["withd"] or 0
+        print(f"{r['ats']:16}{r['n']:>10}{(r['withd'] or 0):>20}{(r['withd'] or 0) / r['n']:>9.0%}")
+    print(f"{'ALL':16}{total:>10}{with_d:>20}{(with_d / total if total else 0):>9.0%}")
     return 0
 
 
@@ -629,6 +660,9 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("coverage")
     c.add_argument("--db")
+    d = sub.add_parser("descriptions")
+    d.add_argument("--db")
+    d.add_argument("--title", help="only postings whose title holds these words, e.g. 'revenue cycle'")
     r = sub.add_parser("reread")
     r.add_argument("--db", required=True)
     r.add_argument("--only", help="comma separated hiring systems, e.g. greenhouse,lever,ashby")
@@ -682,6 +716,8 @@ def main() -> None:
         sys.exit(cmd_recheck(args))
     if args.cmd == "usshare":
         sys.exit(cmd_usshare(args))
+    if args.cmd == "descriptions":
+        sys.exit(cmd_descriptions(args))
     if args.cmd == "reindex":
         sys.exit(cmd_reindex(args))
     if args.cmd == "industry":

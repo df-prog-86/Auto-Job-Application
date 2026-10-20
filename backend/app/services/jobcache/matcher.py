@@ -225,14 +225,16 @@ def _contiguous(needle: list[str], hay: list[str]) -> bool:
     return n > 0 and any(hay[i : i + n] == needle for i in range(len(hay) - n + 1))
 
 
-def title_fit(plan: Plan, title: str) -> float:
-    """0 to 1: how well a posting's title matches the best of the titles asked for."""
+def title_fit(plan: Plan, title: str, typed_only: bool = False) -> float:
+    """0 to 1: how well a posting's title matches the best of the titles asked for. `typed_only` ignores the alternative titles."""
     p_all = all_stems(title)
     p_content = content_stems(title)
     p_set = set(p_all)
     p_level = level_of(title)
     best = 0.0
     for q in plan.queries:
+        if typed_only and q.weight < 1.0:
+            continue
         have = [s for s in q.stems if s in p_set]
         coverage = len(have) / len(q.stems)
         need = 1.0 if len(q.stems) <= 2 else 0.66  # a long title may miss one word; a short one may not
@@ -251,6 +253,24 @@ def title_fit(plan: Plan, title: str) -> float:
             score -= 0.03
         best = max(best, max(0.0, min(1.0, score)) * q.weight)
     return best
+
+
+BORDERLINE_TITLE = 0.70  # a title fit below this is "partly matches": the description gets a say
+DESC_MIN_CHARS = 300  # a description shorter than this says too little to count against a job
+DESC_CONFIRM_BONUS = 0.15
+DESC_DEMOTE = 0.6
+DESC_READ_CHARS = 2500  # how much of a description is read when it confirms or demotes a partly matching title
+
+
+def description_signal(plan: Plan, description: str | None) -> int:
+    """
+    +1 when the description is about the kind of work asked for (every word of it, such as "revenue" and "cycle"), -1 when
+    there is a real description and it is not, 0 when there is none to judge (or nothing to judge it by).
+    """
+    if not plan.desc_phrases or not description or len(description) < DESC_MIN_CHARS:
+        return 0
+    have = set(all_stems(description[:DESC_READ_CHARS]))
+    return 1 if any(all(d in have for d in domain) for domain, _head in plan.desc_phrases) else -1
 
 
 def _recency(posted: dt.date | None, today: dt.date) -> float:
@@ -276,6 +296,14 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
         return None
     tf = title_fit(plan, row["title"])
     via_desc = False
+    if MIN_TITLE_FIT <= tf < BORDERLINE_TITLE and plan.desc_phrases and title_fit(plan, row["title"], typed_only=True) >= tf - 1e-9:
+        # A title that only partly matches what was typed ("Revenue Operations Manager" for "revenue cycle manager"): the
+        # description settles it. About the work asked for lifts it; about something else sinks it; no description changes nothing.
+        signal = description_signal(plan, row.get("description"))
+        if signal > 0:
+            tf = min(1.0, tf + DESC_CONFIRM_BONUS)
+        elif signal < 0:
+            tf *= DESC_DEMOTE
     if tf < MIN_TITLE_FIT:
         if desc_hit(plan, row.get("description"), set(all_stems(row["title"]))):
             tf, via_desc = DESC_TITLE_FLOOR, True  # "Business Analyst" whose description is about revenue cycle work

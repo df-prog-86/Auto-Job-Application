@@ -62,7 +62,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let message = res.statusText;
     try {
       const body = await res.json();
-      message = body.detail ?? JSON.stringify(body);
+      message = typeof body.detail === "string" ? body.detail : res.status === 422 ? "That request was not accepted. Try again." : JSON.stringify(body);
     } catch {
       // response wasn't JSON; fall back to statusText
     }

@@ -201,7 +201,7 @@ export function JobSearch() {
     if (showMore.isPending || target < 1 || target > totalPages || target === currentPage) return;
     const need = target * PAGE_SIZE - shown.length;
     if (need <= 0) setPage(target);
-    else showMore.mutate({ need: Math.min(need, 300), target });
+    else showMore.mutate({ need: Math.min(Math.max(need, PAGE_SIZE), 300), target }); // never fewer than a page: the search asks for at least 3
   };
 
   const add = useMutation({

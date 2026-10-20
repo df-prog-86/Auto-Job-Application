@@ -17,6 +17,8 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
   python -m scripts.cache_tools discover --system greenhouse,lever,...|all [--pages 6] [--limit 300] [--out FILE]
                                                           # asks Common Crawl for employer boards we do not read yet and writes them to FILE.
                                                           # Read only; check them afterwards with 'add --from-file FILE' (a dry run).
+  python -m scripts.cache_tools usshare [--disable | --restore]
+                                                          # lists employers whose jobs are mostly outside the US. --disable turns them off (reversible).
   python -m scripts.cache_tools reindex [--db PATH]
                                                           # builds the index of job description openings so search can read them. Safe to repeat or stop.
   python -m scripts.cache_tools industry [--retag]
@@ -541,6 +543,51 @@ def cmd_industry(args: argparse.Namespace) -> int:
     return 0
 
 
+US_OFF_NOTE = "turned off: mostly outside the US"
+
+
+def cmd_usshare(args: argparse.Namespace) -> int:
+    """Lists employers whose open jobs are mostly outside the US (by the same place reading the add rule uses). --disable turns them off."""
+    cache = JobCache()
+    if args.restore:
+        with cache.session() as db:
+            n = db.execute("UPDATE employers SET enabled = 1, last_error = NULL WHERE enabled = 0 AND last_error = ?", (US_OFF_NOTE,)).rowcount
+        print(f"Turned {n} employers back on.")
+        return 0
+    counts: dict[int, list[int]] = {}  # employer id -> [jobs, clearly US, clearly foreign]
+    info: dict[int, tuple[str, str]] = {}
+    with cache.session() as db:
+        for r in db.execute(
+            "SELECT e.id, e.name, e.ats, p.location FROM postings p JOIN employers e ON e.id = p.employer_id WHERE p.closed_at IS NULL AND e.enabled = 1"
+        ):
+            c = counts.setdefault(r["id"], [0, 0, 0])
+            info[r["id"]] = (r["name"], r["ats"])
+            kind = location_kind(r["location"])
+            c[0] += 1
+            c[1] += kind == "us"
+            c[2] += kind == "foreign"
+    jobs_all = sum(c[0] for c in counts.values())
+    us_all = sum(c[1] for c in counts.values())
+    foreign_all = sum(c[2] for c in counts.values())
+    print(f"All enabled employers: {len(counts):,} employers, {jobs_all:,} jobs; {100 * us_all // max(jobs_all, 1)}% clearly US, {100 * foreign_all // max(jobs_all, 1)}% clearly outside the US.")
+    flagged = sorted(
+        (i for i, c in counts.items() if c[0] >= 1 and 100 * c[1] // c[0] < args.max_us and 100 * c[2] // c[0] >= args.min_foreign),
+        key=lambda i: -counts[i][0],
+    )
+    jobs_flagged = sum(counts[i][0] for i in flagged)
+    print(f"\nMostly outside the US (under {args.max_us}% US and at least {args.min_foreign}% outside): {len(flagged):,} employers, {jobs_flagged:,} jobs.")
+    for i in flagged[: args.top]:
+        c = counts[i]
+        print(f"  {info[i][0][:40]:40s} {info[i][1]:16s} {c[0]:6,d} jobs  US {100 * c[1] // c[0]:3d}%  outside {100 * c[2] // c[0]:3d}%")
+    if args.disable and flagged:
+        with cache.session() as db:
+            db.executemany("UPDATE employers SET enabled = 0, last_error = ? WHERE id = ?", [(US_OFF_NOTE, i) for i in flagged])
+        print(f"\nTurned off {len(flagged):,} employers. Nothing was deleted. Undo with: cache_tools usshare --restore")
+    elif flagged:
+        print("\nDry run: nothing changed. Add --disable to turn these employers off (reversible).")
+    return 0
+
+
 def cmd_reindex(args: argparse.Namespace) -> int:
     cache = JobCache(args.db) if args.db else JobCache()
     if not cache.has_desc:
@@ -583,6 +630,12 @@ def main() -> None:
     ad.add_argument("--skip", action="append", help="leave out any employer whose address contains this text (repeatable)")
     ad.add_argument("--source", default="curated")
     ad.add_argument("--parallel", type=int, default=6, help="employers read at the same time (each is a different website)")
+    us = sub.add_parser("usshare")
+    us.add_argument("--max-us", type=int, default=30, help="employers with a smaller share of clearly US jobs than this are listed")
+    us.add_argument("--min-foreign", type=int, default=50, help="and at least this share clearly outside the US")
+    us.add_argument("--top", type=int, default=40)
+    us.add_argument("--disable", action="store_true", help="turn the listed employers off (they stay saved, and --restore turns them back on)")
+    us.add_argument("--restore", action="store_true", help="turn back on the employers this command turned off")
     ri = sub.add_parser("reindex")
     ri.add_argument("--db", help="another copy of the saved lists, such as the frozen test copy (default: the live one)")
     ind = sub.add_parser("industry")
@@ -597,6 +650,8 @@ def main() -> None:
         sys.exit(asyncio.run(_discover(args)))
     if args.cmd == "add":
         sys.exit(asyncio.run(_add(args)))
+    if args.cmd == "usshare":
+        sys.exit(cmd_usshare(args))
     if args.cmd == "reindex":
         sys.exit(cmd_reindex(args))
     if args.cmd == "industry":

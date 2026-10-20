@@ -1089,3 +1089,45 @@ def test_the_web_search_alone_ranks_its_finds_into_the_list_and_never_fails_the_
     monkeypatch.setattr(web_search, "search_jobs_full", boom)
     broken = client.post("/api/v1/job-search/web", json={"titles": "revenue cycle analyst", "web": "only"})
     assert broken.status_code == 200 and broken.json()["added"] == 0
+
+
+def test_a_page_is_filled_and_the_count_is_honest_when_jobs_fail_the_place_check(monkeypatch):
+    import asyncio
+    import datetime as dt
+    from app.schemas.job_search import JobSearchIn
+    from app.services.discovery import web_search as ws
+    from app.services.jobcache import service as cache_service
+
+    places = ["Santa Fe, NM", None, "Santa Fe, NM", "2 Locations", "Santa Fe, NM", "Santa Fe, NM", "Santa Fe, NM"]
+    ranked = [
+        {"title": f"Chef {i}", "company": "Acme", "location": p, "work_type": None, "salary_text": None, "posted_at": dt.date.today(), "summary": None,
+         "url": f"https://acme.wd1.myworkdayjobs.com/en-US/c/job/x/Chef_R{i}", "url_key": f"k{i}", "grounded": True, "fit": 0.9 - i / 100, "employer_id": 1, "read_at": None}
+        for i, p in enumerate(places)
+    ]
+    dropped: list[set] = []
+
+    async def fake_ranked(criteria):
+        return ranked
+
+    async def keep(items, *a, **k):
+        return items, 0
+
+    async def no_titles(titles):
+        return []
+
+    async def fake_drop(criteria, urls):
+        dropped.append(urls)
+
+    monkeypatch.setattr(cache_service, "ranked_items", fake_ranked)
+    monkeypatch.setattr(cache_service, "expand_titles", no_titles)
+    monkeypatch.setattr(cache_service, "drop_from_ranked", fake_drop)
+    ws._PAGE_CHECKED.clear()
+    ws._PAGE_TOTAL.clear()
+    for name in ("enrich_from_ats", "fill_posted_dates", "drop_closed"):
+        monkeypatch.setattr(ws, name, keep)
+    c = JobSearchIn(titles="chef", location="Santa Fe, NM", count=3, page=1)
+    items, total = asyncio.run(ws.search_page(c, set(), 0))
+    assert [i["title"] for i in items] == ["Chef 0", "Chef 2", "Chef 4"]  # the full page: the two jobs that name no place were skipped
+    assert total == 5 and dropped and len(dropped[0]) == 2
+    _, counted = asyncio.run(ws.search_page(c, set(), 0, count_only=True))
+    assert counted == 5

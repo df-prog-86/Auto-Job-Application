@@ -336,8 +336,9 @@ REMOTE_ELSEWHERE = 0.75  # a remote job (based anywhere) in a search that names 
 
 def location_fit(q: LocationQuery, location: str | None, work_type: str | None) -> float:
     """
-    How well a posting's place fits the place asked for: 1.0 right there, 0.9 remote when remote is acceptable,
-    0.7 same state, 0.5 the posting does not say where (kept, to be checked), 0.0 somewhere else.
+    How well a posting's place fits the place asked for: 1.0 right there, 0.95 in the greater area, 0.75 remote when "or remote" was
+    asked for, 0.4 the posting does not say where (kept, to be checked), 0.0 anywhere else (another town in the state included).
+    A search for a state alone, or for the whole US, is unchanged.
     """
     if q.empty:
         return 1.0
@@ -345,7 +346,9 @@ def location_fit(q: LocationQuery, location: str | None, work_type: str | None) 
     remote_posting = work_type == "remote" or " remote " in f" {fold(loc)} "
     if not loc or _UNKNOWN_PLACE.search(loc):
         # "2 Locations" or no place at all: kept, since one of them may be the place asked for, but behind jobs that say so
-        return (REMOTE_ELSEWHERE if q.cities else 0.9) if remote_posting else (0.4 if q.cities else 0.5)
+        if remote_posting:
+            return (REMOTE_ELSEWHERE if q.remote else 0.0) if q.cities else 0.9
+        return 0.4 if q.cities else 0.5
     folded = f" {fold(loc)} "
     wanted_states = q.states
     posting_states = _states_in(loc)
@@ -363,13 +366,19 @@ def location_fit(q: LocationQuery, location: str | None, work_type: str | None) 
         if f" {near_city} " in folded and (near_state is None or not posting_states or near_state in posting_states):
             return 0.95
     if remote_posting and (q.remote or not q.cities):
-        # remote is welcome, but a job in the city asked for comes first
+        # remote is welcome only when asked for ("or remote"), and a job in the city asked for comes first
         return REMOTE_ELSEWHERE if q.cities else 0.9
     if wanted_states & posting_states:
-        return 0.7 if q.cities else 1.0
-    if remote_posting:
-        return 0.6  # remote, but the person asked for a place and did not say remote is fine
-    return 0.0
+        if not q.cities:
+            return 1.0
+        leftover = re.sub(r"\b(united states|usa|us)\b", " ", folded)
+        for name in STATE_BY_NAME:
+            leftover = re.sub(rf"\b{name}\b", " ", leftover)
+        leftover = re.sub(r"\b[a-z]{2}\b", " ", leftover)  # state abbreviations
+        # a city search is a filter: another town in the same state is not the place asked for. A posting that gives only the state
+        # (no town at all) is kept, behind jobs that name the city, to be checked.
+        return 0.4 if not re.search(r"[a-z]{3,}", leftover) else 0.0
+    return 0.0  # somewhere else, or remote when remote was not asked for
 
 
 # ---- dates ------------------------------------------------------------------------------------------------------

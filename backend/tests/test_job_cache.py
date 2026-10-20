@@ -159,11 +159,11 @@ def test_places():
     assert q.cities == ["boston"] and q.states == {"MA"} and q.remote
     fit = lambda loc, wt=None, query="Boston, MA": text.location_fit(text.parse_location_query(query), loc, wt)
     assert fit("Boston, MA") == 1.0 and fit("Boston, Massachusetts, United States") == 1.0
-    assert fit("Worcester, MA") == 0.7
+    assert fit("Worcester, MA") == 0.0  # another town in the state: a city search is a filter
     assert fit("Boston, GA") == 0.0 and fit("Dallas, TX") == 0.0
     assert fit("2 Locations") == 0.4 and fit(None) == 0.4  # a city search puts jobs that name no place behind jobs that do
     assert fit("2 Locations", None, "United States") == 0.5
-    assert fit("Remote - US", "remote") == 0.6  # remote but remote was not asked for
+    assert fit("Remote - US", "remote") == 0.0  # remote was not asked for
     assert fit("Remote - US", "remote", "Boston, MA or remote") == 0.75  # welcome, but behind jobs in Boston
     assert fit("London, United Kingdom") == 0.0 and fit("Remote - UK", "remote", "Boston, MA or remote") == 0.0
     assert text.location_fit(text.parse_location_query(None), "Anywhere", None) == 1.0
@@ -221,9 +221,9 @@ def test_search_applies_place_work_type_pay_dates_and_exclusions():
 
     assert ids(location="Boston, MA")[0] == "1"  # right place and recent, so first
     assert "2" not in ids(location="Boston, MA")  # Dallas is not Boston
-    assert ids(location="Boston, MA").index("3") > ids(location="Boston, MA").index("1")  # remote is allowed (any work type) but ranks lower
+    assert "3" not in ids(location="Boston, MA")  # remote was not asked for: a city search shows that city and its area only
     assert "3" not in ids(location="Boston, MA", work_type="onsite")
-    assert ids(location="Boston, MA or remote").index("3") < ids(location="Boston, MA").index("3") or True
+    assert "3" in ids(location="Boston, MA or remote")  # "or remote" brings remote jobs in
     assert ids(work_type="remote") == ["3"]
     assert "4" not in ids(location="Boston, MA", posted_within_days=30) and "4" in ids(location="Boston, MA")
     assert "5" not in ids(location="Boston, MA", target_salary=100000)
@@ -594,7 +594,7 @@ def test_nearby_cities_rank_above_the_rest_of_the_state_and_cross_state_lines():
     assert fit(boston, "Boston, MA") == 1.0
     assert fit(boston, "Cambridge, MA") == 0.95
     assert fit(boston, "US-MA-Quincy") == 0.95
-    assert fit(boston, "Springfield, MA") == 0.7  # same state, not near
+    assert fit(boston, "Springfield, MA") == 0.0  # same state, not near: not the place asked for
     assert fit(boston, "Cambridge, United Kingdom") == 0.0  # the other Cambridge
     assert fit(boston, "Cambridge, OH") == 0.0  # wrong state: not the nearby Cambridge
 
@@ -612,8 +612,9 @@ def test_search_with_nearby_places_finds_jobs_around_the_city():
     c = crit(location="Boston, MA")
     plain = {r.row["location"]: r.fit for r in matcher.rank(matcher.build_plan(c), JobCache().candidates("revenue", [], 50, None))}
     near = {r.row["location"]: r.fit for r in matcher.rank(matcher.build_plan(c, None, ["Cambridge, MA"]), JobCache().candidates("revenue", [], 50, None))}
-    assert "Austin, TX" not in plain and plain["Cambridge, MA"] == plain["Springfield, MA"]
-    assert near["Cambridge, MA"] > near["Springfield, MA"] and near["Boston, MA"] >= near["Cambridge, MA"]
+    assert "Austin, TX" not in plain and "Springfield, MA" not in plain and "Cambridge, MA" not in plain  # a city search shows that city only
+    assert "Cambridge, MA" in near and "Springfield, MA" not in near and "Austin, TX" not in near  # ...and the area around it, once known
+    assert near["Boston, MA"] >= near["Cambridge, MA"]
 
 
 def test_the_area_around_a_place_is_asked_once_and_remembered(monkeypatch):
@@ -1559,7 +1560,7 @@ def test_one_employer_does_not_fill_the_screen():
 
 
 def test_the_work_asked_for_outranks_the_same_role_word_in_another_field():
-    plan = matcher.build_plan(crit(titles="revenue cycle analyst", location="Orlando, FL"), ["Financial Analyst", "Billing Analyst"])
+    plan = matcher.build_plan(crit(titles="revenue cycle analyst", location="Orlando, FL or remote"), ["Financial Analyst", "Billing Analyst"])
     exact = {"title": "Revenue Cycle Analyst Underpayments", "company": "R1 RCM", "location": "Remote, USA", "work_type": "remote", "posted_at": None}
     other = {"title": "Financial Analyst", "company": "Lennar", "location": "Orlando, FL", "work_type": None, "posted_at": None}
     ranked = matcher.rank(plan, [other, exact])
@@ -1572,8 +1573,8 @@ def test_a_job_in_a_foreign_city_with_no_country_is_not_shown_for_a_us_search():
     austin = text.parse_location_query("Austin, TX")
     for place in ("Montreal", "Toronto", "Bangalore", "London", "Sao Paulo"):
         assert text.location_fit(austin, place, "remote") == 0.0, place
-    assert text.location_fit(austin, "Remote - US", "remote") > 0
-    assert text.location_fit(austin, "Paris, TX", None) == 0.7  # a US town with a foreign name keeps its state
+    assert text.location_fit(text.parse_location_query("Austin, TX or remote"), "Remote - US", "remote") > 0
+    assert text.location_fit(austin, "Paris, TX", None) == 0.0  # a US town with a foreign name is a town in Texas, not Austin
 
 
 def test_run_together_employer_names_are_shown_the_way_people_write_them():
@@ -1775,7 +1776,8 @@ def test_a_web_result_in_the_wrong_place_is_ruled_out_like_a_saved_one():
     plan = matcher.build_plan(SimpleNamespace(titles="project manager", location="Chicago, IL", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
     assert not matcher.place_ok(plan, "Vaesteras, Vastmanland County, Sweden; Vaasa, Finland", None)
     assert not matcher.place_ok(plan, "Dallas, TX", None)
-    assert matcher.place_ok(plan, "Chicago, IL", None) and matcher.place_ok(plan, "Remote", "remote")
+    assert matcher.place_ok(plan, "Chicago, IL", None) and not matcher.place_ok(plan, "Remote", "remote")  # remote only comes with "or remote"
+    assert matcher.place_ok(matcher.build_plan(SimpleNamespace(titles="project manager", location="Chicago, IL or remote", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), []), "Remote", "remote")
 
 
 def test_a_piped_us_place_is_written_as_city_and_state():
@@ -1805,7 +1807,7 @@ def test_new_york_city_is_a_city_search_not_the_whole_state():
         assert q.cities == ["new york"] and q.states == {"NY"}, typed
     q = text.parse_location_query("New York, NY")
     assert text.location_fit(q, "New York, New York", None) == 1.0
-    assert text.location_fit(q, "Buffalo, NY", None) == 0.7  # same state, not the city
+    assert text.location_fit(q, "Buffalo, NY", None) == 0.0  # same state, not the city: a city search is a filter
 
 
 def test_a_remote_place_listing_two_countries_is_written_plainly_and_still_counts_as_us():
@@ -1851,3 +1853,13 @@ def test_a_job_with_no_place_whose_title_names_another_state_is_left_out():
     assert matcher.score_row(plan, {**row, "title": "Marine Biologist - Alaska"}) is None
     assert matcher.score_row(plan, {**row, "title": "Marine Biologist - Hawaii"}) is not None
     assert matcher.score_row(plan, {**row, "title": "Marine Biologist"}) is not None
+
+
+def test_a_city_search_is_a_filter_for_the_city_and_its_area_only():
+    plan = matcher.build_plan(SimpleNamespace(titles="chef", location="Santa Fe, NM", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [], ["Pojoaque, NM"])
+    ok = lambda loc, wt=None: matcher.place_ok(plan, loc, wt)
+    assert ok("Santa Fe, NM") and ok("Pojoaque, NM")
+    assert not ok("Albuquerque, NM") and not ok("Remote - US", "remote") and not ok("Dallas, TX")
+    assert ok("2 Locations") and ok("New Mexico")  # no town named: kept only to be checked when the job is opened
+    nationwide = matcher.build_plan(SimpleNamespace(titles="chef", location="United States", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
+    assert matcher.place_ok(nationwide, "Albuquerque, NM", None) and matcher.place_ok(nationwide, "Remote - US", "remote")

@@ -981,39 +981,25 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
     )
 
 
-async def search_page(
-    criteria: JobSearchIn,
-    known_keys: set[str],
-    offset: int,
-    sort: str = "search",
-    resume_scores: dict[str, float] | None = None,
-    count_only: bool = False,
-) -> tuple[list[dict[str, Any]], int]:
-    """
-    One page of the saved-list matches: (the checked results at ranks offset..offset+count, how many matches there are in all).
-    The ranked list is built once per search and reused, so any page, the last included, costs about as much as the first. Only
-    the jobs on the page are checked against the employer's system, and a recently read list needs no check at all.
-    """
-    from app.services.jobcache import matcher, service as cache_service
+_PAGE_CHECKED: dict[tuple, tuple[float, list[dict[str, Any]], list[str]]] = {}
+PAGE_CHECKED_TTL = 180  # a page that was just checked (for the count) is not checked again when it is opened a moment later
 
-    ranked = await cache_service.ranked_items(criteria)
-    available = [i for i in ranked if not (loose_keys(i["url"]) & known_keys)]
-    if count_only:
-        return [], len(available)
-    if sort == "newest":  # the whole list, newest first (no date last); equal dates keep their best-match order
-        available = sorted(available, key=lambda i: (i.get("posted_at") is None, -(i["posted_at"].toordinal() if i.get("posted_at") else 0)))
-    elif sort == "resume" and resume_scores:  # jobs already checked against the resume first, best score first; the rest in best-match order
-        available = sorted(available, key=lambda i: -(resume_scores.get(i["url_key"], -1.0)))
-    if offset >= len(available):
-        return [], len(available)
-    try:
-        extra_titles = await cache_service.expand_titles(criteria.titles)
-    except Exception:
-        extra_titles = []
-    plan = matcher.build_plan(criteria, extra_titles)
-    # The checks below (closed postings, pay or date missing once the real page is read, twin listings) can remove jobs from a
-    # page. Rather than show a short page, the next jobs in the ranking are checked too until the page is full. Jobs that fail a
-    # check are dropped from the kept list, so the total and the later pages stay honest.
+
+def _must_name_a_place(plan: Any) -> bool:
+    """A search for a particular city or state needs jobs that say where they are; "anywhere" and "remote only" searches do not."""
+    return plan.work_type != "remote" and not plan.loc.empty and not plan.loc.nationwide and bool(plan.loc.cities or plan.loc.states)
+
+
+async def _check_page(criteria: JobSearchIn, plan: Any, available: list[dict[str, Any]], offset: int) -> tuple[list[dict[str, Any]], list[str]]:
+    """
+    The jobs of one page, checked against the employer's system: (the ones that pass, the addresses of ones that failed a rule).
+    The checks (closed postings, pay or date missing once the real page is read, a place that turns out to be elsewhere or is still
+    unknown, twin listings) can remove jobs. Rather than show a short page, the next jobs in the ranking are checked too until the
+    page is full.
+    """
+    from app.services.jobcache import matcher
+    from app.services.jobcache.text import is_vague_place
+
     kept: list[dict[str, Any]] = []
     rejected: list[str] = []
     pos = offset
@@ -1027,8 +1013,10 @@ async def search_page(
         tidy_items(batch)
         items = merge_twin_postings(merge_same_jobs(_dedupe_by_address(batch)))
         items, _gone = await enrich_from_ats(items)
-        # Opening a job often reveals where it really is (a hospital listed as "3 Locations" that is in Tacoma): check the place again now
-        items = [i for i in items if not i.get("location") or re.search(r"\+\d+ more", i["location"]) or matcher.place_ok(plan, i["location"], i.get("work_type"))]  # "+4 more" hides places: kept
+        # Opening a job often reveals where it really is (a hospital listed as "3 Locations" that is in Tacoma): check the place again now.
+        # A job that still says nothing about where it is does not belong in a search for a place. "+4 more" hides places: kept.
+        items = [i for i in items if (re.search(r"\+\d+ more", i.get("location") or "") or matcher.place_ok(plan, i.get("location"), i.get("work_type")))
+                 and not (_must_name_a_place(plan) and is_vague_place(i.get("location")) and i.get("work_type") != "remote")]
         items, _old = await fill_posted_dates(items, criteria.posted_within_days, need_pay=criteria.require_salary)
         items, _no_pay = apply_pay_rules(items, criteria)
         good, _closed = await drop_closed(items)
@@ -1036,15 +1024,66 @@ async def search_page(
         if criteria.require_salary or criteria.posted_within_days or criteria.location:
             rejected += [u for u in batch_urls if u not in good_urls]  # a failed rule, not a transient miss: take it off the list
         kept += good
-    kept = kept[: criteria.count]
-    if rejected:
-        await cache_service.drop_from_ranked(criteria, set(rejected))
-    for item in kept:
-        item["fit_score"] = item.get("fit")
-        item["fit_note"] = fit_note(plan, item)
-        for key in ("ats_checked", "ats_live", "site_url", "fit", "employer_id", "_desc", "read_at"):
-            item.pop(key, None)
-    return kept, max(len(available) - len(rejected), len(kept))
+    return kept[: criteria.count], rejected
+
+
+async def search_page(
+    criteria: JobSearchIn,
+    known_keys: set[str],
+    offset: int,
+    sort: str = "search",
+    resume_scores: dict[str, float] | None = None,
+    count_only: bool = False,
+) -> tuple[list[dict[str, Any]], int]:
+    """
+    One page of the saved-list matches: (the checked results at ranks offset..offset+count, how many matches there are in all).
+    The ranked list is built once per search and reused, so any page, the last included, costs about as much as the first. Only
+    the jobs on the page are checked against the employer's system. The count also checks the first page, so a search whose
+    first jobs all fail a rule (no pay, wrong place) does not claim matches it cannot show.
+    """
+    from app.services.jobcache import matcher, service as cache_service
+
+    ranked = await cache_service.ranked_items(criteria)
+    available = [i for i in ranked if not (loose_keys(i["url"]) & known_keys)]
+    if count_only and not (criteria.location or criteria.require_salary or criteria.posted_within_days):
+        return [], len(available)  # nothing that a page check could remove: the count is final
+    if sort == "newest":  # the whole list, newest first (no date last); equal dates keep their best-match order
+        available = sorted(available, key=lambda i: (i.get("posted_at") is None, -(i["posted_at"].toordinal() if i.get("posted_at") else 0)))
+    elif sort == "resume" and resume_scores:  # jobs already checked against the resume first, best score first; the rest in best-match order
+        available = sorted(available, key=lambda i: -(resume_scores.get(i["url_key"], -1.0)))
+    if offset >= len(available):
+        return [], len(available)
+    try:
+        extra_titles = await cache_service.expand_titles(criteria.titles)
+    except Exception:
+        extra_titles = []
+    plan = matcher.build_plan(criteria, extra_titles)
+    ckey = (cache_service._ranked_key(criteria), sort, offset, criteria.count)
+    hit = _PAGE_CHECKED.get(ckey)
+    still_there = bool(hit) and {i["url"] for i in available[offset : offset + len(hit[1])]} == {i["url"] for i in hit[1]}  # the same jobs are still at this place in the list
+    if hit and still_there and time.time() - hit[0] < PAGE_CHECKED_TTL:
+        _, kept, rejected = hit
+        kept = [dict(i) for i in kept]
+        rejected = []  # already taken off the list when it was first checked
+    else:
+        kept, rejected = await _check_page(criteria, plan, available, offset)
+        for item in kept:
+            item["fit_score"] = item.get("fit")
+            item["fit_note"] = fit_note(plan, item)
+            for key in ("ats_checked", "ats_live", "site_url", "fit", "employer_id", "_desc", "read_at"):
+                item.pop(key, None)
+        _PAGE_CHECKED[ckey] = (time.time(), [dict(i) for i in kept], [])
+        for old in sorted(_PAGE_CHECKED, key=lambda k: _PAGE_CHECKED[k][0])[: max(len(_PAGE_CHECKED) - 12, 0)]:
+            _PAGE_CHECKED.pop(old, None)
+        if rejected:
+            await cache_service.drop_from_ranked(criteria, set(rejected))
+        total = max(len(available) - len(rejected), len(kept))
+        _PAGE_TOTAL[ckey] = total
+    total = _PAGE_TOTAL.get(ckey, len(available))
+    return ([], total) if count_only else (kept, total)
+
+
+_PAGE_TOTAL: dict[tuple, int] = {}
 
 
 async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]:

@@ -1332,7 +1332,7 @@ def test_usshare_lists_and_turns_off_foreign_employers(tmp_path, monkeypatch):
     b, _ = cache.upsert_employer("smartrecruiters", "eu-co", "EU Co", "curated")
     cache.apply_refresh(a, [PostingIn(ext_id=str(i), title="Nurse", location="Boston, MA", url=f"https://x/a{i}") for i in range(5)], now_ts(), 6.0, True)
     cache.apply_refresh(b, [PostingIn(ext_id=str(i), title="Chef", location="Paris, FR", url=f"https://x/b{i}") for i in range(5)], now_ts(), 6.0, True)
-    ns = dict(max_us=30, min_foreign=50, top=10, disable=False, restore=False)
+    ns = dict(max_us=30, min_foreign=50, keep_us_jobs=15, top=10, disable=False, restore=False)
     cache_tools.cmd_usshare(argparse.Namespace(**ns))
     with cache.session() as db:
         assert db.execute("SELECT COUNT(*) FROM employers WHERE enabled = 1").fetchone()[0] == 2  # a dry run changes nothing

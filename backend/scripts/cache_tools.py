@@ -590,11 +590,11 @@ def cmd_usshare(args: argparse.Namespace) -> int:
     foreign_all = sum(c[2] for c in counts.values())
     print(f"All enabled employers: {len(counts):,} employers, {jobs_all:,} jobs; {100 * us_all // max(jobs_all, 1)}% clearly US, {100 * foreign_all // max(jobs_all, 1)}% clearly outside the US.")
     flagged = sorted(
-        (i for i, c in counts.items() if c[0] >= 1 and 100 * c[1] // c[0] < args.max_us and 100 * c[2] // c[0] >= args.min_foreign),
+        (i for i, c in counts.items() if c[0] >= 1 and 100 * c[1] // c[0] < args.max_us and 100 * c[2] // c[0] >= args.min_foreign and c[1] < args.keep_us_jobs),
         key=lambda i: -counts[i][0],
     )
     jobs_flagged = sum(counts[i][0] for i in flagged)
-    print(f"\nMostly outside the US (under {args.max_us}% US and at least {args.min_foreign}% outside): {len(flagged):,} employers, {jobs_flagged:,} jobs.")
+    print(f"\nMostly outside the US (under {args.max_us}% US, at least {args.min_foreign}% outside, and fewer than {args.keep_us_jobs} US jobs): {len(flagged):,} employers, {jobs_flagged:,} jobs.")
     for i in flagged[: args.top]:
         c = counts[i]
         print(f"  {info[i][0][:40]:40s} {info[i][1]:16s} {c[0]:6,d} jobs  US {100 * c[1] // c[0]:3d}%  outside {100 * c[2] // c[0]:3d}%")
@@ -654,6 +654,7 @@ def main() -> None:
     us = sub.add_parser("usshare")
     us.add_argument("--max-us", type=int, default=30, help="employers with a smaller share of clearly US jobs than this are listed")
     us.add_argument("--min-foreign", type=int, default=50, help="and at least this share clearly outside the US")
+    us.add_argument("--keep-us-jobs", type=int, default=15, help="never list an employer that still has at least this many clearly US jobs (default 15)")
     us.add_argument("--top", type=int, default=40)
     us.add_argument("--disable", action="store_true", help="turn the listed employers off (they stay saved, and --restore turns them back on)")
     us.add_argument("--restore", action="store_true", help="turn back on the employers this command turned off")

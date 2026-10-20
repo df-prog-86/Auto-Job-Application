@@ -447,7 +447,7 @@ def test_posted_date_is_read_from_the_posting_page():
     assert extract_posted_date("<p>No date here</p>") is None
 
 
-def test_date_window_drops_old_postings_but_keeps_undated_ones(monkeypatch):
+def test_date_window_drops_old_and_undated_postings_but_no_window_keeps_undated(monkeypatch):
     import asyncio
     import datetime as dt
     from app.services.discovery import web_search as ws
@@ -460,7 +460,9 @@ def test_date_window_drops_old_postings_but_keeps_undated_ones(monkeypatch):
     mk = lambda n, d: {"title": n, "url": f"https://jobs.example.com/{n}", "posted_at": d}
     items = [mk("new", today - dt.timedelta(days=3)), mk("old", today - dt.timedelta(days=40)), mk("undated", None)]
     kept, dropped = asyncio.run(ws.fill_posted_dates(items, 14))
-    assert [i["title"] for i in kept] == ["new", "undated"] and dropped == 1
+    assert [i["title"] for i in kept] == ["new"] and dropped == 2
+    kept_all, none_dropped = asyncio.run(ws.fill_posted_dates(items, 0))
+    assert len(kept_all) == 3 and none_dropped == 0  # no window asked: nothing is dropped for its date
 
 
 def test_workday_postings_are_read_from_workdays_own_data():

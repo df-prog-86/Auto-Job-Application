@@ -318,7 +318,27 @@ def parse_ashby(data: Any, board: str) -> list[PostingIn]:
 
 async def _read_ashby(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
     data = await _request(client, throttle, "ashby", "GET", f"https://api.ashbyhq.com/posting-api/job-board/{identifier}", params={"includeCompensation": "true"})
-    return ReadResult(parse_ashby(data, identifier))
+    return ReadResult(parse_ashby(data, identifier), name=await _ashby_name(identifier, client, throttle))
+
+
+ASHBY_NAME_QUERY = (
+    "query ApiOrganizationFromHostedJobsPageName($organizationHostedJobsPageName: String!) "
+    "{ organization: organizationFromHostedJobsPageName(organizationHostedJobsPageName: $organizationHostedJobsPageName) { name } }"
+)
+
+
+async def _ashby_name(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> str | None:
+    """The employer's real name ("OpenGov") from the board's own page data. Any trouble just means the name stays as it was."""
+    try:
+        data = await _request(
+            client, throttle, "ashby", "POST", "https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiOrganizationFromHostedJobsPageName",
+            json={"operationName": "ApiOrganizationFromHostedJobsPageName", "variables": {"organizationHostedJobsPageName": identifier}, "query": ASHBY_NAME_QUERY},
+        )
+        org = ((data or {}).get("data") or {}).get("organization") if isinstance(data, dict) else None
+        name = org.get("name") if isinstance(org, dict) else None
+        return name.strip() if isinstance(name, str) and name.strip() and len(name) < 80 else None
+    except Exception:
+        return None
 
 
 # ---- Workday ------------------------------------------------------------------------------------------------------

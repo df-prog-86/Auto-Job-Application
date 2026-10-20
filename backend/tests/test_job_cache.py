@@ -974,8 +974,8 @@ def test_a_trusted_first_seen_day_counts_as_the_posting_date(tmp_path, monkeypat
     ranked = matcher.rank(matcher.build_plan(crit), cache.candidates(None, ["%"], 50))
     item = service.to_item(next(r for r in ranked if r.row["ext_id"] == "2"))
     assert item["posted_at"] == dt.date.fromisoformat(_day(now))
-    undated = service.to_item(next(r for r in matcher.rank(matcher.build_plan(crit), cache.candidates(None, ["%"], 50)) if r.row["ext_id"] == "1"))
-    assert undated["posted_at"] is None
+    still = [r.row["ext_id"] for r in matcher.rank(matcher.build_plan(crit), cache.candidates(None, ["%"], 50))]
+    assert "1" not in still  # first seen before the crawl was trusted: no date, so it does not qualify for "last 7 days"
 
 
 # ---- O*NET titles ----------------------------------------------------------------------------------------------
@@ -1806,3 +1806,22 @@ def test_new_york_city_is_a_city_search_not_the_whole_state():
     q = text.parse_location_query("New York, NY")
     assert text.location_fit(q, "New York, New York", None) == 1.0
     assert text.location_fit(q, "Buffalo, NY", None) == 0.7  # same state, not the city
+
+
+def test_a_remote_place_listing_two_countries_is_written_plainly_and_still_counts_as_us():
+    assert text.tidy_place("Remote (United States | Canada)") == "Remote (US or Canada)"
+    assert text.tidy_place("Remote - US | Canada") == "Remote (US or Canada)"
+    assert text.tidy_place("Remote (US)") == "Remote (US)"
+    assert text.location_fit(text.parse_location_query("Boston, MA or remote"), "Remote (US or Canada)", "remote") > 0
+    assert text.location_fit(text.parse_location_query("Boston, MA or remote"), "Remote, Canada", "remote") == 0.0
+
+
+def test_a_date_window_leaves_out_a_posting_that_shows_no_date():
+    crit = SimpleNamespace(titles="project manager", location="", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=7, count=10)
+    plan = matcher.build_plan(crit, [])
+    row = {"title": "Project Manager", "company": "X", "location": "Boston, MA", "work_type": None, "pay_mid": None, "pay_text": None, "url": "u", "description": None}
+    today = dt.date(2026, 10, 20)
+    assert matcher.score_row(plan, {**row, "posted_at": "2026-10-17"}, today) is not None
+    assert matcher.score_row(plan, {**row, "posted_at": "2026-09-01"}, today) is None
+    assert matcher.score_row(plan, {**row, "posted_at": None}, today) is None
+    assert matcher.score_row(matcher.build_plan(SimpleNamespace(**{**vars(crit), "posted_within_days": None}), []), {**row, "posted_at": None}, today) is not None

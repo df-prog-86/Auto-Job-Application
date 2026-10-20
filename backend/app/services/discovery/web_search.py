@@ -540,7 +540,7 @@ async def fill_posted_dates(
 ) -> tuple[list[dict[str, Any]], int]:
     """
     Results the AI gave no date for get one from the posting page itself. When a date window was asked for,
-    postings that are clearly older are dropped. Still no date means it is kept, and shown as "date not listed".
+    postings that are older, or that still show no date, are dropped (without a window an undated posting is kept, "date not listed").
     """
     gate = asyncio.Semaphore(5)
 
@@ -564,7 +564,7 @@ async def fill_posted_dates(
     await asyncio.gather(*(one(i) for i in items))
     if not within_days:
         return items, 0
-    kept = [i for i in items if not i.get("posted_at") or (dt.date.today() - i["posted_at"]).days <= within_days]
+    kept = [i for i in items if i.get("posted_at") and (dt.date.today() - i["posted_at"]).days <= within_days]  # no date at all cannot show it is recent
     return kept, len(items) - len(kept)
 
 
@@ -1027,11 +1027,13 @@ async def search_page(
         tidy_items(batch)
         items = merge_twin_postings(merge_same_jobs(_dedupe_by_address(batch)))
         items, _gone = await enrich_from_ats(items)
+        # Opening a job often reveals where it really is (a hospital listed as "3 Locations" that is in Tacoma): check the place again now
+        items = [i for i in items if not i.get("location") or re.search(r"\+\d+ more", i["location"]) or matcher.place_ok(plan, i["location"], i.get("work_type"))]  # "+4 more" hides places: kept
         items, _old = await fill_posted_dates(items, criteria.posted_within_days, need_pay=criteria.require_salary)
         items, _no_pay = apply_pay_rules(items, criteria)
         good, _closed = await drop_closed(items)
         good_urls = {i.get("url") for i in good}
-        if criteria.require_salary or criteria.posted_within_days:
+        if criteria.require_salary or criteria.posted_within_days or criteria.location:
             rejected += [u for u in batch_urls if u not in good_urls]  # a failed rule, not a transient miss: take it off the list
         kept += good
     kept = kept[: criteria.count]

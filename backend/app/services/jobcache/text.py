@@ -467,6 +467,11 @@ def tidy_place(location: str | None) -> str | None:
     piped = re.match(r"^(?:US|USA|United States)\s*\|\s*([A-Za-z .]+?)\s*\|\s*([A-Za-z .'-]+)$", location.strip())
     if piped and STATE_BY_NAME.get(piped.group(1).lower()):  # "US | Illinois | Chicago" -> "Chicago, IL"
         return f"{piped.group(2).strip()}, {STATE_BY_NAME[piped.group(1).lower()]}"
+    remote_list = re.match(r"^remote\s*[(\-:]\s*([^()]+?)\s*\)?$", location.strip(), re.I)
+    if remote_list and "|" in remote_list.group(1):  # "Remote (United States | Canada)" -> "Remote (US or Canada)"
+        names = [re.sub(r"^(united states|usa|us)$", "US", p.strip(), flags=re.I) for p in remote_list.group(1).split("|") if p.strip()]
+        if names:
+            return "Remote (" + " or ".join(names) + ")"
     parts = []
     for part in re.split(r"\s*;\s*", location.strip()):
         m = _CITY_DASH_STATE.match(part)

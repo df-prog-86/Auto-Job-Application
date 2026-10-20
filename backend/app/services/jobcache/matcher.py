@@ -341,8 +341,8 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
     if plan.pay_floor and mid is not None and mid < plan.pay_floor:
         return None
     posted = _date(row.get("posted_at") or row.get("seen_date"))
-    if plan.window_days and posted and (today - posted).days > plan.window_days:
-        return None
+    if plan.window_days and (posted is None or (today - posted).days > plan.window_days):
+        return None  # a date window was asked for: a posting that cannot show when it was posted does not qualify
     kw = 0.0
     if plan.keyword_phrases:
         # Keywords are required: every word of at least one keyword must be in the title, employer, place or (when the

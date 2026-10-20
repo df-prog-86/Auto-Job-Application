@@ -655,6 +655,27 @@ def cmd_recheck(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_names(args: argparse.Namespace) -> int:
+    """Shows employers whose name is still only a guess from the web address (often run together, like "Opengov"), by hiring system."""
+    from app.services.jobcache.store import guess_name
+    from app.services.jobcache.text import clean_company
+
+    cache = JobCache()
+    with cache.session() as db:
+        rows = [dict(r) for r in db.execute("SELECT ats, identifier, name, open_count FROM employers WHERE enabled = 1")]
+    guessed = [r for r in rows if r["name"] == guess_name(r["ats"], r["identifier"]) and " " not in clean_company(r["name"]) and len(r["name"]) >= 7]
+    by: dict[str, int] = {}
+    for r in guessed:
+        by[r["ats"]] = by.get(r["ats"], 0) + 1
+    print(f"{len(guessed)} of {len(rows)} employers still have a one-word guessed name:")
+    for ats, n in sorted(by.items(), key=lambda kv: -kv[1]):
+        print(f"  {ats:16s} {n}")
+    print("Biggest examples:")
+    for r in sorted(guessed, key=lambda r: -(r["open_count"] or 0))[: args.limit]:
+        print(f"  {r['name']:30s} {r['ats']:16s} {r['open_count']} open")
+    return 0
+
+
 US_OFF_NOTE = "turned off: mostly outside the US"
 
 
@@ -727,6 +748,8 @@ def main() -> None:
     f.add_argument("--per-employer", type=int, default=15, help="most postings read from one employer per batch")
     f.add_argument("--pause", type=float, default=2.0, help="seconds to wait between batches")
     f.add_argument("--retry", help="comma separated hiring systems whose unreadable postings should be tried again, e.g. icims,smartrecruiters,workable")
+    nm = sub.add_parser("names")
+    nm.add_argument("--limit", type=int, default=25)
     r = sub.add_parser("reread")
     r.add_argument("--db", required=True)
     r.add_argument("--only", help="comma separated hiring systems, e.g. greenhouse,lever,ashby")
@@ -786,6 +809,8 @@ def main() -> None:
         sys.exit(asyncio.run(_fill(args)))
     if args.cmd == "reindex":
         sys.exit(cmd_reindex(args))
+    if args.cmd == "names":
+        sys.exit(cmd_names(args))
     if args.cmd == "industry":
         sys.exit(cmd_industry(args))
     if args.cmd == "probe":

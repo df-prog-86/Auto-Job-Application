@@ -247,9 +247,11 @@ def add_decision(system: str, ident: str, postings: list, args: argparse.Namespa
     if n < args.min_jobs:
         return False, f"only {n} jobs (rule: at least {args.min_jobs})"
     included = any(s.lower() in key for s in (getattr(args, "include", None) or []))
-    if not included and foreign > 100 - args.min_us:
+    keep = getattr(args, "keep_us_jobs", 15)
+    enough_us = us * n // 100 >= keep  # a US employer with many offices abroad (Amgen, BCG) still has real US jobs worth having
+    if not included and not enough_us and foreign > 100 - args.min_us:
         return False, f"{foreign}% of jobs are outside the US (rule: at most {100 - args.min_us}%)"
-    if not included and us < 10 and foreign > 20:
+    if not included and not enough_us and us < 10 and foreign > 20:
         return False, f"only {us}% clearly US and {foreign}% outside the US"
     if is_agency(name):
         return False, "looks like a staffing agency"
@@ -647,6 +649,7 @@ def main() -> None:
     ad.add_argument("--apply", action="store_true", help="actually add them (without this it only shows what it would do)")
     ad.add_argument("--min-jobs", type=int, default=10)
     ad.add_argument("--min-us", type=int, default=60)
+    ad.add_argument("--keep-us-jobs", type=int, default=15, help="an employer with at least this many clearly US jobs passes the place check even when it is mostly abroad (default 15)")
     ad.add_argument("--include", action="append", help="add any employer whose address contains this text without the place check (repeatable)")
     ad.add_argument("--resume-from", action="append", metavar="FILE", help="an earlier output of this command; employers already judged there are not checked again (repeatable)")
     ad.add_argument("--skip", action="append", help="leave out any employer whose address contains this text (repeatable)")

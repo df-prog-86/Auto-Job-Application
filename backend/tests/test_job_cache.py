@@ -1475,3 +1475,19 @@ def test_industry_display_names_and_new_overrides():
     assert classify("Hyvee", ["Produce Clerk"]) == "Retail Trade"
     assert classify("Ngc", ["Systems Engineer"]) == "Professional, Scientific, and Technical Services"
     assert DISPLAY_NAMES["jll"] == "JLL" and DISPLAY_NAMES["bjswholesaleclub"] == "BJ's Wholesale Club"
+
+
+def test_add_keeps_mostly_foreign_employer_with_many_us_jobs():
+    import argparse, sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from scripts.cache_tools import add_decision
+    from app.services.jobcache.store import PostingIn
+
+    def mk(us, fo):
+        return [PostingIn(ext_id=str(i), title="t", url="u", location="Boston, MA") for i in range(us)] + [PostingIn(ext_id=f"f{i}", title="t", url="u", location="Paris, France") for i in range(fo)]
+
+    a = argparse.Namespace(skip=None, min_jobs=10, min_us=60, include=None, keep_us_jobs=15)
+    ok, why = add_decision("workday", "x.wd1.myworkdayjobs.com|x|S", mk(30, 70), a)
+    assert ok and "named by you" not in why
+    assert not add_decision("workday", "x.wd1.myworkdayjobs.com|x|S", mk(8, 70), a)[0]

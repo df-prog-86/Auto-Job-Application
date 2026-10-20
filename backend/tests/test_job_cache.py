@@ -1891,3 +1891,10 @@ def test_names_no_town_means_state_only():
     assert names_no_town("PA") and names_no_town("US; PA; NJ")
     assert not names_no_town("Philadelphia, PA") and not names_no_town("Remote") and not names_no_town("")
     assert location_fit(parse_location_query("Philadelphia, PA"), "Pittsburgh, PA", None) == 0.0
+
+
+def test_remote_jobs_come_after_the_city_when_remote_is_included():
+    plan = matcher.build_plan(crit(titles="accountant", location="Philadelphia, PA", include_remote=True), [])
+    city = {"title": "Staff Accountant", "company": "City Co", "location": "Philadelphia, PA", "work_type": None, "posted_at": None}
+    remote = {"title": "Accountant", "company": "Remote Co", "location": "Remote, USA", "work_type": "remote", "posted_at": None}
+    assert [s.row["company"] for s in matcher.rank(plan, [remote, city])] == ["City Co", "Remote Co"]

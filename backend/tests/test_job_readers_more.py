@@ -44,7 +44,7 @@ def test_breezy_postings_are_parsed():
         {"id": None, "name": "No id"},
     ]
     a, b = readers.parse_breezy(data, "tyton-partners")
-    assert a.title.startswith("Senior Associate") and a.location == "Boston, MA" and a.work_type == "remote"
+    assert a.title.startswith("Senior Associate") and a.location == "Boston, MA" and a.work_type is None  # a remote flag on a job with a city does not make it remote
     assert a.pay_text == "$120,000 / year" and a.pay_mid == 120000 and a.posted_at == dt.date(2026, 9, 21)
     assert b.pay_text is None and b.work_type is None
 

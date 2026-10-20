@@ -77,10 +77,11 @@ def _save_item(db: Session, item: dict, payload: JobSearchIn) -> JobSearchResult
         return row
     row.fit_score = item.get("fit_score")
     row.fit_note = item.get("fit_note")
+    # What the job says now (its place list, pay, date) replaces what an earlier search saved, so a page never shows stale details.
+    for key in ("title", "company", "location", "work_type", "salary_text", "posted_at"):
+        if item.get(key) is not None:
+            setattr(row, key, item[key])
     if row.status == "stale":
-        for key in ("title", "company", "location", "work_type", "salary_text", "posted_at"):
-            if item.get(key) is not None:
-                setattr(row, key, item[key])
         row.status = "new"
         row.criteria = payload.model_dump()
     return row

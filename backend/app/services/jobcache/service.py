@@ -23,7 +23,7 @@ from app.services.jobcache import geo, matcher, onet
 from app.services.jobcache.keys import loose_keys, url_key
 from app.services.jobcache.readers import SYSTEMS, ReaderError, Throttle, employer_ref, make_client, read_employer
 from app.services.jobcache.store import JobCache, now_ts
-from app.services.jobcache.text import fold, is_vague_place, parse_location_query, place_ref
+from app.services.jobcache.text import fold, is_vague_place, names_no_town, parse_location_query, place_ref
 
 log = logging.getLogger("job_cache")
 
@@ -343,7 +343,9 @@ async def resolve_vague_places(criteria: Any, items: list[dict[str, Any]], extra
     plan = matcher.build_plan(criteria, extra_titles, extra_places)
     if plan.work_type == "remote" or plan.loc.empty or plan.loc.nationwide or not (plan.loc.cities or plan.loc.states):
         return items
-    vague = [i for i in items if is_vague_place(i.get("location"))]
+    # a city search: a job that gives only a state ("PA") says nothing about the town either, so it is opened too
+    unplaced = (lambda loc: is_vague_place(loc) or names_no_town(loc)) if plan.loc.cities else is_vague_place
+    vague = [i for i in items if unplaced(i.get("location"))]
     vague.sort(key=lambda i: -(i.get("fit") or 0.0))
     todo = vague[:RESOLVE_PLACES_MAX]
     if not todo:
@@ -360,7 +362,7 @@ async def resolve_vague_places(criteria: Any, items: list[dict[str, Any]], extra
             gone.add(id(item))
             continue
         loc = item.get("location")
-        if loc and loc != before[id(item)] and not is_vague_place(loc):
+        if loc and loc != before[id(item)] and not unplaced(loc):
             await asyncio.to_thread(cache.set_location, item["url"], loc)
             if not matcher.place_ok(plan, loc, item.get("work_type")):
                 gone.add(id(item))
@@ -369,7 +371,7 @@ async def resolve_vague_places(criteria: Any, items: list[dict[str, Any]], extra
         item.pop("ats_live", None)
     # A job that still names no place was not opened (beyond the best 60, or its system did not answer): a search for a place does not
     # show it. Each search saves the places of the next 60, so over searches the list fills in.
-    return [i for i in items if id(i) not in gone and not is_vague_place(i.get("location"))]
+    return [i for i in items if id(i) not in gone and not (unplaced(i.get("location")) and i.get("work_type") != "remote")]
 
 
 async def drop_from_ranked(criteria: Any, urls: set[str]) -> None:

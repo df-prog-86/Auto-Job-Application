@@ -331,6 +331,18 @@ def is_vague_place(location: str | None) -> bool:
     return not (location or "").strip() or bool(_UNKNOWN_PLACE.search(location or ""))
 
 
+def names_no_town(location: str | None) -> bool:
+    """True when a place gives only a state or country ("PA", "US; PA; NJ"): it says which state, but not which town."""
+    folded = fold(location or "")
+    if not folded.strip():
+        return False
+    left = re.sub(r"\b(united states|usa|us)\b", " ", f" {folded} ")
+    for name in STATE_BY_NAME:
+        left = re.sub(rf"\b{name}\b", " ", left)
+    left = re.sub(r"\b[a-z]{2}\b", " ", left)
+    return not re.search(r"[a-z]{3,}", left)
+
+
 REMOTE_ELSEWHERE = 0.75  # a remote job (based anywhere) in a search that names a city: kept, but behind jobs in that city
 
 

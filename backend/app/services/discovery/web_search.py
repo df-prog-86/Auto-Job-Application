@@ -998,7 +998,7 @@ async def _check_page(criteria: JobSearchIn, plan: Any, available: list[dict[str
     page is full.
     """
     from app.services.jobcache import matcher
-    from app.services.jobcache.text import is_vague_place, lead_with_place, tidy_place
+    from app.services.jobcache.text import is_vague_place, lead_with_place, names_no_town, tidy_place
 
     kept: list[dict[str, Any]] = []
     rejected: list[str] = []
@@ -1022,7 +1022,8 @@ async def _check_page(criteria: JobSearchIn, plan: Any, available: list[dict[str
             if i.get("location") and not is_vague_place(i["location"]):
                 i["location"] = tidy_place(lead_with_place(i["location"], wanted))
         items = [i for i in items if matcher.place_ok(plan, i.get("location"), i.get("work_type"))
-                 and not (_must_name_a_place(plan) and is_vague_place(i.get("location")) and i.get("work_type") != "remote")]
+                 and not (_must_name_a_place(plan) and i.get("work_type") != "remote"
+                          and (is_vague_place(i.get("location")) or (plan.loc.cities and names_no_town(i.get("location")))))]
         items, _old = await fill_posted_dates(items, criteria.posted_within_days, need_pay=criteria.require_salary)
         items, _no_pay = apply_pay_rules(items, criteria)
         good, _closed = await drop_closed(items)

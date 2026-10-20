@@ -1883,3 +1883,11 @@ def test_a_refresh_keeps_the_real_places_found_for_a_multi_location_job(tmp_path
     cache.apply_refresh(eid, [row], 2000)  # the list still says "3 Locations"
     with cache.session() as db:
         assert db.execute("SELECT location FROM postings WHERE ext_id = ?", (row.ext_id,)).fetchone()["location"] == "Boston, MA; Quincy, MA; Salem, MA"
+
+
+def test_names_no_town_means_state_only():
+    from app.services.jobcache.text import location_fit, names_no_town, parse_location_query
+
+    assert names_no_town("PA") and names_no_town("US; PA; NJ")
+    assert not names_no_town("Philadelphia, PA") and not names_no_town("Remote") and not names_no_town("")
+    assert location_fit(parse_location_query("Philadelphia, PA"), "Pittsburgh, PA", None) == 0.0

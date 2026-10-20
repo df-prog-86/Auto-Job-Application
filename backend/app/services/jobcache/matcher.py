@@ -33,14 +33,14 @@ from app.services.jobcache.text import (
 )
 
 MIN_TITLE_FIT = 0.35  # below this a title only shares a word or two with the search: left out
-CANDIDATE_LIMIT = 600  # postings read from the index per search, however large the saved copy is
+CANDIDATE_LIMIT = 5000  # postings read from the index per search: high enough that every real match is reached, low enough to stay fast
 EXPANDED_WEIGHT = 0.92  # an alternative title counts for a little less than the one the person typed
 
 W_TITLE, W_PLACE, W_RECENT, W_PAY, W_KEYWORD = 0.62, 0.22, 0.08, 0.04, 0.04
 W_DESC = 0.05  # added when the opening of the description names the kind of work asked for; the total is capped at 1
 DESC_TITLE_FLOOR = 0.40  # the title credit of a posting found only through its description: above the cut-off, below a real title match
 DESC_CHARS = 600  # how much of the opening of a description is read
-DESC_CANDIDATE_LIMIT = 200  # postings added from the description index per search
+DESC_CANDIDATE_LIMIT = 600  # postings added from the description index per search
 
 
 @dataclass

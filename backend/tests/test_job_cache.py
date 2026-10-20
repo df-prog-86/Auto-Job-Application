@@ -1940,3 +1940,11 @@ def test_remote_jobs_in_other_countries_are_not_shown():
     assert text.location_fit(q, "Remote - European Union", "remote") == 0.0
     assert text.title_names_foreign("REMOTE (INDIA): Project Coordinator")
     assert not text.title_names_foreign("Remote Project Coordinator (US)") and not text.title_names_foreign("Project Coordinator")
+
+
+def test_bamboohr_description_comes_from_its_detail_data():
+    from app.services.jobcache import service
+
+    assert service._description_request("https://acme.bamboohr.com/careers/146") == ("bamboohr", "https://acme.bamboohr.com/careers/146/detail")
+    assert service._data_description("bamboohr", {"result": {"jobOpening": {"description": "<p>Do things</p>"}}}) == "<p>Do things</p>"
+    assert service._data_description("bamboohr", {"result": {}}) is None

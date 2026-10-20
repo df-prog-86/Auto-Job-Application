@@ -103,6 +103,8 @@ def _description_request(url: str) -> tuple[str, str] | None:
         return "smartrecruiters", f"https://api.smartrecruiters.com/v1/companies/{segs[0]}/postings/{posting_id}"
     if host == "apply.workable.com" and len(segs) >= 3 and segs[1] == "j":
         return "workable", f"https://apply.workable.com/api/v2/accounts/{segs[0]}/jobs/{segs[2]}"
+    if host.endswith(".bamboohr.com") and len(segs) >= 2 and segs[0] == "careers" and segs[1].isdigit():
+        return "bamboohr", f"{parts.scheme}://{parts.netloc}/careers/{segs[1]}/detail"  # the page is built by script; the text is in this data
     if host.endswith(".icims.com") and "/jobs/" in parts.path:
         return "icims", f"{parts.scheme}://{parts.netloc}{parts.path}?in_iframe=1"
     return None
@@ -119,6 +121,9 @@ def _data_description(kind: str, data: Any) -> str | None:
     if kind == "workable":
         texts = [str(data.get(k) or "") for k in ("description", "requirements", "benefits")]
         return " ".join(t for t in texts if t) or None
+    if kind == "bamboohr":
+        opening = ((data.get("result") or {}).get("jobOpening") or {}) if isinstance(data.get("result"), dict) else {}
+        return str(opening.get("description") or "") or None
     return None
 
 
@@ -203,7 +208,7 @@ async def read_missing_descriptions(unread: list[tuple[int, str]], max_chars: in
                         markup = info.get("jobDescription")
                         if not markup and why is not None:
                             why[f"workday http {resp.status_code}"] = why.get(f"workday http {resp.status_code}", 0) + 1
-                    elif req and req[0] in ("smartrecruiters", "workable"):
+                    elif req and req[0] in ("smartrecruiters", "workable", "bamboohr"):
                         resp = await client.get(req[1])
                         markup = _data_description(req[0], resp.json()) if resp.status_code == 200 else None
                         if not markup and why is not None:

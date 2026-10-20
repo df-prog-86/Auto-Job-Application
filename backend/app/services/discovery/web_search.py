@@ -710,7 +710,10 @@ def fit_note(plan: Any, item: dict[str, Any]) -> str:
 
     parts: list[str] = []
     tf = matcher.title_fit(plan, item["title"])
-    parts.append("Title matches closely" if tf >= 0.8 else "Title is a related role" if tf >= 0.5 else "Title partly matches")
+    if tf < matcher.MIN_TITLE_FIT and matcher.desc_hit(plan, item.get("_desc")):
+        parts.append("Description matches your search")
+    else:
+        parts.append("Title matches closely" if tf >= 0.8 else "Title is a related role" if tf >= 0.5 else "Title partly matches")
     lf = location_fit(plan.loc, item.get("location"), item.get("work_type"))
     if not plan.loc.empty:
         parts.append("In your area" if lf >= 0.95 else "Remote" if item.get("work_type") == "remote" else "Same state" if lf >= 0.7 else "Place not stated" if lf >= 0.5 else "Elsewhere")

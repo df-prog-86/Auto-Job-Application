@@ -12,3 +12,11 @@ Run order (from `backend`, see `python -m scripts.eval_search --help`):
 5. `score --runs baseline` prints the report.
 
 Runs, pool and labels live in `backend/data/eval/` (local only, never committed).
+
+## Description search before and after
+
+Search can also read the opening lines of each job's description (switch: `JOB_SEARCH_USE_DESCRIPTION`, on by default). To compare:
+
+1. `python -m scripts.cache_tools reindex --db data/eval/job_cache_frozen.db` builds the description index on the frozen copy.
+2. `JOB_SEARCH_USE_DESCRIPTION=false python -m scripts.eval_search run --arm saved --name desc-off`, then `python -m scripts.eval_search run --arm saved --name desc-on`.
+3. `pool`, `prelabel` (jobs found through descriptions are new to the pool), then `score --runs desc-off,desc-on`.

@@ -88,8 +88,19 @@ FTS_SCHEMA = (
 )
 
 CLOSED_KEEP_DAYS = 30
+DESC_FTS_SCHEMA = (
+    "CREATE VIRTUAL TABLE IF NOT EXISTS postings_desc_fts USING fts5(body, tokenize = 'porter unicode61 remove_diacritics 2')"
+)
+DESC_INDEX_CHARS = 600  # the opening lines of a posting's description that search can read
+DESC_READY_KEY = "desc_index_ready"
 _INIT_LOCK = threading.Lock()
 _INITIALISED: dict[str, bool] = {}  # path -> whether full-text search is available
+_DESC_OK: dict[str, bool] = {}  # path -> whether the description index could be created
+
+
+def desc_lead(text_: str | None) -> str:
+    """The opening lines of a description as one line of plain text: what search reads of it."""
+    return " ".join((text_ or "").split())[:DESC_INDEX_CHARS]
 
 
 @dataclass
@@ -158,6 +169,11 @@ class JobCache:
                     fts = True
                 except sqlite3.OperationalError:
                     fts = False  # this Python's SQLite has no full-text search: searches fall back to a plain scan
+                try:
+                    conn.execute(DESC_FTS_SCHEMA)  # a second, separate index: the first one is never altered
+                    _DESC_OK[self.path] = fts
+                except sqlite3.OperationalError:
+                    _DESC_OK[self.path] = False
                 for row in conn.execute("SELECT id, ats, identifier, name FROM employers").fetchall():
                     proper = known_name(row["ats"], row["identifier"])
                     if proper and row["name"] != proper:  # fixes names saved before the proper one was known
@@ -292,6 +308,18 @@ class JobCache:
         if self.has_fts and ids:
             db.executemany("DELETE FROM postings_fts WHERE rowid = ?", [(i,) for i in ids])
 
+    @property
+    def has_desc(self) -> bool:
+        return _DESC_OK.get(self.path, False)
+
+    def _desc_delete(self, db: sqlite3.Connection, ids: list[int]) -> None:
+        if self.has_desc and ids:
+            db.executemany("DELETE FROM postings_desc_fts WHERE rowid = ?", [(i,) for i in ids])
+
+    def _desc_insert(self, db: sqlite3.Connection, rows: list[tuple[int, str]]) -> None:
+        if self.has_desc and rows:
+            db.executemany("INSERT INTO postings_desc_fts (rowid, body) VALUES (?, ?)", rows)
+
     def _fts_insert(self, db: sqlite3.Connection, rows: list[tuple[int, str, str, str]]) -> None:
         if self.has_fts and rows:
             db.executemany("INSERT INTO postings_fts (rowid, title, company, location) VALUES (?, ?, ?, ?)", rows)
@@ -329,6 +357,8 @@ class JobCache:
             seen: set[str] = set()
             fts_add: list[tuple[int, str, str, str]] = []
             fts_del: list[int] = []
+            desc_add: list[tuple[int, str]] = []
+            desc_del: list[int] = []
             for p in postings:
                 if not p.ext_id or not p.title or not p.url or p.ext_id in seen:
                     continue
@@ -346,6 +376,8 @@ class JobCache:
                          blob, fingerprint, agency, None if p.posted_at else seen_day),
                     )
                     fts_add.append((int(cur.lastrowid), p.title[:300], company, (p.location or "")[:300]))
+                    if desc_lead(p.description):
+                        desc_add.append((int(cur.lastrowid), desc_lead(p.description)))
                     result.new += 1
                     continue
                 db.execute(
@@ -355,6 +387,9 @@ class JobCache:
                 )
                 if fingerprint and fingerprint != row["desc_hash"]:  # the text is saved again only when it is new or has changed
                     db.execute("UPDATE postings SET description_z = ?, desc_hash = ? WHERE id = ?", (blob, fingerprint, row["id"]))
+                    desc_del.append(row["id"])
+                    if desc_lead(p.description):
+                        desc_add.append((row["id"], desc_lead(p.description)))
                 if agency is not None and agency != row["agency"]:
                     db.execute("UPDATE postings SET agency = ? WHERE id = ?", (agency, row["id"]))
                 changed = row["title"] != p.title[:300] or (row["location"] or "") != (p.location or "")[:300]
@@ -365,9 +400,12 @@ class JobCache:
             if gone:
                 db.executemany("UPDATE postings SET closed_at = ? WHERE id = ?", [(now, i) for i in gone])
                 fts_del.extend(gone)
+                desc_del.extend(gone)
                 result.closed = len(gone)
             self._fts_delete(db, fts_del)
             self._fts_insert(db, fts_add)
+            self._desc_delete(db, desc_del)
+            self._desc_insert(db, desc_add)
             open_now = db.execute("SELECT COUNT(*) AS n FROM postings WHERE employer_id = ? AND closed_at IS NULL", (employer_id,)).fetchone()["n"]
             db.execute(
                 "UPDATE employers SET status = 'ok', fail_count = 0, last_error = NULL, last_checked = ?, last_ok = ?, next_check = ?, open_count = ? WHERE id = ?",
@@ -389,6 +427,7 @@ class JobCache:
             if over > 0:
                 ids = [r["id"] for r in db.execute("SELECT id FROM postings ORDER BY (closed_at IS NULL), COALESCE(closed_at, last_seen) ASC LIMIT ?", (over,))]
                 self._fts_delete(db, ids)
+                self._desc_delete(db, ids)
                 db.executemany("DELETE FROM postings WHERE id = ?", [(i,) for i in ids])
                 removed += len(ids)
         return removed
@@ -427,6 +466,66 @@ class JobCache:
             d = dict(r)
             d["description"] = unpack_description(d.pop("description_z", None))
             out.append(d)
+        return out
+
+    def desc_ready(self) -> bool:
+        """True once the description index has been built for the postings already saved (see reindex_descriptions)."""
+        return self.has_desc and self.meta_get(DESC_READY_KEY) == "1"
+
+    def reindex_descriptions(self, batch: int = 2000, progress: Any = None) -> int:
+        """
+        Builds the description index for every open posting that has a saved description and is not in it yet. Safe to run
+        again and to stop part way: it only adds what is missing. Returns how many postings it added.
+        """
+        if not self.has_desc:
+            return 0
+        added = 0
+        while True:
+            with self.session() as db:
+                rows = db.execute(
+                    "SELECT p.id, p.description_z FROM postings p WHERE p.closed_at IS NULL AND p.description_z IS NOT NULL "
+                    "AND p.id NOT IN (SELECT rowid FROM postings_desc_fts) LIMIT ?",
+                    (batch,),
+                ).fetchall()
+                if not rows:
+                    break
+                items = [(r["id"], desc_lead(unpack_description(r["description_z"]))) for r in rows]
+                # a posting whose text unpacks to nothing still gets a row, so the loop always moves forward
+                self._desc_insert(db, items)
+            added += len(rows)
+            if progress:
+                progress(added)
+        self.meta_set(DESC_READY_KEY, "1")
+        return added
+
+    def candidates_by_description(
+        self, match: str, limit: int, earliest_posted: dt.date | None = None, exclude_ids: set[int] | None = None
+    ) -> list[dict[str, Any]]:
+        """Open postings whose description opening matches a full-text query, best matches first. Empty until the index is built."""
+        if not self.desc_ready() or not match:
+            return []
+        params: list[Any] = []
+        date_clause = ""
+        if earliest_posted is not None:
+            date_clause = " AND (p.posted_at IS NULL OR p.posted_at >= ?)"
+            params.append(earliest_posted.isoformat())
+        with self.session() as db:
+            rows = db.execute(
+                "SELECT p.*, e.name AS company, e.ats AS ats, e.id AS eid FROM postings_desc_fts f "
+                "JOIN postings p ON p.id = f.rowid JOIN employers e ON e.id = p.employer_id "
+                "WHERE postings_desc_fts MATCH ? AND p.closed_at IS NULL AND e.enabled = 1" + date_clause +
+                " ORDER BY bm25(postings_desc_fts) LIMIT ?",
+                [match, *params, limit + len(exclude_ids or ())],
+            ).fetchall()
+        out = []
+        for r in rows:
+            if exclude_ids and r["id"] in exclude_ids:
+                continue
+            d = dict(r)
+            d["description"] = unpack_description(d.pop("description_z", None))
+            out.append(d)
+            if len(out) >= limit:
+                break
         return out
 
     def lookup_get(self, board_key: str, max_age_seconds: int) -> tuple[bool, str | None]:

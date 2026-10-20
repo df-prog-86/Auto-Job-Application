@@ -17,6 +17,8 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
   python -m scripts.cache_tools discover --system greenhouse,lever,...|all [--pages 6] [--limit 300] [--out FILE]
                                                           # asks Common Crawl for employer boards we do not read yet and writes them to FILE.
                                                           # Read only; check them afterwards with 'add --from-file FILE' (a dry run).
+  python -m scripts.cache_tools reindex [--db PATH]
+                                                          # builds the index of job description openings so search can read them. Safe to repeat or stop.
   python -m scripts.cache_tools industry [--retag]
                                                           # works out each employer's industry from its name and job titles, saves it, and prints
                                                           # how many employers and open jobs each industry has. Without --retag only blanks are filled.
@@ -539,6 +541,17 @@ def cmd_industry(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reindex(args: argparse.Namespace) -> int:
+    cache = JobCache(args.db) if args.db else JobCache()
+    if not cache.has_desc:
+        print("This copy of SQLite has no full-text search, so descriptions cannot be indexed. Nothing was changed.")
+        return 1
+    print(f"Indexing the opening lines of job descriptions in {cache.path} ...", flush=True)
+    n = cache.reindex_descriptions(progress=lambda done: print(f"  {done:,} postings indexed", flush=True) if done % 10000 < 2000 else None)
+    print(f"Done: {n:,} postings added to the description index. Search now reads descriptions (switch off with JOB_SEARCH_USE_DESCRIPTION=false).")
+    return 0
+
+
 def main() -> None:
     sys.stdout.reconfigure(line_buffering=True)  # show each line as it happens, even when piped to a file or tee
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -570,6 +583,8 @@ def main() -> None:
     ad.add_argument("--skip", action="append", help="leave out any employer whose address contains this text (repeatable)")
     ad.add_argument("--source", default="curated")
     ad.add_argument("--parallel", type=int, default=6, help="employers read at the same time (each is a different website)")
+    ri = sub.add_parser("reindex")
+    ri.add_argument("--db", help="another copy of the saved lists, such as the frozen test copy (default: the live one)")
     ind = sub.add_parser("industry")
     ind.add_argument("--retag", action="store_true", help="redo every employer, not only the ones with no industry yet")
     pr = sub.add_parser("probe")
@@ -582,6 +597,8 @@ def main() -> None:
         sys.exit(asyncio.run(_discover(args)))
     if args.cmd == "add":
         sys.exit(asyncio.run(_add(args)))
+    if args.cmd == "reindex":
+        sys.exit(cmd_reindex(args))
     if args.cmd == "industry":
         sys.exit(cmd_industry(args))
     if args.cmd == "probe":

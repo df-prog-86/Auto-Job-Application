@@ -1240,3 +1240,81 @@ def test_industry_classify_and_tag(tmp_path):
         got = {r["name"]: r["industry"] for r in db.execute("SELECT name, industry FROM employers")}
     assert got == {"Acme Hospital": "Health Care and Social Assistance", "Manual Co": "Retail Trade"}  # one with an industry is left alone
     assert table["Health Care and Social Assistance"][0] == 1
+
+
+def _desc_cache(tmp_path):
+    from app.services.jobcache.store import JobCache, PostingIn, now_ts
+
+    cache = JobCache(str(tmp_path / "d.db"))
+    eid, _ = cache.upsert_employer("greenhouse", "acmehealth", "Acme Health", "curated")
+    cache.apply_refresh(
+        eid,
+        [
+            PostingIn(ext_id="1", title="Business Analyst", url="https://x/1",
+                      description="Join our revenue cycle team to analyze denials and payer trends across the system."),
+            PostingIn(ext_id="2", title="Software Engineer", url="https://x/2",
+                      description="Build the revenue cycle platform used by our billing teams."),
+            PostingIn(ext_id="3", title="Revenue Cycle Analyst", url="https://x/3", description="Analyze claims."),
+            PostingIn(ext_id="4", title="Office Manager", url="https://x/4"),
+        ],
+        now_ts(), 6.0, True,
+    )
+    return cache
+
+
+def test_description_index_find_and_close(tmp_path):
+    from app.services.jobcache.store import now_ts
+
+    cache = _desc_cache(tmp_path)
+    assert cache.has_desc
+    assert not cache.desc_ready()
+    assert cache.candidates_by_description('"revenue cycle"', 50) == []  # nothing is read until the index is declared built
+    assert cache.reindex_descriptions() == 0  # new postings were indexed as they were saved
+    assert cache.desc_ready()
+    found = {r["title"] for r in cache.candidates_by_description('"revenue cycle"', 50)}
+    assert found == {"Business Analyst", "Software Engineer"}
+    eid = cache.list_employers()[0]["id"]
+    from app.services.jobcache.store import PostingIn
+
+    cache.apply_refresh(eid, [PostingIn(ext_id="2", title="Software Engineer", url="https://x/2", description="Build the revenue cycle platform used by our billing teams.")], now_ts() + 10, 6.0, True)
+    assert {r["title"] for r in cache.candidates_by_description('"revenue cycle"', 50)} == {"Software Engineer"}  # the closed one left the index
+
+
+def test_description_reindex_catches_up_older_rows(tmp_path):
+    cache = _desc_cache(tmp_path)
+    with cache.session() as db:
+        db.execute("DELETE FROM postings_desc_fts")  # as if the postings were saved before the index existed
+    assert cache.reindex_descriptions() == 3
+    assert {r["title"] for r in cache.candidates_by_description('"revenue cycle"', 50)} == {"Business Analyst", "Software Engineer"}
+
+
+def test_description_changes_the_match(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.config import settings
+    from app.services.jobcache import matcher
+
+    crit = SimpleNamespace(titles="revenue cycle analyst", location=None, work_type="any", keywords=None, target_salary=None,
+                           exclude_companies=None, posted_within_days=0)
+    biz = {"title": "Business Analyst", "company": "Acme Health", "location": "Boston, MA", "work_type": None,
+           "description": "Join our revenue cycle team to analyze denials."}
+    eng = {"title": "Software Engineer", "company": "Acme Health", "location": "Boston, MA", "work_type": None,
+           "description": "Build the revenue cycle platform."}
+    real = {"title": "Revenue Cycle Analyst", "company": "Acme Health", "location": "Boston, MA", "work_type": None, "description": None}
+
+    plan = matcher.build_plan(crit)
+    assert plan.desc_phrases and matcher.fts_desc_query(plan) == '"revenue cycle"'
+    ranked = matcher.rank(plan, [biz, eng, real])
+    assert [s.row["title"] for s in ranked] == ["Revenue Cycle Analyst", "Business Analyst"]  # the engineer's title shares no role word
+    assert ranked[1].via_description and not ranked[0].via_description
+
+    monkeypatch.setattr(settings, "JOB_SEARCH_USE_DESCRIPTION", False)
+    off = matcher.build_plan(crit)
+    assert off.desc_phrases == [] and matcher.fts_desc_query(off) is None
+    assert [s.row["title"] for s in matcher.rank(off, [biz, eng, real])] == ["Revenue Cycle Analyst"]
+
+    # a short title never uses descriptions: "project manager" would match far too many
+    short = matcher.build_plan(SimpleNamespace(**{**crit.__dict__, "titles": "project manager"}))
+    monkeypatch.setattr(settings, "JOB_SEARCH_USE_DESCRIPTION", True)
+    assert matcher.build_plan(SimpleNamespace(**{**crit.__dict__, "titles": "project manager"})).desc_phrases == []
+    assert short.desc_phrases == []

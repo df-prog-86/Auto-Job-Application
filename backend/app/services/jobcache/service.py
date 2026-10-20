@@ -79,13 +79,18 @@ def search_sync(criteria: Any, known_keys: set[str], extra_titles: list[str] | N
         rows = cache.candidates(query, matcher.like_terms(plan), matcher.CANDIDATE_LIMIT, plan.earliest())
         if len(rows) >= matcher.ENOUGH_TIGHT:
             break
+    capped = len(rows) >= matcher.CANDIDATE_LIMIT
+    desc_query = matcher.fts_desc_query(plan)
+    if desc_query and cache.desc_ready():
+        # postings whose title is a different one but whose description opening names this kind of work
+        rows += cache.candidates_by_description(desc_query, matcher.DESC_CANDIDATE_LIMIT, plan.earliest(), {r["id"] for r in rows})
     rows = [r for r in rows if r["ats"] not in off]
     scored = matcher.rank(plan, rows)
     fresh = [s for s in scored if not (loose_keys(s.row["url"]) & known_keys)]
     return CacheOutcome(
         items=[to_item(s) for s in fresh[:pool]],
         matches=len(fresh),
-        matches_capped=len(rows) >= matcher.CANDIDATE_LIMIT,
+        matches_capped=capped,
         coverage=coverage,
     )
 

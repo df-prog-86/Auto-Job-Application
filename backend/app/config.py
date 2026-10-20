@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     JOB_CACHE_MAX_POSTINGS: int = 300_000  # oldest closed postings go first when the copy grows past this
     # Hiring systems to switch off, comma separated: workday, greenhouse, lever, ashby, smartrecruiters. A kill switch if one ever objects.
     JOB_CACHE_DISABLED_SYSTEMS: str = ""
+    JOB_SEARCH_USE_DESCRIPTION: bool = True  # search also reads the opening lines of job descriptions (False turns it off)
     JOB_CACHE_AUTO_REFRESH: bool = True  # False stops the app from reading employers on its own (tests turn it off)
     # "always": the AI web search runs with every search (it also finds new employers). "auto": it runs only when the
     # local copy found fewer results than asked for. "off": local copy only.

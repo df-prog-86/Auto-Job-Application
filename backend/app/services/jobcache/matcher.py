@@ -37,6 +37,10 @@ CANDIDATE_LIMIT = 600  # postings read from the index per search, however large 
 EXPANDED_WEIGHT = 0.92  # an alternative title counts for a little less than the one the person typed
 
 W_TITLE, W_PLACE, W_RECENT, W_PAY, W_KEYWORD = 0.62, 0.22, 0.08, 0.04, 0.04
+W_DESC = 0.05  # added when the opening of the description names the kind of work asked for; the total is capped at 1
+DESC_TITLE_FLOOR = 0.40  # the title credit of a posting found only through its description: above the cut-off, below a real title match
+DESC_CHARS = 600  # how much of the opening of a description is read
+DESC_CANDIDATE_LIMIT = 200  # postings added from the description index per search
 
 
 @dataclass
@@ -58,6 +62,8 @@ class Plan:
     pay_floor: int | None = None
     window_days: int = 0
     excluded: list[str] = field(default_factory=list)
+    # (the kind of work as stems, the role word) for each asked title with three or more words: "revenue cycle", "analyst".
+    desc_phrases: list[tuple[list[str], str]] = field(default_factory=list)
 
     def earliest(self, today: dt.date | None = None) -> dt.date | None:
         return (today or dt.date.today()) - dt.timedelta(days=self.window_days) if self.window_days else None
@@ -93,6 +99,13 @@ def build_plan(criteria: Any, extra_titles: list[str] | None = None, extra_place
     if getattr(criteria, "target_salary", None):
         floor = int(criteria.target_salary * 0.95)  # same 5% slack the rest of Job Search uses
     excluded = [e.strip().lower() for e in re.split(r"[,;\n]", getattr(criteria, "exclude_companies", None) or "") if e.strip()][:20]
+    desc_phrases: list[tuple[list[str], str]] = []
+    if _use_description():
+        for q in queries:
+            if len(q.stems) >= 3:  # "revenue cycle analyst" (the kind of work is two words); a short title would match far too much
+                item = (q.stems[:-1], q.stems[-1])
+                if item not in desc_phrases:
+                    desc_phrases.append(item)
     loc = parse_location_query(getattr(criteria, "location", None))
     if loc.cities:  # nearby places only widen a search that names a city
         loc.near = [r for r in (place_ref(p) for p in extra_places or []) if r][:15]
@@ -105,6 +118,38 @@ def build_plan(criteria: Any, extra_titles: list[str] | None = None, extra_place
         pay_floor=floor,
         window_days=int(getattr(criteria, "posted_within_days", 0) or 0),
         excluded=excluded,
+        desc_phrases=desc_phrases,
+    )
+
+
+def _use_description() -> bool:
+    """The switch for reading descriptions (JOB_SEARCH_USE_DESCRIPTION, on by default), so a before and after test is possible."""
+    from app.config import settings
+
+    return bool(getattr(settings, "JOB_SEARCH_USE_DESCRIPTION", True))
+
+
+def fts_desc_query(plan: Plan) -> str | None:
+    """A full-text query for the description index: the kind of work as an exact phrase, for each asked title. None when there is none."""
+    parts = []
+    for domain, _head in plan.desc_phrases:
+        if all(re.fullmatch(r"[a-z0-9]+", t) for t in domain):
+            parts.append('"' + " ".join(domain) + '"')
+    return " OR ".join(dict.fromkeys(parts)) or None
+
+
+def desc_hit(plan: Plan, description: str | None, title_stems: set[str] | None = None) -> bool:
+    """
+    True when the opening of the description names the kind of work asked for ("revenue cycle") as consecutive words. With
+    `title_stems`, the title must also hold the role word of that same asked title ("analyst"), so a software engineer whose
+    description mentions revenue cycle does not count for a revenue cycle analyst search.
+    """
+    if not description or not plan.desc_phrases:
+        return False
+    lead = content_stems(description[:DESC_CHARS])
+    return any(
+        _contiguous(domain, lead) and (title_stems is None or head in title_stems)
+        for domain, head in plan.desc_phrases
     )
 
 
@@ -185,6 +230,7 @@ class Scored:
     fit: float
     title_fit: float
     place_fit: float
+    via_description: bool = False  # the title alone did not match; the description opening did
 
 
 def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> Scored | None:
@@ -194,8 +240,12 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
     if any(e in company or company in e for e in plan.excluded if company):
         return None
     tf = title_fit(plan, row["title"])
+    via_desc = False
     if tf < MIN_TITLE_FIT:
-        return None
+        if desc_hit(plan, row.get("description"), set(all_stems(row["title"]))):
+            tf, via_desc = DESC_TITLE_FLOOR, True  # "Business Analyst" whose description is about revenue cycle work
+        else:
+            return None
     wt = row.get("work_type")
     if plan.work_type != "any" and wt is not None and wt != plan.work_type:
         return None  # a posting that does not say how it works is kept; one that says something else is not
@@ -224,7 +274,9 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
             return None
         kw = 1.0
     fit = W_TITLE * tf + W_PLACE * lf + W_RECENT * _recency(posted, today) + W_PAY * (1.0 if mid is not None else 0.0) + W_KEYWORD * kw
-    return Scored(row=row, fit=round(fit, 4), title_fit=tf, place_fit=lf)
+    if via_desc or desc_hit(plan, row.get("description")):
+        fit += W_DESC
+    return Scored(row=row, fit=round(min(fit, 1.0), 4), title_fit=tf, place_fit=lf, via_description=via_desc)
 
 
 def keyword_match(plan: Plan, text: str) -> bool:

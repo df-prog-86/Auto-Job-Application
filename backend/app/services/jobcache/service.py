@@ -12,6 +12,7 @@ import asyncio
 import datetime as dt
 import json
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -73,18 +74,67 @@ UNREAD_LOOK = 400  # how far down the ranking a partly matching job is worth rea
 UNREAD_FETCH = 40  # postings read per search; each is saved, so a repeat search reads nothing new
 
 
-async def _page_description(url: str) -> str | None:
-    """The description a posting page publishes as structured data (schema.org JobPosting), or None. Pages that block or lack it are skipped."""
+_SR_SECTIONS = ("companyDescription", "jobDescription", "qualifications", "additionalInformation")
+
+
+def _description_request(url: str) -> tuple[str, str] | None:
+    """(kind, address) for hiring systems that serve a posting's text as data; None when the posting page itself must be read."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    segs = [p for p in parts.path.split("/") if p]
+    if host == "jobs.smartrecruiters.com" and len(segs) >= 2:
+        posting_id = segs[1].split("-")[0]
+        return "smartrecruiters", f"https://api.smartrecruiters.com/v1/companies/{segs[0]}/postings/{posting_id}"
+    if host == "apply.workable.com" and len(segs) >= 3 and segs[1] == "j":
+        return "workable", f"https://apply.workable.com/api/v2/accounts/{segs[0]}/jobs/{segs[2]}"
+    if host.endswith(".icims.com") and "/jobs/" in parts.path:
+        return "icims", f"{parts.scheme}://{parts.netloc}{parts.path}?in_iframe=1"
+    return None
+
+
+def _data_description(kind: str, data: Any) -> str | None:
+    """The posting text inside a SmartRecruiters or Workable answer."""
+    if not isinstance(data, dict):
+        return None
+    if kind == "smartrecruiters":
+        sections = ((data.get("jobAd") or {}).get("sections") or {}) if isinstance(data.get("jobAd"), dict) else {}
+        texts = [str((sections.get(k) or {}).get("text") or "") for k in _SR_SECTIONS if isinstance(sections.get(k), dict)]
+        return " ".join(t for t in texts if t) or None
+    if kind == "workable":
+        texts = [str(data.get(k) or "") for k in ("description", "requirements", "benefits")]
+        return " ".join(t for t in texts if t) or None
+    return None
+
+
+_ICIMS_CONTENT = re.compile(r'class="[^"]*iCIMS_JobContent[^"]*"[^>]*>(.*)', re.S | re.I)
+
+
+async def _page_description(url: str, why: dict[str, int] | None = None) -> str | None:
+    """
+    The description a posting page publishes (structured job details for search engines; the page body for iCIMS), or None.
+    `why` collects the reason when nothing could be read, so a hiring system that keeps failing can be understood.
+    """
     from app.services.discovery import manual_extraction as mx
     from app.services.safe_fetch import safe_get
 
+    def note(reason: str) -> None:
+        if why is not None:
+            why[reason] = why.get(reason, 0) + 1
+
+    req = _description_request(url)
+    address = req[1] if req and req[0] == "icims" else url
     try:
-        resp = await safe_get(url, headers={"User-Agent": mx._USER_AGENT, "Accept": "text/html"}, timeout=8.0)
-    except Exception:
+        resp = await safe_get(address, headers={"User-Agent": mx._USER_AGENT, "Accept": "text/html,application/json"}, timeout=8.0)
+    except Exception as exc:
+        note(f"error {type(exc).__name__}")
         return None
     if resp.status_code != 200:
+        note(f"http {resp.status_code}")
         return None
-    for block in mx._JSONLD_PATTERN.findall(resp.text[:600000]):
+    body = resp.text[:600000]
+    for block in mx._JSONLD_PATTERN.findall(body):
         try:
             data = json.loads(block)
         except (ValueError, TypeError):
@@ -92,6 +142,11 @@ async def _page_description(url: str) -> str | None:
         for item in mx._flatten_jsonld(data):
             if mx._is_job_posting(item) and isinstance(item.get("description"), str) and item["description"].strip():
                 return item["description"]
+    if req and req[0] == "icims":
+        m = _ICIMS_CONTENT.search(body)
+        if m:
+            return m.group(1)[:20000]
+    note("page has no job details")
     return None
 
 
@@ -101,7 +156,7 @@ NEW_EMPLOYER_PER_EMPLOYER = 30  # postings read from a newly added employer's si
 DESC_FILL_SYSTEMS_WITH_TEXT = {"greenhouse", "ashby", "lever", "jibe"}  # their lists already carry the text
 
 
-async def read_missing_descriptions(unread: list[tuple[int, str]], max_chars: int | None = None, mark_failures: bool = False) -> int:
+async def read_missing_descriptions(unread: list[tuple[int, str]], max_chars: int | None = None, mark_failures: bool = False, why: dict[str, int] | None = None) -> int:
     """
     Most hiring systems' job lists carry no description, but each posting can be read on its own: Workday as data, the others
     from the structured job details every posting page publishes for search engines. The few that only partly match the search
@@ -127,12 +182,21 @@ async def read_missing_descriptions(unread: list[tuple[int, str]], max_chars: in
             api = workday_api_url(url)
             try:
                 async with gate:
+                    req = _description_request(url)
                     if api:
                         resp = await client.get(api)
                         info = (resp.json() or {}).get("jobPostingInfo") or {} if resp.status_code == 200 else {}
                         markup = info.get("jobDescription")
+                        if not markup and why is not None:
+                            why[f"workday http {resp.status_code}"] = why.get(f"workday http {resp.status_code}", 0) + 1
+                    elif req and req[0] in ("smartrecruiters", "workable"):
+                        resp = await client.get(req[1])
+                        markup = _data_description(req[0], resp.json()) if resp.status_code == 200 else None
+                        if not markup and why is not None:
+                            key = f"{req[0]} http {resp.status_code}" if resp.status_code != 200 else f"{req[0]} answer has no text"
+                            why[key] = why.get(key, 0) + 1
                     else:
-                        markup = await _page_description(url)
+                        markup = await _page_description(url, why)
                 text_ = html_to_text(markup)
                 if text_ and await asyncio.to_thread(cache.set_description, posting_id, text_, max_chars):
                     saved += 1

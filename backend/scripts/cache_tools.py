@@ -132,14 +132,22 @@ async def _fill(args: argparse.Namespace) -> int:
     from app.services.jobcache import service
 
     cache = JobCache()
+    if args.retry:
+        again = cache.retry_unavailable([x.strip() for x in args.retry.split(",") if x.strip()] or None)
+        print(f"{again} postings that could not be read before will be tried again.")
     skip = service.DESC_FILL_SYSTEMS_WITH_TEXT
     waiting_before = cache.count_postings_without_description(skip)
     todo = cache.postings_without_description(args.limit, service.DESC_FILL_PER_EMPLOYER, skip)
-    saved = await service.read_missing_descriptions(todo, max_chars=service.DESC_FILL_CHARS, mark_failures=True)
+    why: dict[str, int] = {}
+    saved = await service.read_missing_descriptions(todo, max_chars=service.DESC_FILL_CHARS, mark_failures=True, why=why)
     print(f"Tried {len(todo)} postings: {saved} descriptions saved, {len(todo) - saved} could not be read (not tried again).")
     print(f"{'system':16}{'saved':>8}{'unreadable':>12}")
     for ats_name, n in sorted(cache.description_outcomes([i for i, _u in todo]).items()):
         print(f"{ats_name:16}{n['saved']:>8}{n['unreadable']:>12}")
+    if why:
+        print("Why postings could not be read:")
+        for reason, n in sorted(why.items(), key=lambda kv: -kv[1]):
+            print(f"  {n:>4}  {reason}")
     print(f"Postings still waiting for a description: {cache.count_postings_without_description(skip)} (was {waiting_before})")
     return 0
 
@@ -691,6 +699,7 @@ def main() -> None:
     d.add_argument("--title", help="only postings whose title holds these words, e.g. 'revenue cycle'")
     f = sub.add_parser("fill")
     f.add_argument("--limit", type=int, default=150, help="postings to read in this batch")
+    f.add_argument("--retry", help="comma separated hiring systems whose unreadable postings should be tried again, e.g. icims,smartrecruiters,workable")
     r = sub.add_parser("reread")
     r.add_argument("--db", required=True)
     r.add_argument("--only", help="comma separated hiring systems, e.g. greenhouse,lever,ashby")

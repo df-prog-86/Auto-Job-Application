@@ -1741,3 +1741,14 @@ def test_a_new_employers_postings_can_be_filled_in_on_their_own():
         cache.apply_refresh(eid, [PostingIn(ext_id=str(n), title=f"Analyst {n}", url=f"https://{name}.icims.com/jobs/{n}/job", location="Boston, MA") for n in range(5)], 1_000_000)
     only_new = cache.postings_without_description(50, 30, None, [new])
     assert len(only_new) == 5 and all("newco" in u for _i, u in only_new)
+
+
+def test_description_addresses_for_smartrecruiters_workable_and_icims_and_their_answers():
+    assert service._description_request("https://jobs.smartrecruiters.com/AcmeHealth/743999-revenue-cycle-lead") == ("smartrecruiters", "https://api.smartrecruiters.com/v1/companies/AcmeHealth/postings/743999")
+    assert service._description_request("https://apply.workable.com/acme/j/ABC123DEF/") == ("workable", "https://apply.workable.com/api/v2/accounts/acme/jobs/ABC123DEF")
+    assert service._description_request("https://careers-acme.icims.com/jobs/1234/billing-lead/job") == ("icims", "https://careers-acme.icims.com/jobs/1234/billing-lead/job?in_iframe=1")
+    assert service._description_request("https://example.com/careers/1") is None
+    sr = {"jobAd": {"sections": {"jobDescription": {"text": "Lead claims and denials work."}, "qualifications": {"text": "CPC preferred."}}}}
+    assert service._data_description("smartrecruiters", sr) == "Lead claims and denials work. CPC preferred."
+    assert service._data_description("workable", {"description": "<p>Own billing.</p>", "requirements": "<p>Epic.</p>"}) == "<p>Own billing.</p> <p>Epic.</p>"
+    assert service._data_description("workable", {}) is None

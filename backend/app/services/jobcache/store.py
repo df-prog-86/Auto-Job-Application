@@ -525,6 +525,17 @@ class JobCache:
                 list(skip_systems or ()),
             ).fetchone()[0]
 
+    def retry_unavailable(self, systems: list[str] | None = None) -> int:
+        """Lets postings marked unreadable be tried again (all, or only those of the named hiring systems). Returns how many."""
+        marks = ",".join("?" for _ in (systems or ()))
+        with self.session() as db:
+            cur = db.execute(
+                "UPDATE postings SET desc_hash = NULL WHERE desc_hash = 'unavailable' AND description_z IS NULL"
+                + (f" AND employer_id IN (SELECT id FROM employers WHERE ats IN ({marks}))" if marks else ""),
+                list(systems or ()),
+            )
+            return cur.rowcount
+
     def mark_description_unavailable(self, posting_ids: list[int]) -> None:
         """Remembers that a posting's text could not be read, so it is not tried again on every refresh."""
         if not posting_ids:

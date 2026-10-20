@@ -472,9 +472,41 @@ class JobCache:
         """True once the description index has been built for the postings already saved (see reindex_descriptions)."""
         return self.has_desc and self.meta_get(DESC_READY_KEY) == "1"
 
-    def set_description(self, posting_id: int, text_: str) -> bool:
+    def postings_without_description(self, limit: int, per_employer: int, skip_systems: set[str] | None = None) -> list[tuple[int, str]]:
+        """
+        (id, link) of open postings that have no saved description and were not tried before: the busiest employers (the ones
+        searches reach) first, newest postings first, and no more than `per_employer` from any one employer.
+        """
+        marks = ",".join("?" for _ in (skip_systems or ()))
+        with self.session() as db:
+            rows = db.execute(
+                "SELECT p.id, p.url, p.employer_id FROM postings p JOIN employers e ON e.id = p.employer_id "
+                "WHERE p.closed_at IS NULL AND e.enabled = 1 AND p.description_z IS NULL AND p.desc_hash IS NULL"
+                + (f" AND e.ats NOT IN ({marks})" if marks else "")
+                + " ORDER BY e.hits DESC, p.first_seen DESC LIMIT ?",
+                [*(skip_systems or ()), limit * 20],
+            ).fetchall()
+        taken: dict[int, int] = {}
+        out: list[tuple[int, str]] = []
+        for r in rows:
+            if taken.get(r["employer_id"], 0) >= per_employer:
+                continue
+            taken[r["employer_id"]] = taken.get(r["employer_id"], 0) + 1
+            out.append((r["id"], r["url"]))
+            if len(out) >= limit:
+                break
+        return out
+
+    def mark_description_unavailable(self, posting_ids: list[int]) -> None:
+        """Remembers that a posting's text could not be read, so it is not tried again on every refresh."""
+        if not posting_ids:
+            return
+        with self.session() as db:
+            db.executemany("UPDATE postings SET desc_hash = 'unavailable' WHERE id = ? AND description_z IS NULL", [(i,) for i in posting_ids])
+
+    def set_description(self, posting_id: int, text_: str, max_chars: int | None = None) -> bool:
         """Saves the text of one posting (and its place in the description index). False when there was nothing to save."""
-        blob, fingerprint = pack_description(text_)
+        blob, fingerprint = pack_description((text_ or "")[:max_chars] if max_chars else text_)
         if not blob:
             return False
         with self.session() as db:

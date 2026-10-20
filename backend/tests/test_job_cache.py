@@ -1714,3 +1714,20 @@ def test_a_posting_page_without_an_api_gives_its_description_from_its_structured
 
     monkeypatch.setattr(safe_fetch, "safe_get", blocked)
     assert asyncio.run(service._page_description("https://careers-acme.icims.com/jobs/1/billing-lead/job")) is None
+
+
+def test_descriptions_are_filled_in_gradually_a_few_per_employer_and_never_retried_when_unreadable():
+    cache = JobCache()
+    big, _ = cache.upsert_employer("workday", "big.wd1.myworkdayjobs.com|big|Careers", "Big Health", "user_link")
+    small, _ = cache.upsert_employer("icims", "small", "Small Clinic", "user_link")
+    gh, _ = cache.upsert_employer("greenhouse", "ghco", "GH Co", "user_link")
+    cache.apply_refresh(big, [PostingIn(ext_id=f"/job/{n}", title=f"Analyst {n}", url=f"https://big.wd1.myworkdayjobs.com/en-US/Careers/job/{n}", location="Boston, MA") for n in range(10)], 1_000_000)
+    cache.apply_refresh(small, [PostingIn(ext_id="1", title="Billing Clerk", url="https://small.icims.com/jobs/1/job", location="Quincy, MA")], 1_000_000)
+    cache.apply_refresh(gh, [PostingIn(ext_id="9", title="Engineer", url="https://job-boards.greenhouse.io/ghco/jobs/9", location="Boston, MA")], 1_000_000)
+    todo = cache.postings_without_description(50, 3, {"greenhouse"})
+    assert len(todo) == 4  # three from the big employer, one from the small one, none from a system whose list already carries the text
+    cache.mark_description_unavailable([i for i, _u in todo])
+    assert [i for i, _u in cache.postings_without_description(50, 3, {"greenhouse"})] != [i for i, _u in todo]  # the ones tried are not tried again
+    pid = todo[0][0]
+    assert cache.set_description(pid, "x" * 5000, max_chars=2000)
+    assert pid not in [i for i, _u in cache.postings_without_description(50, 3, {"greenhouse"})]

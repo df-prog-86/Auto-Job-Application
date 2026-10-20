@@ -95,7 +95,12 @@ async def _page_description(url: str) -> str | None:
     return None
 
 
-async def read_missing_descriptions(unread: list[tuple[int, str]]) -> int:
+DESC_FILL_CHARS = 2000  # the portion of a description kept when filling in gradually: what search reads, and small to store
+DESC_FILL_PER_EMPLOYER = 15  # postings read from one employer's site per refresh
+DESC_FILL_SYSTEMS_WITH_TEXT = {"greenhouse", "ashby", "lever", "jibe"}  # their lists already carry the text
+
+
+async def read_missing_descriptions(unread: list[tuple[int, str]], max_chars: int | None = None, mark_failures: bool = False) -> int:
     """
     Most hiring systems' job lists carry no description, but each posting can be read on its own: Workday as data, the others
     from the structured job details every posting page publishes for search engines. The few that only partly match the search
@@ -110,8 +115,9 @@ async def read_missing_descriptions(unread: list[tuple[int, str]]) -> int:
     if not unread:
         return 0
     cache = JobCache()
-    gate = asyncio.Semaphore(8)
+    gate = asyncio.Semaphore(8 if not mark_failures else 4)  # the gradual fill is slower and gentler than a search waiting on an answer
     saved = 0
+    failed: list[int] = []
 
     async with httpx.AsyncClient(timeout=8.0, follow_redirects=False, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}) as client:
 
@@ -127,13 +133,29 @@ async def read_missing_descriptions(unread: list[tuple[int, str]]) -> int:
                     else:
                         markup = await _page_description(url)
                 text_ = html_to_text(markup)
-                if text_ and await asyncio.to_thread(cache.set_description, posting_id, text_):
+                if text_ and await asyncio.to_thread(cache.set_description, posting_id, text_, max_chars):
                     saved += 1
+                else:
+                    failed.append(posting_id)
             except Exception:  # one posting that cannot be read is simply left as it was
-                return
+                failed.append(posting_id)
 
         await asyncio.gather(*(one(i, u) for i, u in unread))
+    if mark_failures and failed:
+        await asyncio.to_thread(cache.mark_description_unavailable, failed)
     return saved
+
+
+async def fill_descriptions_gradually(cache: JobCache) -> int:
+    """
+    After each refresh, reads a small batch of postings that have no saved description and keeps the first part of each. Over
+    many refreshes the saved lists gain descriptions without any one employer's site being read hard. Returns how many were saved.
+    """
+    budget = settings.JOB_CACHE_DESCRIPTION_FILL
+    if budget <= 0:
+        return 0
+    todo = await asyncio.to_thread(cache.postings_without_description, budget, DESC_FILL_PER_EMPLOYER, DESC_FILL_SYSTEMS_WITH_TEXT)
+    return await read_missing_descriptions(todo, max_chars=DESC_FILL_CHARS, mark_failures=True)
 
 
 def search_sync(criteria: Any, known_keys: set[str], extra_titles: list[str] | None, pool: int, extra_places: list[str] | None = None) -> CacheOutcome:
@@ -537,9 +559,14 @@ async def _refresh_async(only_ids: list[int] | None, limit: int, max_seconds: fl
                     STATE.done += 1
 
         await asyncio.gather(*(one(e) for e in due))
+    try:
+        filled = await fill_descriptions_gradually(cache)
+    except Exception:
+        log.exception("job cache: could not fill in descriptions")
+        filled = 0
     removed = cache.cleanup()
     return (
-        f"read {tallies['ok']} employers ({tallies['new']} new postings, {tallies['closed']} closed), "
+        f"saved {filled} descriptions, read {tallies['ok']} employers ({tallies['new']} new postings, {tallies['closed']} closed), "
         f"{tallies['failed']} failed, {tallies['skipped']} left for next time, {removed} old postings removed"
     )
 

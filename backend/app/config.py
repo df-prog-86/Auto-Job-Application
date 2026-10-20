@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # Hiring systems to switch off, comma separated: workday, greenhouse, lever, ashby, smartrecruiters. A kill switch if one ever objects.
     JOB_CACHE_DISABLED_SYSTEMS: str = ""
     JOB_SEARCH_USE_DESCRIPTION: bool = True  # search also reads the opening lines of job descriptions (False turns it off)
+    # Postings whose description is read (and a portion saved) after each background refresh. 0 turns it off. Small on purpose:
+    # the saved lists fill in gradually and no employer's site is read hard.
+    JOB_CACHE_DESCRIPTION_FILL: int = 150
     JOB_CACHE_AUTO_REFRESH: bool = True  # False stops the app from reading employers on its own (tests turn it off)
     # "always": the AI web search runs with every search (it also finds new employers). "auto": it runs only when the
     # local copy found fewer results than asked for. "off": local copy only.

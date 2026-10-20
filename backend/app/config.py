@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     # Postings whose description is read (and a portion saved) after each background refresh. 0 turns it off. Small on purpose:
     # the saved lists fill in gradually and no employer's site is read hard.
     JOB_CACHE_DESCRIPTION_FILL: int = 150
+    JOB_CACHE_PLACE_FILL: int = 150  # postings listed as "3 Locations" opened per refresh to save their real places (0 = off)
     JOB_CACHE_AUTO_REFRESH: bool = True  # False stops the app from reading employers on its own (tests turn it off)
     # "always": the AI web search runs with every search (it also finds new employers). "auto": it runs only when the
     # local copy found fewer results than asked for. "off": local copy only.

@@ -731,6 +731,11 @@ async def _refresh_async(only_ids: list[int] | None, limit: int, max_seconds: fl
     except Exception:
         log.exception("job cache: could not fill in descriptions")
         filled = 0
+    try:  # multi-location postings (also from newly added employers) get their real places saved a few at a time, so city searches are quick
+        if settings.JOB_CACHE_PLACE_FILL > 0:
+            await fill_places(cache, settings.JOB_CACHE_PLACE_FILL, 10)
+    except Exception:
+        log.exception("job cache: could not fill in places")
     removed = cache.cleanup()
     return (
         f"saved {filled} descriptions, read {tallies['ok']} employers ({tallies['new']} new postings, {tallies['closed']} closed), "

@@ -45,6 +45,7 @@ class JobSearchResultOut(BaseModel):
     url: str
     grounded: bool
     status: str
+    page_no: int | None = None  # set when the job was opened from a later page rather than returned by the search itself
 
     class Config:
         from_attributes = True

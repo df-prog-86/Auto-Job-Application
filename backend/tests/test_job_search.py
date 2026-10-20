@@ -97,7 +97,28 @@ def test_search_keeps_real_links_marks_grounded_ones_and_skips_known_ones(search
     assert by_title["Revenue Cycle Billing Analyst"]["grounded"] is False
 
     again = client.post("/api/v1/job-search/run", json={"titles": "revenue cycle analyst"}).json()
-    assert again["found"] == 0 and len(again["results"]) == 2  # nothing is duplicated
+    assert len(again["results"]) == 2  # the same jobs come back, nothing is duplicated
+    with SessionLocal() as db:
+        from app.models.job_search import JobSearchResult
+
+        assert db.query(JobSearchResult).count() == 2
+
+
+def test_a_new_search_shows_only_its_own_jobs_and_sets_the_old_ones_aside(search):
+    client, SessionLocal = search
+    _saved_job(SessionLocal)
+    first = client.post("/api/v1/job-search/run", json={"titles": "analyst"}).json()
+    assert len(first["results"]) == 2
+    from app.models.job_search import JobSearchResult
+
+    with SessionLocal() as db:
+        db.add(JobSearchResult(title="Old leftover", company="Acme", url="https://acme.example.com/jobs/1",
+                               url_key="acme.example.com/jobs/1", status="new", criteria={}))
+        db.commit()
+    out = client.post("/api/v1/job-search/run", json={"titles": "analyst"}).json()
+    assert "Old leftover" not in [r["title"] for r in out["results"]]
+    with SessionLocal() as db:
+        assert db.query(JobSearchResult).filter(JobSearchResult.title == "Old leftover").one().status == "stale"
 
 
 def test_add_uses_the_summary_when_the_page_cannot_be_read_and_remove_hides_a_result(search, monkeypatch):

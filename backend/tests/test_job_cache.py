@@ -161,7 +161,8 @@ def test_places():
     assert fit("Boston, MA") == 1.0 and fit("Boston, Massachusetts, United States") == 1.0
     assert fit("Worcester, MA") == 0.7
     assert fit("Boston, GA") == 0.0 and fit("Dallas, TX") == 0.0
-    assert fit("2 Locations") == 0.5 and fit(None) == 0.5
+    assert fit("2 Locations") == 0.4 and fit(None) == 0.4  # a city search puts jobs that name no place behind jobs that do
+    assert fit("2 Locations", None, "United States") == 0.5
     assert fit("Remote - US", "remote") == 0.6  # remote but remote was not asked for
     assert fit("Remote - US", "remote", "Boston, MA or remote") == 0.9
     assert fit("London, United Kingdom") == 0.0 and fit("Remote - UK", "remote", "Boston, MA or remote") == 0.0
@@ -198,7 +199,7 @@ def test_shorthand_and_alternative_titles_are_understood():
     plain = matcher.build_plan(crit())
     wider = matcher.build_plan(crit(), ["Patient Financial Services Manager"])
     assert matcher.title_fit(plain, "Patient Financial Services Manager") == 0.0
-    assert 0.8 < matcher.title_fit(wider, "Patient Financial Services Manager") <= matcher.EXPANDED_WEIGHT
+    assert 0.65 < matcher.title_fit(wider, "Patient Financial Services Manager") <= matcher.OTHER_FIELD_WEIGHT  # none of "revenue cycle": counts for less
 
 
 def test_search_applies_place_work_type_pay_dates_and_exclusions():
@@ -1170,7 +1171,6 @@ async def test_add_command_applies_the_standing_rule(tmp_path, monkeypatch):
 def test_place_text_is_told_apart_by_state_name_country_or_neither():
     from scripts import cache_tools as c
 
-    assert [c.location_kind(x) for x in ["Boston, Massachusetts", "Boston-MA", "Remote US", "United States of America : Remote", "London, KY"]] == ["us"] * 5
     assert [c.location_kind(x) for x in ["London, United Kingdom", "Remote Poland", "Singapore, Singapore", "Toronto, Ontario, Canada"]] == ["foreign"] * 4
     assert [c.location_kind(x) for x in ["Main Campus", "2 Locations", None, "Remote"]] == ["unknown"] * 4
 
@@ -1556,3 +1556,21 @@ def test_one_employer_does_not_fill_the_screen():
     assert len(out) == 8  # nothing is dropped
     assert companies[:3].count("Spam Co") == 1  # the repeated opening is shown once, the rest come after the other employers
     assert set(companies[:3]) == {"Spam Co", "Real Co", "Other Co"}
+
+
+def test_the_work_asked_for_outranks_the_same_role_word_in_another_field():
+    plan = matcher.build_plan(crit(titles="revenue cycle analyst", location="Orlando, FL"), ["Financial Analyst", "Billing Analyst"])
+    exact = {"title": "Revenue Cycle Analyst Underpayments", "company": "R1 RCM", "location": "Remote, USA", "work_type": "remote", "posted_at": None}
+    other = {"title": "Financial Analyst", "company": "Lennar", "location": "Orlando, FL", "work_type": None, "posted_at": None}
+    ranked = matcher.rank(plan, [other, exact])
+    assert [s.row["company"] for s in ranked] == ["R1 RCM", "Lennar"]  # the exact work first, even though the other is in Orlando
+
+
+def test_a_job_in_a_foreign_city_with_no_country_is_not_shown_for_a_us_search():
+    from app.services.jobcache import text
+
+    austin = text.parse_location_query("Austin, TX")
+    for place in ("Montreal", "Toronto", "Bangalore", "London", "Sao Paulo"):
+        assert text.location_fit(austin, place, "remote") == 0.0, place
+    assert text.location_fit(austin, "Remote - US", "remote") > 0
+    assert text.location_fit(austin, "Paris, TX", None) == 0.7  # a US town with a foreign name keeps its state

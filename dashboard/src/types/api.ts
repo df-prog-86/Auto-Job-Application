@@ -383,6 +383,9 @@ export interface JobSearchResultOut {
   url: string;
   grounded: boolean;
   status: string;
+  /** Set when the job was opened from a later page; null for a job the search itself returned. */
+  page_no?: number | null;
+
 }
 
 export interface CoverageOut {

@@ -39,6 +39,12 @@ class JobSearchResult(Base, TimestampMixin):
     url_key: Mapped[str] = mapped_column(String(1000), index=True)  # host + path, for de-duplication
     # True when the link appeared in the search engine's own sources, not only in the model's answer.
     grounded: Mapped[bool] = mapped_column(Boolean, default=False)
-    status: Mapped[str] = mapped_column(String(20), default="new")  # new / added / removed
+    status: Mapped[str] = mapped_column(String(20), default="new")  # new / added / removed / stale (from an earlier search; kept for its scores)
     job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True)
     criteria: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    @property
+    def page_no(self) -> int | None:
+        """The page it was opened from (pages 1 and later of the saved-list matches); None for a job a search itself returned."""
+        page = (self.criteria or {}).get("page")
+        return page if isinstance(page, int) and page > 0 else None

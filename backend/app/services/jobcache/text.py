@@ -239,6 +239,16 @@ _NON_US = (
     "thailand", "malaysia", "south korea", "korea", "taiwan", "hong kong", "new zealand", "sri lanka", "nepal", "kazakhstan",
     "uzbekistan", "turkiye", "republic of georgia", "armenia", "azerbaijan", "belarus", "moldova", "albania", "north macedonia",
     "bosnia", "montenegro", "kosovo", "lithuania",
+    # big non-US cities a posting may name with no country ("Montreal", "Bangalore"). One that is also a US town needs no state here
+    # to be foreign: a US posting names its state, and a place that names a US state is never treated as foreign.
+    "montreal", "toronto", "vancouver", "ottawa", "calgary", "edmonton", "winnipeg", "quebec", "mississauga", "london", "dublin",
+    "paris", "berlin", "munich", "amsterdam", "madrid", "barcelona", "lisbon", "milan", "zurich", "geneva", "stockholm", "copenhagen",
+    "oslo", "helsinki", "brussels", "warsaw", "krakow", "prague", "budapest", "bucharest", "sofia", "kyiv", "tel aviv", "dubai",
+    "abu dhabi", "riyadh", "istanbul", "bangalore", "bengaluru", "hyderabad", "mumbai", "pune", "chennai", "gurgaon", "gurugram",
+    "noida", "delhi", "kolkata", "manila", "cebu", "jakarta", "bangkok", "hanoi", "ho chi minh", "kuala lumpur", "seoul", "tokyo",
+    "osaka", "beijing", "shanghai", "shenzhen", "taipei", "sydney", "melbourne", "brisbane", "auckland", "sao paulo", "rio de janeiro",
+    "buenos aires", "bogota", "mexico city", "guadalajara", "monterrey", "lima", "santiago", "johannesburg", "cape town", "nairobi",
+    "lagos", "cairo", "casablanca",
 )
 _UNKNOWN_PLACE = re.compile(r"\b(\d+\s+locations?|multiple locations?|various|several locations?|locations? vary|anywhere)\b", re.I)
 
@@ -324,7 +334,8 @@ def location_fit(q: LocationQuery, location: str | None, work_type: str | None) 
     loc = (location or "").strip()
     remote_posting = work_type == "remote" or " remote " in f" {fold(loc)} "
     if not loc or _UNKNOWN_PLACE.search(loc):
-        return 0.9 if remote_posting else 0.5
+        # "2 Locations" or no place at all: kept, since one of them may be the place asked for, but behind jobs that say so
+        return 0.9 if remote_posting else (0.4 if q.cities else 0.5)
     folded = f" {fold(loc)} "
     wanted_states = q.states
     posting_states = _states_in(loc)

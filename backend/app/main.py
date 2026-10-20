@@ -96,7 +96,11 @@ def create_app() -> FastAPI:
             # Only serve files that really live inside the built dashboard folder.
             if path and candidate.is_file() and dist_root in candidate.parents:
                 return FileResponse(candidate)
-            return FileResponse(dist_root / "index.html")
+            # index.html names the current JS bundle, so it must never be cached,
+            # or a rebuilt dashboard looks stale until a hard refresh.
+            return FileResponse(
+                dist_root / "index.html", headers={"Cache-Control": "no-cache"}
+            )
 
     return app
 

@@ -59,6 +59,32 @@ def _run_out(db: Session, found: int, skipped: int, outcome: web_search.SearchOu
     return out
 
 
+def _save_item(db: Session, item: dict, payload: JobSearchIn) -> JobSearchResult:
+    """
+    The result row for a found job. A job already on the list is reused, and one set aside by an earlier search comes back
+    with its resume score intact, so a job is never saved twice and never scored twice.
+    """
+    row = (
+        db.query(JobSearchResult)
+        .filter(JobSearchResult.url_key == item["url_key"], JobSearchResult.status.in_(("new", "stale")))
+        .order_by(JobSearchResult.status.asc())  # "new" before "stale"
+        .first()
+    )
+    if row is None:
+        row = JobSearchResult(**item, status="new", criteria=payload.model_dump())
+        db.add(row)
+        return row
+    row.fit_score = item.get("fit_score")
+    row.fit_note = item.get("fit_note")
+    if row.status == "stale":
+        for key in ("title", "company", "location", "work_type", "salary_text", "posted_at"):
+            if item.get(key) is not None:
+                setattr(row, key, item[key])
+        row.status = "new"
+        row.criteria = payload.model_dump()
+    return row
+
+
 @router.get("/places")
 def suggest_places(q: str = "") -> list[dict[str, str]]:
     """City suggestions while typing in the place box ("Bost" offers "Boston, MA")."""
@@ -100,7 +126,9 @@ async def run_search(payload: JobSearchIn, db: Session = Depends(get_db)) -> Job
     known: set[str] = set()
     for (url,) in db.query(Job.canonical_application_url).all():
         known |= loose_keys(url)
-    for (url,) in db.query(JobSearchResult.url).all():
+    # Only jobs you added or hid are left out of a search. Jobs an earlier search showed can come up again.
+    seen = db.query(JobSearchResult.url).filter(JobSearchResult.status.in_(("added", "removed") if not payload.more else ("added", "removed", "new")))
+    for (url,) in seen.all():
         known |= loose_keys(url)
     try:
         outcome = await web_search.search_jobs_full(payload, known_keys=known, cache_only=payload.more)
@@ -115,6 +143,9 @@ async def run_search(payload: JobSearchIn, db: Session = Depends(get_db)) -> Job
             detail="The search service didn't answer. Try again in a minute.",
         ) from exc
 
+    if not payload.more:
+        # A new search starts a new list. The old one is set aside (not deleted), so its resume scores are not lost.
+        db.query(JobSearchResult).filter(JobSearchResult.status == "new").update({"status": "stale"}, synchronize_session=False)
     found = 0
     skipped = outcome.skipped  # postings that were clearly closed when the link was opened
     for item in outcome.items:
@@ -122,7 +153,7 @@ async def run_search(payload: JobSearchIn, db: Session = Depends(get_db)) -> Job
             skipped += 1
             continue
         known |= loose_keys(item["url"])
-        db.add(JobSearchResult(**item, status="new", criteria=payload.model_dump()))
+        _save_item(db, item, payload)
         found += 1
     db.commit()
     return _run_out(db, found, skipped, outcome)
@@ -151,14 +182,7 @@ async def search_page(payload: JobSearchIn, db: Session = Depends(get_db)) -> Jo
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="The search service didn't answer. Try again in a minute.") from exc
     rows: list[JobSearchResult] = []
     for item in items:
-        row = db.query(JobSearchResult).filter(JobSearchResult.url_key == item["url_key"], JobSearchResult.status == "new").first()
-        if row is None:
-            row = JobSearchResult(**item, status="new", criteria=payload.model_dump())
-            db.add(row)
-        else:
-            row.fit_score = item.get("fit_score")
-            row.fit_note = item.get("fit_note")
-        rows.append(row)
+        rows.append(_save_item(db, item, payload))
     db.commit()
     for row in rows:
         db.refresh(row)

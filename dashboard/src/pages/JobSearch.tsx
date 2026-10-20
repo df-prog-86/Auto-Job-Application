@@ -101,7 +101,6 @@ export function JobSearch() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [lastRun, setLastRun] = useState<{ found: number } | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [autofillOnly, setAutofillOnly] = useState(false);
@@ -110,7 +109,6 @@ export function JobSearch() {
   const [scoringAll, setScoringAll] = useState<{ done: number; total: number } | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [coverage, setCoverage] = useState<CoverageOut | null>(null);
-  const [moreAvailable, setMoreAvailable] = useState(0);
   const lastCriteria = useRef<JobSearchCriteria | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -120,17 +118,23 @@ export function JobSearch() {
   // Pages of PAGE_SIZE. In "Best match" order the first page is the top of what is loaded and every later page is fetched from the
   // server on its own (so the last page is as quick as page 2). In any other order the pages are cut from what is already loaded.
   const serverMode = !autofillOnly;
-  const poolSize = serverMode ? (matchTotal ?? shown.length + moreAvailable) : shown.length;
+  // One number for the status line and the page count: the saved-list matches the server counted for this search.
+  const totalMatches = matchTotal ?? coverage?.matches ?? items.length;
+  const poolSize = serverMode ? totalMatches : shown.length;
   const totalPages = Math.max(1, Math.ceil(poolSize / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const firstPageIds = new Set(shown.slice(0, PAGE_SIZE).map((r) => r.id));
+  // The jobs the search itself returned (the web results included), best first. Jobs opened from later pages are kept apart.
+  const searchRows = sortResults(items.filter((r) => !r.page_no), "search");
+  const firstPageIds = new Set(searchRows.map((r) => r.id));
   const byId = new Map(items.map((r) => [r.id, r]));
   // In "Best match" order page 1 is what the search just found (the web results included); every other page, and every page in
   // another order, is the server's cut of the whole list in that order.
   const fromServer = serverMode && !(sortBy === "search" && currentPage === 1);
   const pageItems = fromServer
     ? (serverPages[currentPage] ?? []).map((id) => byId.get(id)).filter((r): r is JobSearchResultOut => !!r && (sortBy !== "search" || !firstPageIds.has(r.id)))
-    : shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+    : serverMode
+      ? searchRows.slice(0, PAGE_SIZE)
+      : shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   useEffect(() => {
     listRef.current?.scrollTo({ top: 0 });
   }, [currentPage]);
@@ -150,6 +154,17 @@ export function JobSearch() {
   });
   const current = buildCriteria(titles, keywords, exclude);
   const activeSaved = savedList.find((s) => sameCriteria(s.criteria, current));
+
+  // After a refresh the page knows the saved jobs but not how many matches the last search had: ask once, so the number of pages is right.
+  const askedTotal = useRef(false);
+  useEffect(() => {
+    if (askedTotal.current || !results.isSuccess || items.length === 0 || matchTotal !== null || titles.length === 0) return;
+    askedTotal.current = true;
+    api
+      .pageJobSearch({ ...toApiCriteria(current), count: PAGE_SIZE, page: 0 })
+      .then((t) => setMatchTotal(t.total))
+      .catch(() => undefined);
+  }, [results.isSuccess, items.length, matchTotal, titles.length, current]);
 
   /** Turns anything still typed into chips so the search and the saved copy match what is on screen. */
   const settle = () => {
@@ -179,7 +194,6 @@ export function JobSearch() {
     },
     onSuccess: (r) => {
       setCoverage(r.coverage ?? null);
-      setMoreAvailable(r.more_available ?? 0);
       setPage(1);
       setServerPages({});
       setMatchTotal(null);
@@ -189,7 +203,6 @@ export function JobSearch() {
         .then((t) => setMatchTotal(t.total))
         .catch(() => undefined);
       void qc.invalidateQueries({ queryKey: ["job-employers"] });
-      setLastRun({ found: r.found });
       setNotice(
         r.found > 0
           ? null
@@ -403,12 +416,11 @@ export function JobSearch() {
   if (search.isPending) {
     status = "Searching your saved employer lists and the web. This can take up to a minute.";
   } else if (coverage && coverage.employers > 0) {
-    const n = coverage.matches + (lastRun?.found ?? 0);
-    const matches = coverage.matches_capped ? `${n.toLocaleString("en-US")}+` : n.toLocaleString("en-US");
-    status = `${matches} ${n === 1 && !coverage.matches_capped ? "match" : "matches"} from ${coverage.postings.toLocaleString("en-US")} jobs at ${coverage.employers.toLocaleString("en-US")} employers.`;
-    if (lastRun && lastRun.found > 0) status += ` ${lastRun.found} new from the web and saved lists are ready to review.`;
+    const n = totalMatches;
+    const matches = coverage.matches_capped && matchTotal === null ? `${n.toLocaleString("en-US")}+` : n.toLocaleString("en-US");
+    status = `${matches} ${n === 1 ? "match" : "matches"} from ${coverage.postings.toLocaleString("en-US")} jobs at ${coverage.employers.toLocaleString("en-US")} employers.`;
   } else if (items.length > 0) {
-    status = `${items.length} ${items.length === 1 ? "match" : "matches"} to review.`;
+    status = `${totalMatches.toLocaleString("en-US")} ${totalMatches === 1 ? "match" : "matches"} to review.`;
   }
 
   const openFilters = () => setFiltersOpen(true);

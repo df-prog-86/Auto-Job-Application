@@ -16,6 +16,7 @@ import json
 import logging
 import math
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -488,9 +489,17 @@ async def enrich_from_ats(items: list[dict[str, Any]]) -> tuple[list[dict[str, A
     """
     gate = asyncio.Semaphore(6)
     boards: dict[str, tuple[int, Any]] = {}
+    now = time.time()
     async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
 
         async def one(item: dict[str, Any]) -> None:
+            read = item.get("read_at")
+            if read and 0 <= now - read <= FRESH_LIST_HOURS * 3600:
+                # The saved list itself was read from the employer's system recently and still shows this posting open, so asking
+                # the employer again would repeat the same answer (it is the slow step: one web call per result).
+                item["ats_checked"] = True
+                item["ats_live"] = True
+                return
             async with gate:
                 info = await ats.inspect(item["url"], client, boards)
             if not info.checked:
@@ -825,6 +834,9 @@ class SearchOutcome:
     more_capped: bool = False  # True when there may be many more than that number
 
 
+FRESH_LIST_HOURS = 24  # a saved list read within this many hours is trusted; older ones are checked again live
+
+
 def _pool_size(criteria: JobSearchIn) -> int:
     """How many candidates from the saved lists get checked against the employers' own systems. More when pay must be stated."""
     return min(60, max(criteria.count * (4 if criteria.require_salary else 3), 24))
@@ -929,7 +941,7 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
     if from_saved:
         await asyncio.to_thread(cache_service.record_hits, [i["employer_id"] for i in from_saved])
     for item in final:  # working notes, not saved columns
-        for key in ("ats_checked", "ats_live", "site_url", "fit", "employer_id", "_desc"):
+        for key in ("ats_checked", "ats_live", "site_url", "fit", "employer_id", "_desc", "read_at"):
             item.pop(key, None)
     coverage = None
     if cached.coverage and cached.coverage.get("employers"):

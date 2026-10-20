@@ -447,7 +447,7 @@ class JobCache:
         with self.session() as db:
             if self.has_fts and match:
                 sql = (
-                    "SELECT p.*, e.name AS company, e.ats AS ats, e.id AS eid FROM postings_fts f "
+                    "SELECT p.*, e.name AS company, e.ats AS ats, e.id AS eid, e.last_ok AS read_ok FROM postings_fts f "
                     "JOIN postings p ON p.id = f.rowid JOIN employers e ON e.id = p.employer_id "
                     "WHERE postings_fts MATCH ? AND p.closed_at IS NULL AND e.enabled = 1" + date_clause +
                     " ORDER BY bm25(postings_fts, 10.0, 0.0, 0.5) LIMIT ?"
@@ -457,7 +457,7 @@ class JobCache:
                 terms = [t for t in like_terms if t][:6] or ["%"]
                 like = " OR ".join("p.title LIKE ?" for _ in terms)
                 sql = (
-                    "SELECT p.*, e.name AS company, e.ats AS ats, e.id AS eid FROM postings p JOIN employers e ON e.id = p.employer_id "
+                    "SELECT p.*, e.name AS company, e.ats AS ats, e.id AS eid, e.last_ok AS read_ok FROM postings p JOIN employers e ON e.id = p.employer_id "
                     f"WHERE ({like}) AND p.closed_at IS NULL AND e.enabled = 1" + date_clause + " LIMIT ?"
                 )
                 rows = db.execute(sql, [*[f"%{t}%" for t in terms], *params, limit]).fetchall()
@@ -511,7 +511,7 @@ class JobCache:
             params.append(earliest_posted.isoformat())
         with self.session() as db:
             rows = db.execute(
-                "SELECT p.*, e.name AS company, e.ats AS ats, e.id AS eid FROM postings_desc_fts f "
+                "SELECT p.*, e.name AS company, e.ats AS ats, e.id AS eid, e.last_ok AS read_ok FROM postings_desc_fts f "
                 "JOIN postings p ON p.id = f.rowid JOIN employers e ON e.id = p.employer_id "
                 "WHERE postings_desc_fts MATCH ? AND p.closed_at IS NULL AND e.enabled = 1" + date_clause +
                 " ORDER BY bm25(postings_desc_fts) LIMIT ?",

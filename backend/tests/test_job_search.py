@@ -934,3 +934,27 @@ def test_saved_pay_text_is_read_when_the_saved_number_is_missing():
     assert matcher.score_row(plan, _row("Consultant", pay_text="$17.71 - $24.28")) is None
     assert matcher.score_row(plan, _row("Consultant", pay_text="$90,000.00 - $110,000.00")) is not None
     assert matcher.score_row(plan, _row("Consultant", pay_text=None)) is not None  # no pay stated: kept here, removed by "pay must be listed"
+
+
+def test_a_recently_read_saved_list_is_not_asked_again(monkeypatch):
+    import asyncio
+    import time
+    from app.services.discovery import ats, web_search as ws
+
+    asked = []
+
+    async def fake(url, client, boards):
+        asked.append(url)
+        return ats.AtsInfo(live=True, checked=True)
+
+    monkeypatch.setattr(ws.ats, "inspect", fake)
+    now = time.time()
+    items = [
+        {"title": "fresh", "url": "https://x.example.com/fresh", "read_at": now - 3600},
+        {"title": "stale", "url": "https://x.example.com/stale", "read_at": now - 5 * 86400},
+        {"title": "web", "url": "https://x.example.com/web"},
+    ]
+    kept, gone = asyncio.run(ws.enrich_from_ats(items))
+    assert gone == 0 and len(kept) == 3
+    assert asked == ["https://x.example.com/stale", "https://x.example.com/web"]
+    assert items[0]["ats_checked"] is True and items[0]["ats_live"] is True

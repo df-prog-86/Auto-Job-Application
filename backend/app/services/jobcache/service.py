@@ -64,6 +64,7 @@ def to_item(scored: matcher.Scored) -> dict[str, Any]:
         "grounded": True,  # the employer's own list: as direct as a link gets
         "fit": scored.fit,
         "employer_id": r["eid"],
+        "read_at": r.get("read_ok"),  # when the employer's list was last read; lets the search skip a second check on a fresh list
     }
 
 

@@ -24,6 +24,8 @@ class JobSearchIn(BaseModel):
     more: bool = False
     # For the page endpoint: which page of the saved-list matches to return (10 to a page).
     page: int | None = Field(default=None, ge=0, le=5000)  # 0 = only count the matches
+    # "saved" = the saved employer lists only (quick); "only" = just the web search, to be ranked in afterwards; "all" = both at once.
+    web: Literal["all", "saved", "only"] = "all"
     sort: Literal["search", "newest", "resume"] = "search"  # the order of the whole list, so the page count never changes with it
 
 
@@ -142,3 +144,8 @@ class AddResultOut(BaseModel):
 
 class ClearOut(BaseModel):
     cleared: int
+
+
+class JobSearchWebOut(BaseModel):
+    added: int  # jobs from the web search that were ranked into the list
+    total: int  # how many matches the list has now

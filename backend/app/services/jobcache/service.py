@@ -161,6 +161,30 @@ async def ranked_items(criteria: Any) -> list[dict[str, Any]]:
     return items
 
 
+async def add_to_ranked(criteria: Any, new_items: list[dict[str, Any]]) -> tuple[int, int]:
+    """
+    Slips jobs the web search found into this search's ranked list, at the place their match earns, so they appear on whichever
+    page they belong to. Jobs already in the list (the same posting) are skipped. Returns (how many were added, the new total).
+    """
+    ranked = await ranked_items(criteria)
+    have: set[str] = set()
+    for item in ranked:
+        have |= loose_keys(item["url"])
+    fresh = []
+    for item in new_items:
+        keys = loose_keys(item["url"])
+        if keys & have:
+            continue
+        have |= keys
+        item = dict(item)
+        item["fit"] = item.get("fit_score") if item.get("fit_score") is not None else item.get("fit", 0.0)
+        fresh.append(item)
+    if fresh:
+        merged = sorted([*ranked, *fresh], key=lambda i: -(i.get("fit") or 0.0))  # stable: equal fits keep the saved list's order
+        _RANKED[_ranked_key(criteria)] = (time.time(), collapse_listings(merged))
+    return len(fresh), len(_RANKED[_ranked_key(criteria)][1]) if fresh else len(ranked)
+
+
 async def expand_titles(titles: str) -> list[str]:
     """
     A few other titles employers use for the same kind of work, so a search for "revenue cycle manager" also finds

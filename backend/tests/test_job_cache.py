@@ -1609,3 +1609,15 @@ def test_workday_names_the_places_behind_a_three_locations_listing():
 
     info = workday_info(200, {"jobPostingInfo": {"location": "Boston, MA", "additionalLocations": ["Quincy, MA", "Boston, MA", "Salem, MA", "Lynn, MA"], "startDate": "2026-10-01"}})
     assert info.places == "Boston, MA; Quincy, MA; Salem, MA +1 more"
+
+
+async def test_web_finds_are_ranked_into_the_list_by_their_match_not_added_at_the_end():
+    crit = SimpleNamespace(titles="analyst", location="", work_type=None, keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None)
+    saved = [{"title": f"Analyst {n}", "company": "Acme", "url": f"https://acme.example.com/jobs/{n}", "fit": fit} for n, fit in ((1, 0.95), (2, 0.80), (3, 0.60))]
+    service._RANKED[service._ranked_key(crit)] = (__import__("time").time(), saved)
+    web = [{"title": "Analyst W", "company": "Newco", "url": "https://newco.example.com/jobs/9", "fit_score": 0.85},
+           {"title": "Analyst 1 again", "company": "Acme", "url": "https://acme.example.com/jobs/1", "fit_score": 0.99}]  # already in the list
+    added, total = await service.add_to_ranked(crit, web)
+    assert (added, total) == (1, 4)
+    order = [i["title"] for i in service._RANKED[service._ranked_key(crit)][1]]
+    assert order == ["Analyst 1", "Analyst W", "Analyst 2", "Analyst 3"]  # between the 0.95 and the 0.80, not last

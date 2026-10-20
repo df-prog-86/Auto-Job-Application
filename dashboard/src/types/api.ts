@@ -362,6 +362,8 @@ export interface JobSearchCriteria {
   page?: number;
   /** The order of the whole list (the page count does not change with it). */
   sort?: "search" | "newest" | "resume";
+  /** "saved" = saved employer lists only (quick), "only" = just the web search, "all" = both. */
+  web?: "all" | "saved" | "only";
 }
 
 export interface JobSearchResultOut {
@@ -405,6 +407,11 @@ export interface JobSearchRunOut {
   coverage?: CoverageOut | null;
   more_available?: number;
   more_capped?: boolean;
+}
+
+export interface JobSearchWebOut {
+  added: number;
+  total: number;
 }
 
 export interface JobSearchPageOut {

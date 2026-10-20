@@ -859,7 +859,11 @@ def _dedupe_by_address(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = None, cache_only: bool = False) -> SearchOutcome:
+class _WebOnly(Exception):
+    """Internal: skips the saved-list step when only the web search is wanted."""
+
+
+async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = None, cache_only: bool = False, web_only: bool = False) -> SearchOutcome:
     """
     Two sources, merged. First the saved copy of employers' job lists (instant, no AI, can hold thousands of postings), then,
     unless switched off or already plentiful, one AI web search per kind of source (Workday, Greenhouse/Ashby/Lever, company
@@ -870,17 +874,21 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
 
     known = known_keys or set()
     try:
+        if web_only:  # the saved lists were already shown; this run is only the web search, to be ranked in with them
+            raise _WebOnly()
         pool = _pool_size(criteria)
         cached = await cache_service.search_cache(criteria, known, pool * 2)  # twice as many, so the AI second opinion can lift a good one
         cached.items = await rerank_items(criteria, cached.items, pool)
+    except _WebOnly:
+        cached = cache_service.CacheOutcome()
     except Exception:  # the saved copy is a bonus: if it fails the web search still runs
         log.exception("job search: the saved employer lists could not be searched")
         cached = cache_service.CacheOutcome()
     mode = (settings.JOB_SEARCH_AI or "always").lower()
-    run_ai = not cache_only and mode != "off" and (mode == "always" or len(cached.items) < criteria.count)
+    run_ai = not cache_only and mode != "off" and (mode == "always" or web_only or len(cached.items) < criteria.count)
     model = search_model()
     if run_ai and not model:
-        if not cached.items:
+        if not cached.items and not web_only:
             raise LLMNotConfiguredError("No LLM provider configured (PRIMARY_FAST_MODEL unset).")
         run_ai = False  # the saved lists already have results; the web search needs the AI connection and is skipped
 

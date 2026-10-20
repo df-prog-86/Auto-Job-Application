@@ -15,6 +15,7 @@ import type {
   JobSearchCriteria,
   JobSearchResultOut,
   JobSearchPageOut,
+  JobSearchWebOut,
   JobSearchRunOut,
   JobOut,
   ManualJobInput,
@@ -186,6 +187,8 @@ export const api = {
     request<JobSearchRunOut>("/job-search/run", { method: "POST", body: JSON.stringify(criteria) }),
   pageJobSearch: (criteria: JobSearchCriteria) =>
     request<JobSearchPageOut>("/job-search/page", { method: "POST", body: JSON.stringify(criteria) }),
+  webJobSearch: (criteria: JobSearchCriteria) =>
+    request<JobSearchWebOut>("/job-search/web", { method: "POST", body: JSON.stringify({ ...criteria, web: "only" }) }),
   scoreSearchResult: (id: number) =>
     request<JobSearchResultOut>(`/job-search/results/${id}/score`, { method: "POST" }),
   addSearchResult: (id: number) =>

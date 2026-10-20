@@ -19,6 +19,7 @@ from app.schemas.job_search import (
     CoverageOut,
     JobSearchIn,
     JobSearchPageOut,
+    JobSearchWebOut,
     JobSearchResultOut,
     JobSearchRunOut,
 )
@@ -131,7 +132,7 @@ async def run_search(payload: JobSearchIn, db: Session = Depends(get_db)) -> Job
     for (url,) in seen.all():
         known |= loose_keys(url)
     try:
-        outcome = await web_search.search_jobs_full(payload, known_keys=known, cache_only=payload.more)
+        outcome = await web_search.search_jobs_full(payload, known_keys=known, cache_only=payload.more or payload.web == "saved")
     except LLMNotConfiguredError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -157,6 +158,30 @@ async def run_search(payload: JobSearchIn, db: Session = Depends(get_db)) -> Job
         found += 1
     db.commit()
     return _run_out(db, found, skipped, outcome)
+
+
+@router.post("/web", response_model=JobSearchWebOut)
+async def search_web(payload: JobSearchIn, db: Session = Depends(get_db)) -> JobSearchWebOut:
+    """
+    The web search on its own, run after the saved-list results are already showing. What it finds is ranked into the same list
+    the pages are cut from, so each job lands on the page its match earns. Nothing is saved here; the jobs are saved when their
+    page is opened. If the web search is unavailable the answer is simply "nothing added".
+    """
+    from app.services.jobcache import service as cache_service
+
+    known: set[str] = set()
+    for (url,) in db.query(Job.canonical_application_url).all():
+        known |= loose_keys(url)
+    for (url,) in db.query(JobSearchResult.url).filter(JobSearchResult.status.in_(("removed", "added"))).all():
+        known |= loose_keys(url)
+    try:
+        outcome = await web_search.search_jobs_full(payload, known_keys=known, web_only=True)
+    except Exception:  # the web search is a bonus on top of the saved lists: any failure just means nothing is added
+        total = len(await cache_service.ranked_items(payload))
+        return JobSearchWebOut(added=0, total=total)
+    fresh = [i for i in outcome.items if not (loose_keys(i["url"]) & known)]
+    added, total = await cache_service.add_to_ranked(payload, fresh)
+    return JobSearchWebOut(added=added, total=total)
 
 
 @router.post("/page", response_model=JobSearchPageOut)

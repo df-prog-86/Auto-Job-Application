@@ -1072,3 +1072,18 @@ def test_sort_orders_the_whole_list_and_the_count_never_changes(monkeypatch):
     assert counted == 5
     scored, _ = asyncio.run(ws.search_page(c, set(), 0, sort="resume", resume_scores={"k3": 0.9, "k1": 0.4}))
     assert [i["title"] for i in scored][:2] == ["Analyst 3", "Analyst 1"]
+
+
+def test_the_web_search_alone_ranks_its_finds_into_the_list_and_never_fails_the_page(search, monkeypatch):
+    from app.services.discovery import web_search
+
+    client, SessionLocal = search
+    out = client.post("/api/v1/job-search/web", json={"titles": "revenue cycle analyst", "web": "only"})
+    assert out.status_code == 200 and set(out.json()) == {"added", "total"}
+
+    async def boom(*a, **k):
+        raise RuntimeError("web search down")
+
+    monkeypatch.setattr(web_search, "search_jobs_full", boom)
+    broken = client.post("/api/v1/job-search/web", json={"titles": "revenue cycle analyst", "web": "only"})
+    assert broken.status_code == 200 and broken.json()["added"] == 0

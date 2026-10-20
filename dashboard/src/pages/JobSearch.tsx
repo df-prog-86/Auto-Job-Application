@@ -98,6 +98,10 @@ export function JobSearch() {
   // Pages after the first come from the server one at a time: the ids of the jobs on each, and how many matches there are in all.
   const [serverPages, setServerPages] = useState<Record<number, number[]>>({});
   const [matchTotal, setMatchTotal] = useState<number | null>(null);
+  // True once the web search has been ranked into the list: from then on page 1 is also cut from the server's list.
+  const [webMerged, setWebMerged] = useState(false);
+  const pageRef = useRef(1);
+  const sortRef = useRef<SortBy>("search");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -127,15 +131,17 @@ export function JobSearch() {
   const byId = new Map(items.map((r) => [r.id, r]));
   // In "Best match" order page 1 is what the search just found (the web results included); every other page, and every page in
   // another order, is the server's cut of the whole list in that order.
-  const fromServer = serverMode && !(sortBy === "search" && currentPage === 1);
+  const fromServer = serverMode && !(sortBy === "search" && currentPage === 1 && !webMerged);
   const pageItems = fromServer
-    ? (serverPages[currentPage] ?? []).map((id) => byId.get(id)).filter((r): r is JobSearchResultOut => !!r && (sortBy !== "search" || !firstPageIds.has(r.id)))
+    ? (serverPages[currentPage] ?? []).map((id) => byId.get(id)).filter((r): r is JobSearchResultOut => !!r && (sortBy !== "search" || webMerged || !firstPageIds.has(r.id)))
     : serverMode
       ? searchRows.slice(0, PAGE_SIZE)
       : shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   useEffect(() => {
+    pageRef.current = currentPage;
+    sortRef.current = sortBy;
     listRef.current?.scrollTo({ top: 0 });
-  }, [currentPage]);
+  }, [currentPage, sortBy]);
   const anyAutofill = items.some((r) => autofillSite(r.url));
 
   const buildCriteria = (t: string[], k: string[], x: string[]): SavedCriteria => ({
@@ -187,13 +193,34 @@ export function JobSearch() {
       }
       const apiCriteria = toApiCriteria(c);
       lastCriteria.current = apiCriteria;
-      return api.runJobSearch(apiCriteria);
+      return api.runJobSearch({ ...apiCriteria, web: "saved" }); // the saved lists first: results show in a couple of seconds
     },
     onSuccess: (r) => {
       setCoverage(r.coverage ?? null);
       setPage(1);
       setServerPages({});
       setMatchTotal(null);
+      setWebMerged(false);
+      // The web search runs on behind the results and, when it finishes, its finds are ranked into the list quietly.
+      const crit = lastCriteria.current ?? toApiCriteria(current);
+      api
+        .webJobSearch(crit)
+        .then(async (w) => {
+          if (lastCriteria.current !== crit || w.added === 0) return;
+          const first = await api.pageJobSearch({ ...crit, count: PAGE_SIZE, page: 1, sort: "search" });
+          if (lastCriteria.current !== crit) return;
+          qc.setQueryData<JobSearchResultOut[]>(["job-search-results"], (old) => {
+            const have = new Set((old ?? []).map((x) => x.id));
+            return [...(old ?? []), ...first.results.filter((x) => !have.has(x.id))];
+          });
+          if (sortRef.current === "search") {
+            setServerPages((p) => ({ [pageRef.current]: p[pageRef.current] ?? [], 1: first.results.map((x) => x.id) }));
+          }
+          setMatchTotal(first.total);
+          setWebMerged(true);
+          void qc.invalidateQueries({ queryKey: ["job-search-results"] });
+        })
+        .catch(() => undefined);
       // the number of pages comes from the server (and this warms its list), so it matches whichever order is chosen
       api
         .pageJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), count: PAGE_SIZE, page: 0 })
@@ -235,12 +262,12 @@ export function JobSearch() {
     setSortBy(value);
     setServerPages({});
     setPage(1);
-    if (serverMode && value !== "search") openPage.mutate({ target: 1, sort: value });
+    if (serverMode && (value !== "search" || webMerged)) openPage.mutate({ target: 1, sort: value });
   };
 
   const goToPage = (target: number) => {
     if (openPage.isPending || target < 1 || target > totalPages || target === currentPage) return;
-    if (!serverMode || (sortBy === "search" && target === 1) || serverPages[target]) setPage(target);
+    if (!serverMode || (sortBy === "search" && target === 1 && !webMerged) || serverPages[target]) setPage(target);
     else openPage.mutate({ target, sort: sortBy });
   };
 

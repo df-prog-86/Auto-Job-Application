@@ -1512,3 +1512,17 @@ def test_jibe_parse_and_link():
     assert got[1].pay_text and "176" in got[1].pay_text
     assert readers.parse_jibe({"jobs": []}, "x") == ([], None)
     assert readers.employer_ref("https://careers.amd.com/jobs") == ("jibe", "careers.amd.com")
+
+
+def test_prelabel_shows_description_opening(monkeypatch):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from scripts import eval_search
+
+    monkeypatch.setattr(eval_search.evalset, "describe", lambda c: ["revenue cycle manager in Boston"])
+    search = {"criteria": {"titles": ["revenue cycle manager"], "location": "Boston, MA"}, "relevant": "x", "not_relevant": "y"}
+    rows = [{"title": "Associate Director", "company": "Acme", "location": "Boston, MA", "pay": None, "url": "https://x/1"}]
+    msgs = eval_search.label_messages(search, rows, {"https://x/1": "You will lead patient billing and denials."})
+    assert "description opens: You will lead patient billing and denials." in msgs[1]["content"]
+    assert "description opens" not in eval_search.label_messages(search, rows)[1]["content"]

@@ -669,9 +669,30 @@ def clean_found_name(raw: str | None) -> str | None:
     name = re.sub(r"\s+", " ", _html.unescape(raw or "")).strip()
     name = _JOB_PREFIX.sub("", name)
     name = _NAME_TRAIL.sub("", name).strip(" -|:,")
+    name = re.sub(r",?\s+(inc\.?|llc|l\.l\.c\.|ltd\.?|corp\.?|corporation|co\.|l\.p\.|lp|plc|gmbh|b\.v\.)$", "", name, flags=re.I).strip(" ,")
     if not (2 <= len(name) <= 60) or name.lower() in _GENERIC_NAMES or re.search(r"\b(search|openings?|apply|login|sign in|404|not found|error)\b", name, re.I):
         return None
     return name
+
+
+def _slug_of(ats: str, identifier: str) -> str:
+    """The employer's own short name as it appears in its address ("careers-dohertyinc.icims.com" -> "dohertyinc")."""
+    if ats == "workday" and identifier.count("|") == 2:
+        return identifier.split("|")[1]
+    if ats == "icims":
+        return re.sub(r"^(careers|jobs)-|-(careers|jobs)$", "", identifier.split(".")[0])
+    return identifier.split(".")[0].removeprefix("eu:")
+
+
+def name_agrees_with_address(name: str, slug: str) -> bool:
+    """True when a found name plausibly belongs to the employer whose address is `slug` (so a subsidiary or another company's name is refused)."""
+    sq = lambda t: re.sub(r"[^a-z0-9]", "", t.lower())
+    s, n = sq(slug), sq(name)
+    if len(s) < 3 or not n:
+        return False
+    if s in n or n in s:
+        return True
+    return any(len(sq(w)) >= 4 and (s.startswith(sq(w)) or sq(w).startswith(s[:5])) for w in re.split(r"[\s,&/-]+", name))
 
 
 def _home_page(ats: str, identifier: str) -> str | None:
@@ -701,6 +722,17 @@ async def _find_name(emp: dict, row_url: str | None) -> tuple[str | None, str]:
             return None
         return resp.text[:400000] if resp.status_code == 200 else None
 
+    slug = _slug_of(emp["ats"], emp["identifier"])
+    # The careers page of the employer itself comes first: a job record names whichever legal entity posted it (a subsidiary,
+    # a franchisee), which is often not the company. Every name must also fit the employer's own web address.
+    home = _home_page(emp["ats"], emp["identifier"])
+    body = await page(home) if home else None
+    if body:
+        for pattern, label in ((r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\']([^"\']+)', "site name"), (r"<title[^>]*>([^<]+)</title>", "page title")):
+            m = re.search(pattern, body, re.I)
+            found = clean_found_name(m.group(1)) if m else None
+            if found and name_agrees_with_address(found, slug):
+                return found, label
     if row_url:
         req = _description_request(row_url)
         body = await page(req[1] if req and req[0] == "icims" else row_url)
@@ -712,16 +744,8 @@ async def _find_name(emp: dict, row_url: str | None) -> tuple[str | None, str]:
             for item in mx._flatten_jsonld(data):
                 org = item.get("hiringOrganization") if isinstance(item, dict) else None
                 found = clean_found_name(org.get("name") if isinstance(org, dict) else org if isinstance(org, str) else None)
-                if found:
-                    return found, "job page data"
-    home = _home_page(emp["ats"], emp["identifier"])
-    body = await page(home) if home else None
-    if body:
-        for pattern, label in ((r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\']([^"\']+)', "site name"), (r"<title[^>]*>([^<]+)</title>", "page title")):
-            m = re.search(pattern, body, re.I)
-            found = clean_found_name(m.group(1)) if m else None
-            if found:
-                return found, label
+                if found and name_agrees_with_address(found, slug):
+                    return found, "job page data (matches address)"
     return None, ""
 
 

@@ -1834,3 +1834,12 @@ def test_a_company_name_is_taken_from_a_careers_page_title_and_generic_titles_ar
     assert cache_tools.clean_found_name("Careers at Doherty Enterprises") == "Doherty Enterprises"
     assert cache_tools.clean_found_name("PT Solutions | Jobs") == "PT Solutions"
     assert cache_tools.clean_found_name("Search Results") is None and cache_tools.clean_found_name("Careers") is None
+
+
+def test_a_found_name_must_fit_the_employers_own_address():
+    from scripts import cache_tools
+
+    ok = cache_tools.name_agrees_with_address
+    assert ok("ASM Global", "asmglobal") and ok("Doherty Enterprises", "dohertyinc") and ok("PT Solutions", "ptsolutions")
+    assert not ok("Legends Hospitality", "asmglobal") and not ok("JINYA Ramen Bar", "dohertyinc") and not ok("Gerber Payroll Services", "boydgroup")
+    assert cache_tools.clean_found_name("Gerber Payroll Services, Inc.") == "Gerber Payroll Services"

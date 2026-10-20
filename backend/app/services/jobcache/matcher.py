@@ -20,6 +20,7 @@ from app.services.jobcache.text import (
     STATE_BY_NAME,
     STOPWORDS,
     LocationQuery,
+    title_names_foreign,
     all_stems,
     content_stems,
     fold,
@@ -340,6 +341,8 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
     lf = location_fit(loc, row.get("location"), wt)
     if lf <= 0.0:
         return None
+    if is_vague_place(row.get("location")) and title_names_foreign(row["title"]):
+        return None  # no place listed, but the title puts the job in another country: the launch market is the US
     if is_vague_place(row.get("location")) and title_names_other_state(plan, row["title"]):
         return None  # no place listed, but the title says where ("Marine Biologist - Alaska"): not the place asked for
     mid = row.get("pay_mid")

@@ -1931,3 +1931,12 @@ def test_a_remote_flag_on_a_job_with_a_city_does_not_make_it_remote():
     assert remote_from_flag(True, "Baton Rouge, LA") is None
     assert remote_from_flag(True, None) == "remote" and remote_from_flag(True, "Remote") == "remote" and remote_from_flag(True, "United States") == "remote"
     assert remote_from_flag(False, None) is None
+
+
+def test_remote_jobs_in_other_countries_are_not_shown():
+    from app.services.jobcache import text
+
+    q = text.parse_location_query("Philadelphia, PA")
+    assert text.location_fit(q, "Remote - European Union", "remote") == 0.0
+    assert text.title_names_foreign("REMOTE (INDIA): Project Coordinator")
+    assert not text.title_names_foreign("Remote Project Coordinator (US)") and not text.title_names_foreign("Project Coordinator")

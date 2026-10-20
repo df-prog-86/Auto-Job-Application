@@ -245,7 +245,8 @@ _NON_US = (
     "netherlands", "australia", "mexico", "brazil", "philippines", "poland", "singapore", "japan", "china", "israel",
     "argentina", "colombia", "portugal", "sweden", "romania", "ukraine", "costa rica", "south africa", "nigeria", "egypt",
     "pakistan", "bangladesh", "vietnam", "indonesia", "turkey", "switzerland", "denmark", "norway", "finland", "belgium",
-    "emea", "apac", "latam", "europe", "uk",
+    "emea", "apac", "latam", "europe", "uk", "european union", "european", "eu", "dach", "nordics", "asia", "africa",
+    "middle east", "latin america", "south america", "anz", "mena",
     "greece", "malta", "lithuania", "latvia", "estonia", "hungary", "czechia", "czech republic", "slovakia", "slovenia", "croatia",
     "serbia", "bulgaria", "austria", "russia", "luxembourg", "iceland", "cyprus", "morocco", "tunisia", "algeria", "kenya", "ghana",
     "ethiopia", "tanzania", "uganda", "senegal", "ivory coast", "saudi arabia", "united arab emirates", "uae", "qatar", "kuwait",
@@ -344,6 +345,16 @@ def _states_in(location: str) -> set[str]:
 def is_vague_place(location: str | None) -> bool:
     """True when a posting does not name where the job is ("2 Locations", "Multiple locations", nothing at all)."""
     return not (location or "").strip() or bool(_UNKNOWN_PLACE.search(location or ""))
+
+
+def title_names_foreign(title: str | None) -> bool:
+    """True when a remote job's title puts it in another country ("REMOTE (INDIA): Project Coordinator") and says nothing of the US."""
+    folded = f" {fold(title)} "
+    if " remote " not in folded and " work from home " not in folded:
+        return False
+    if any(f" {us} " in folded for us in ("us", "usa", "united states", "u s")):
+        return False
+    return any(f" {c} " in folded for c in _NON_US)
 
 
 def names_no_town(location: str | None) -> bool:

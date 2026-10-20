@@ -1407,3 +1407,30 @@ def test_industry_hand_set_employers_win():
     assert classify("Joyce Corp", ["Welder"]) != "Health Care and Social Assistance"  # "joya" must not catch "joyce"
     assert classify("Accord Healthcare", ["Welder"]) != "Accommodation and Food Services"
     assert classify("AccorHotel", ["Receptionist"]) == "Accommodation and Food Services"
+
+
+DELOITTE_PAGE = """
+<article class="article--result " data-total="999+"><div class="article__content--result"><div class="article__header__text">
+<h3 class="article__header__text__title article__header__text__title--2">
+<a href="https://apply.deloitte.com/en_US/careers/JobDetail/Project-Associate-Vice-President-Security-Analytics-and-Insights/372165" class="link">
+ Project - Associate Vice President, Security Analytics and Insights
+</a></h3><div class="article__header__text__subtitle"><span>
+ Deloitte US
+</span> | <span>
+ Deloitte Transactions and Business Analytics LLP
+</span> | <span>Rosslyn, Virginia, United States</span></div></div></div></article>
+<article class="article--result " data-total="999+"><div class="article__content--result"><div class="article__header__text">
+<h3><a href="https://apply.deloitte.com/en_US/careers/JobDetail/WMS-Consulting-Senior-Manager/372156" class="link">WMS Consulting Senior Manager</a></h3>
+<div class="article__header__text__subtitle"><span>Deloitte US</span> | <span>Deloitte Consulting LLP</span> | <span>Remote, United States</span></div></div></div></article>
+"""
+
+
+def test_deloitte_parse_and_link():
+    from app.services.jobcache import readers
+    got = readers.parse_deloitte(DELOITTE_PAGE)
+    assert [g.ext_id for g in got] == ["372165", "372156"]
+    assert got[0].title == "Project - Associate Vice President, Security Analytics and Insights"
+    assert got[0].location == "Rosslyn, Virginia, United States"
+    assert got[0].url.endswith("/372165")
+    assert readers.parse_deloitte("<html>nothing</html>") == []
+    assert readers.employer_ref("https://apply.deloitte.com/en_US/careers/JobDetail/WMS-Consulting-Senior-Manager/372156") == ("deloitte", "apply.deloitte.com")

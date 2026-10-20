@@ -638,6 +638,7 @@ OTHER_NAMES = {
     ("successfactors", "careers.ey.com|ey"): "EY",
     ("dayforce", "finthrive|candidateportal|en-us"): "FinThrive",
     ("kpmg", "www.kpmguscareers.com"): "KPMG",
+    ("deloitte", "apply.deloitte.com"): "Deloitte",
 }
 
 

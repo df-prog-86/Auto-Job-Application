@@ -26,14 +26,14 @@ from app.services.jobcache.text import html_to_text, is_vague_place, location_fr
 USER_AGENT = "JobAgent/1.0 (personal job search tool; reads public job lists)"
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
-SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle", "icims", "taleo", "phenom", "successfactors", "dayforce", "kpmg")
+SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle", "icims", "taleo", "phenom", "successfactors", "dayforce", "kpmg", "deloitte")
 WORKDAY_PAGE = 20  # Workday returns at most 20 jobs per request
 WORKDAY_MAX_JOBS = 4000  # a very large employer is read up to this many jobs, newest first as Workday lists them (IQVIA hit the old 1,500 limit)
 SMARTRECRUITERS_PAGE = 100  # postings per request from the public Posting API
 SMARTRECRUITERS_MAX_JOBS = 2000
 _MIN_GAP = {
     "workday": 0.6, "greenhouse": 0.3, "lever": 0.3, "ashby": 0.3, "smartrecruiters": 0.4,
-    "breezy": 0.5, "workable": 0.5, "bamboohr": 0.5, "pinpoint": 0.5, "jazzhr": 0.8, "jobvite": 0.8, "oracle": 0.6, "icims": 1.0, "taleo": 1.0, "phenom": 0.6, "successfactors": 1.0, "dayforce": 0.6, "kpmg": 1.0,
+    "breezy": 0.5, "workable": 0.5, "bamboohr": 0.5, "pinpoint": 0.5, "jazzhr": 0.8, "jobvite": 0.8, "oracle": 0.6, "icims": 1.0, "taleo": 1.0, "phenom": 0.6, "successfactors": 1.0, "dayforce": 0.6, "kpmg": 1.0, "deloitte": 1.0,
 }  # seconds between requests to one site
 PHENOM_SITES = {"careers.bcg.com"}  # Phenom career sites differ in their settings, so each one is added by hand once it has been checked
 SUCCESSFACTORS_SITES = {"careers.ey.com"}  # EY lists the whole world; only its US jobs are read (see SUCCESSFACTORS_COUNTRY)
@@ -135,6 +135,8 @@ def employer_ref(url: str) -> tuple[str, str] | None:
         return "dayforce", f"{segs[1]}|{segs[2]}|{segs[0]}"
     if host in ("www.kpmguscareers.com", "kpmguscareers.com") and segs and segs[0] in ("job-search", "jobdetail"):
         return "kpmg", "www.kpmguscareers.com"
+    if host == "apply.deloitte.com" and any(x.lower() in ("searchjobs", "jobdetail") for x in segs):
+        return "deloitte", "apply.deloitte.com"
     if host.endswith(".icims.com") and sub not in ("www", "app", "api", "login", "careers", "jobs"):
         return "icims", host
     if host.endswith(".oraclecloud.com") and ".fa." in host and "sites" in segs[:-1]:
@@ -150,7 +152,7 @@ def employer_ref(url: str) -> tuple[str, str] | None:
 READER_HOST_SUFFIXES = (
     ".greenhouse.io", ".lever.co", ".ashbyhq.com", ".smartrecruiters.com", ".myworkdayjobs.com", ".breezy.hr", ".workable.com",
     ".bamboohr.com", ".pinpointhq.com", ".applytojob.com", ".jobvite.com", ".oraclecloud.com", ".icims.com", ".taleo.net",
-    ".dayforcehcm.com", ".kpmguscareers.com",
+    ".dayforcehcm.com", ".kpmguscareers.com", "apply.deloitte.com",
 )
 
 
@@ -1080,13 +1082,62 @@ async def _read_kpmg(identifier: str, client: httpx.AsyncClient, throttle: Throt
     return ReadResult(postings, complete=complete, notes=notes)
 
 
+# ---- Deloitte US careers site (page reading) ----------------------------------------------------------------------
+
+DELOITTE_MAX_PAGES = 300  # 10 jobs a page
+_DELOITTE_HOST = "apply.deloitte.com"
+
+
+def parse_deloitte(page: Any) -> list[PostingIn]:
+    """Deloitte's job search page (https://apply.deloitte.com/en_US/careers/SearchJobs?jobOffset=N): 10 result cards, each a
+    link to /JobDetail/<slug>/<id>, then "Deloitte US | Business | Place"."""
+    out: list[PostingIn] = []
+    seen: set[str] = set()
+    for block in re.split(r'<article class="article--result', page if isinstance(page, str) else "")[1:]:
+        block = block.split("</article>", 1)[0]
+        link = re.search(r'href="(https://apply\.deloitte\.com/en_US/careers/JobDetail/[^"]*?/(\d+))"', block)
+        if not link or link.group(2) in seen:
+            continue
+        title_m = re.search(r'<a[^>]+class="link"[^>]*>(.*?)</a>', block, re.S)
+        title = _plain(title_m.group(1)) if title_m else ""
+        if not title:
+            continue
+        seen.add(link.group(2))
+        sub_m = re.search(r'article__header__text__subtitle">(.*?)</div>', block, re.S)
+        spans = [_plain(x) for x in re.findall(r"<span[^>]*>(.*?)</span>", sub_m.group(1), re.S)] if sub_m else []
+        spans = [x for x in spans if x]
+        loc = spans[-1] if len(spans) >= 3 else None
+        out.append(PostingIn(ext_id=link.group(2), title=title, url=link.group(1), location=loc, work_type=work_type_from(None, loc, title)))
+    return out
+
+
+async def _read_deloitte(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    postings: list[PostingIn] = []
+    seen: set[str] = set()
+    complete = False
+    for n in range(DELOITTE_MAX_PAGES):
+        url = f"https://{_DELOITTE_HOST}/en_US/careers/SearchJobs" + (f"?jobOffset={n * 10}" if n else "")
+        page = await _request(client, throttle, "deloitte", "GET", url, text=True, headers={"Accept": "text/html"})
+        found = parse_deloitte(page)
+        if n == 0 and not found:
+            raise ReaderError("we couldn't make sense of that careers page")
+        new = [p for p in found if p.ext_id not in seen]
+        seen.update(p.ext_id for p in new)
+        postings.extend(new)
+        if not new:
+            complete = True
+            break
+    notes = [] if complete else [f"read the first {len(postings)} jobs"]
+    return ReadResult(postings, complete=complete, notes=notes)
+
+
 # ---- entry point --------------------------------------------------------------------------------------------------
 
 _READERS = {"greenhouse": _read_greenhouse, "lever": _read_lever, "ashby": _read_ashby, "workday": _read_workday, "smartrecruiters": _read_smartrecruiters,
     "breezy": _read_breezy, "workable": _read_workable, "bamboohr": _read_bamboohr, "pinpoint": _read_pinpoint,
     "jazzhr": _read_jazzhr, "jobvite": _read_jobvite, "oracle": _read_oracle, "icims": _read_icims,
     "taleo": _read_taleo, "phenom": _read_phenom, "successfactors": _read_successfactors,
-    "dayforce": _read_dayforce, "kpmg": _read_kpmg,
+    "dayforce": _read_dayforce, "kpmg": _read_kpmg, "deloitte": _read_deloitte,
 }
 
 

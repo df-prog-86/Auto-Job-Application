@@ -223,7 +223,8 @@ def test_search_applies_place_work_type_pay_dates_and_exclusions():
     assert "2" not in ids(location="Boston, MA")  # Dallas is not Boston
     assert "3" not in ids(location="Boston, MA")  # remote was not asked for: a city search shows that city and its area only
     assert "3" not in ids(location="Boston, MA", work_type="onsite")
-    assert "3" in ids(location="Boston, MA or remote")  # "or remote" brings remote jobs in
+    assert "3" in ids(location="Boston, MA", include_remote=True)  # the remote checkbox brings remote jobs in
+    assert "3" not in ids(location="Boston, MA or remote")  # typing it in the place box does nothing: the box is a city and state only
     assert ids(work_type="remote") == ["3"]
     assert "4" not in ids(location="Boston, MA", posted_within_days=30) and "4" in ids(location="Boston, MA")
     assert "5" not in ids(location="Boston, MA", target_salary=100000)
@@ -1560,7 +1561,7 @@ def test_one_employer_does_not_fill_the_screen():
 
 
 def test_the_work_asked_for_outranks_the_same_role_word_in_another_field():
-    plan = matcher.build_plan(crit(titles="revenue cycle analyst", location="Orlando, FL or remote"), ["Financial Analyst", "Billing Analyst"])
+    plan = matcher.build_plan(crit(titles="revenue cycle analyst", location="Orlando, FL", include_remote=True), ["Financial Analyst", "Billing Analyst"])
     exact = {"title": "Revenue Cycle Analyst Underpayments", "company": "R1 RCM", "location": "Remote, USA", "work_type": "remote", "posted_at": None}
     other = {"title": "Financial Analyst", "company": "Lennar", "location": "Orlando, FL", "work_type": None, "posted_at": None}
     ranked = matcher.rank(plan, [other, exact])
@@ -1776,8 +1777,8 @@ def test_a_web_result_in_the_wrong_place_is_ruled_out_like_a_saved_one():
     plan = matcher.build_plan(SimpleNamespace(titles="project manager", location="Chicago, IL", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
     assert not matcher.place_ok(plan, "Vaesteras, Vastmanland County, Sweden; Vaasa, Finland", None)
     assert not matcher.place_ok(plan, "Dallas, TX", None)
-    assert matcher.place_ok(plan, "Chicago, IL", None) and not matcher.place_ok(plan, "Remote", "remote")  # remote only comes with "or remote"
-    assert matcher.place_ok(matcher.build_plan(SimpleNamespace(titles="project manager", location="Chicago, IL or remote", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), []), "Remote", "remote")
+    assert matcher.place_ok(plan, "Chicago, IL", None) and not matcher.place_ok(plan, "Remote", "remote")  # remote only comes with the remote checkbox
+    assert matcher.place_ok(matcher.build_plan(SimpleNamespace(titles="project manager", location="Chicago, IL", include_remote=True, work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), []), "Remote", "remote")
 
 
 def test_a_piped_us_place_is_written_as_city_and_state():

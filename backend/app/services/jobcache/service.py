@@ -271,7 +271,7 @@ RANKED_KEEP = 6
 
 
 def _ranked_key(criteria: Any) -> str:
-    fields = [getattr(criteria, k, None) for k in ("titles", "location", "work_type", "keywords", "exclude_companies", "target_salary", "require_salary", "posted_within_days")]
+    fields = [getattr(criteria, k, None) for k in ("titles", "location", "work_type", "keywords", "exclude_companies", "target_salary", "require_salary", "posted_within_days", "include_remote")]
     return json.dumps(fields, default=str)
 
 

@@ -354,6 +354,8 @@ export interface JobSearchCriteria {
   exclude_companies?: string | null;
   target_salary?: number | null;
   require_salary: boolean;
+  /** Also show remote jobs, after the jobs in the city and its area. */
+  include_remote?: boolean;
   posted_within_days: 0 | 7 | 14 | 30;
   count: number;
   /** True for "Show more results": only the saved employer lists are searched, which is instant. */

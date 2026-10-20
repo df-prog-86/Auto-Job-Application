@@ -18,6 +18,7 @@ class JobSearchIn(BaseModel):
     keywords: str | None = Field(default=None, max_length=300)
     target_salary: int | None = Field(default=None, ge=0, le=2_000_000)  # midpoint of the pay range wanted
     require_salary: bool = False  # skip postings that do not state pay
+    include_remote: bool = False  # a place search also shows remote jobs, after the jobs in that place and its area
     posted_within_days: Literal[0, 7, 14, 30] = 0  # 0 = any time
     count: int = Field(default=10, ge=3, le=300)  # a page is 10; opening a later page asks for every job up to it at once
     # True for "Show more results": look only in the saved employer lists, which is instant and uses no AI.

@@ -92,6 +92,7 @@ export function JobSearch() {
   const [excludeDraft, setExcludeDraft] = useState("");
   const [targetSalary, setTargetSalary] = useState(saved.targetSalary ?? "");
   const [requireSalary, setRequireSalary] = useState(saved.requireSalary ?? false);
+  const [includeRemote, setIncludeRemote] = useState(saved.includeRemote ?? false);
   const [within, setWithin] = useState<JobSearchCriteria["posted_within_days"]>(saved.within ?? 0);
   const count = PAGE_SIZE;
   const [page, setPage] = useState(1);
@@ -152,6 +153,7 @@ export function JobSearch() {
     exclude: x.join(", "),
     targetSalary,
     requireSalary,
+    includeRemote,
     within,
     count,
   });
@@ -325,6 +327,7 @@ export function JobSearch() {
     setExcludeDraft("");
     setTargetSalary(c.targetSalary ?? "");
     setRequireSalary(c.requireSalary ?? false);
+    setIncludeRemote(c.includeRemote ?? false);
     setWithin(c.within ?? 0);
   };
 
@@ -341,6 +344,7 @@ export function JobSearch() {
     const names = { remote: "Remote", hybrid: "Hybrid", onsite: "On site" } as const;
     filterChips.push({ key: "wt", text: names[workType as keyof typeof names] ?? String(workType), clear: () => setWorkType("any") });
   }
+  if (includeRemote && workType !== "remote") filterChips.push({ key: "inclrem", text: "Remote jobs included", clear: () => setIncludeRemote(false) });
   if (within) filterChips.push({ key: "within", text: `Last ${within} days`, clear: () => setWithin(0) });
   const salaryNumber = parseInt(targetSalary.replace(/[^0-9]/g, ""), 10);
   if (Number.isFinite(salaryNumber) && salaryNumber > 0) {
@@ -359,6 +363,7 @@ export function JobSearch() {
     setWithin(0);
     setTargetSalary("");
     setRequireSalary(false);
+    setIncludeRemote(false);
     setKeywords([]);
     setExclude([]);
   };
@@ -524,6 +529,8 @@ export function JobSearch() {
               setTargetSalary={setTargetSalary}
               requireSalary={requireSalary}
               setRequireSalary={setRequireSalary}
+              includeRemote={includeRemote}
+              setIncludeRemote={setIncludeRemote}
               onClear={clearFilters}
             />
           )}
@@ -1074,6 +1081,8 @@ function FiltersPopover(p: {
   setTargetSalary: (v: string) => void;
   requireSalary: boolean;
   setRequireSalary: (v: boolean) => void;
+  includeRemote: boolean;
+  setIncludeRemote: (v: boolean) => void;
   onClear: () => void;
 }) {
   const ref = useClickAway(p.onClose);
@@ -1095,6 +1104,20 @@ function FiltersPopover(p: {
           { value: "onsite", label: "On site" },
         ]}
       />
+      {p.workType !== "remote" && (
+        <label className="-mt-2 flex items-start gap-2.5 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5 text-sm text-ink-700">
+          <input
+            type="checkbox"
+            checked={p.includeRemote}
+            onChange={(e) => p.setIncludeRemote(e.target.checked)}
+            className="mt-0.5 h-[18px] w-[18px] accent-[#5b57f5]"
+          />
+          <span>
+            <span className="block font-semibold text-ink-900">Also show remote jobs</span>
+            <span className="text-ink-500">Remote jobs appear after the jobs in your city and area. Turn it off to see only your city.</span>
+          </span>
+        </label>
+      )}
       <Segmented
         label="Posted"
         value={p.within as number}

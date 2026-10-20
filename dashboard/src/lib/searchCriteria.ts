@@ -11,6 +11,8 @@ export interface SavedCriteria {
   exclude: string;
   targetSalary: string;
   requireSalary: boolean;
+  /** Also show remote jobs after the jobs in the city and its area. */
+  includeRemote?: boolean;
   within: JobSearchCriteria["posted_within_days"];
   count: number;
 }
@@ -35,6 +37,7 @@ export function toApiCriteria(c: Partial<SavedCriteria>): JobSearchCriteria {
     exclude_companies: (c.exclude ?? "").trim() || null,
     target_salary: Number.isFinite(salary) && salary > 0 ? salary : null,
     require_salary: c.requireSalary ?? false,
+    include_remote: c.includeRemote ?? false,
     posted_within_days: c.within ?? 0,
     count: c.count ?? 10,
   };
@@ -79,5 +82,6 @@ export function savedSearchName(c: SavedCriteria): string {
 }
 
 export function sameCriteria(a: SavedCriteria, b: SavedCriteria): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  const norm = (c: SavedCriteria) => JSON.stringify({ ...c, includeRemote: !!c.includeRemote });
+  return norm(a) === norm(b);
 }

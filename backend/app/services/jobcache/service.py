@@ -27,6 +27,20 @@ from app.services.jobcache.text import fold, is_vague_place, names_no_town, pars
 
 log = logging.getLogger("job_cache")
 
+def timing_note(what: str, started: float) -> None:
+    """One line saying how long a step of a search took, appended to data/search_timing.log (to see where the wait goes)."""
+    try:
+        from pathlib import Path
+
+        path = Path(settings.JOB_CACHE_PATH).parent / "search_timing.log"
+        if path.exists() and path.stat().st_size > 500_000:
+            path.write_text("")
+        with path.open("a") as fh:
+            fh.write(f"{time.strftime('%H:%M:%S')} {time.time() - started:6.1f}s  {what}\n")
+    except Exception:  # timing notes must never get in the way of a search
+        pass
+
+
 SYSTEM_LABELS = {"workday": "Workday", "greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "smartrecruiters": "SmartRecruiters",
     "breezy": "Breezy HR", "workable": "Workable", "bamboohr": "BambooHR", "pinpoint": "Pinpoint", "jazzhr": "JazzHR", "jobvite": "Jobvite", "oracle": "Oracle Cloud", "icims": "iCIMS", "taleo": "Taleo", "phenom": "Phenom", "successfactors": "SuccessFactors", "dayforce": "Dayforce", "kpmg": "KPMG careers site", "deloitte": "Deloitte careers site", "talentbrew": "TalentBrew careers site", "jibe": "Jibe careers site",
 }
@@ -331,8 +345,11 @@ async def ranked_items(criteria: Any) -> list[dict[str, Any]]:
     counts = await asyncio.to_thread(cache.counts)
     if counts["postings"] == 0:
         return []
+    t0 = time.time()
     extra, places = await asyncio.gather(expand_titles(criteria.titles), expand_places(getattr(criteria, "location", None)))
+    timing_note(f"expand titles/places for {criteria.titles!r} {getattr(criteria, 'location', None)!r}", t0)
     out = await asyncio.to_thread(search_sync, criteria, set(), extra, 1_000_000, places)
+    timing_note(f"saved-list search ({len(out.items)} items, {len(out.unread)} unread)", t0)
     if out.unread:
         try:
             if await read_missing_descriptions(out.unread):  # the text now saved may settle those jobs: rank again
@@ -340,7 +357,9 @@ async def ranked_items(criteria: Any) -> list[dict[str, Any]]:
         except Exception:
             log.exception("job search: could not read the descriptions of partly matching jobs")
     items = collapse_listings(out.items)
+    timing_note("descriptions read, listings collapsed", t0)
     items = await resolve_vague_places(criteria, items, extra, places)
+    timing_note(f"vague places resolved ({len(items)} left)", t0)
     for item in items:  # the description note only tells copies of one job apart: its opening is enough, and keeps the kept lists small
         if item.get("_desc"):
             item["_desc"] = item["_desc"][:600]

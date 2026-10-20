@@ -35,7 +35,7 @@ from app.services.jobcache.text import (
 
 MIN_TITLE_FIT = 0.35  # below this a title only shares a word or two with the search: left out
 CANDIDATE_LIMIT = 5000  # postings read from the index per search: high enough that every real match is reached, low enough to stay fast
-EXPANDED_WEIGHT = 0.92  # an alternative title counts for a little less than the one the person typed
+EXPANDED_WEIGHT = 0.85  # an alternative title counts for a little less than the one the person typed
 OTHER_FIELD_WEIGHT = 0.72  # ...and one that names none of the kind of work typed counts for clearly less
 SHORT_OTHER_FIELD_WEIGHT = 0.55  # an alternative to a two-word title ("financial analyst") that drops the field word: shown, but never a strong match
 LOOKALIKE_WEIGHT = 0.30 # ...and one that names only PART of it ("revenue operations" for "revenue cycle") is usually a different field
@@ -257,6 +257,8 @@ def title_fit(plan: Plan, title: str, typed_only: bool = False) -> float:
         phrase = 1.0 if _contiguous(q.stems, p_content) else (0.6 if coverage == 1.0 else 0.0)
         precision = min(1.0, len(have) / max(len(p_content), 1))
         score = 0.5 * coverage + 0.3 * phrase + 0.2 * precision
+        if q.weight >= 1.0 and coverage == 1.0 and phrase == 1.0:
+            score = max(score, 0.96)  # the title typed, as written, inside the posting's title ("Project Coordinator, Market Access"): extra words do not count against it
         if len(q.stems) >= 3 and q.stems[-2] not in p_set:
             score *= 0.6  # the word that names the field ("cycle" in "revenue cycle manager") is missing: "Revenue Operations Manager" is not it
         if q.level is not None and p_level is not None:

@@ -198,6 +198,8 @@ def work_type_from(declared: str | None, location: str | None, title: str | None
     """remote / hybrid / onsite when the system or the text says so, else None (unknown, never guessed as onsite)."""
     d = fold(declared)
     if d in ("remote", "fully remote"):
+        if " hybrid " in f" {fold(location)} {fold(title)} ":
+            return "hybrid"  # a system's "remote allowed" flag on a job whose own words say hybrid
         return "remote"
     if d == "hybrid":
         return "hybrid"

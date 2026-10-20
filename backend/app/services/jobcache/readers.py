@@ -296,7 +296,9 @@ def parse_ashby(data: Any, board: str) -> list[PostingIn]:
         if not isinstance(j, dict) or not j.get("id") or not j.get("title") or j.get("isListed") is False:
             continue
         loc = j.get("location") if isinstance(j.get("location"), str) else None
-        declared = "remote" if j.get("isRemote") is True else j.get("workplaceType")
+        # Ashby's isRemote only says remote work is allowed (a "Hybrid - Denver" job has it too): the workplace type decides, and
+        # isRemote is used only when the job gives none.
+        declared = j.get("workplaceType") or ("remote" if j.get("isRemote") is True else None)
         comp = j.get("compensation") if isinstance(j.get("compensation"), dict) else {}
         pay_text = comp.get("compensationTierSummary") or comp.get("scrapeableCompensationSalarySummary")
         pay_text = pay_text if isinstance(pay_text, str) and pay_text.strip() else None

@@ -1005,7 +1005,7 @@ async def _check_page(criteria: JobSearchIn, plan: Any, available: list[dict[str
     unknown, twin listings) can remove jobs. Rather than show a short page, the next jobs in the ranking are checked too until the
     page is full.
     """
-    from app.services.jobcache import matcher
+    from app.services.jobcache import matcher, service as cache_service
     from app.services.jobcache.text import is_vague_place, lead_with_place, names_no_town, tidy_place
 
     kept: list[dict[str, Any]] = []
@@ -1023,7 +1023,9 @@ async def _check_page(criteria: JobSearchIn, plan: Any, available: list[dict[str
             i["location"] = lead_with_place(i.get("location"), wanted)
         tidy_items(batch)
         items = merge_twin_postings(merge_same_jobs(_dedupe_by_address(batch)))
+        t0 = time.time()
         items, _gone = await enrich_from_ats(items)
+        cache_service.timing_note(f"page check round {_round}: opened {len(batch)} jobs", t0)
         # Opening a job often reveals where it really is (a hospital listed as "3 Locations" that is in Tacoma): check the place again now.
         # A job that still says nothing about where it is does not belong in a search for a place.
         for i in items:  # places found by opening the job are the full list: the place searched goes first, then it is shortened to three
@@ -1032,9 +1034,13 @@ async def _check_page(criteria: JobSearchIn, plan: Any, available: list[dict[str
         items = [i for i in items if matcher.place_ok(plan, i.get("location"), i.get("work_type"))
                  and not (_must_name_a_place(plan) and i.get("work_type") != "remote"
                           and (is_vague_place(i.get("location")) or (plan.loc.cities and names_no_town(i.get("location")))))]
+        t0 = time.time()
         items, _old = await fill_posted_dates(items, criteria.posted_within_days, need_pay=criteria.require_salary)
+        cache_service.timing_note(f"page check round {_round}: dates/pay for {len(items)} jobs", t0)
         items, _no_pay = apply_pay_rules(items, criteria)
+        t0 = time.time()
         good, _closed = await drop_closed(items)
+        cache_service.timing_note(f"page check round {_round}: still-open check for {len(items)} jobs", t0)
         good_urls = {i.get("url") for i in good}
         if criteria.require_salary or criteria.posted_within_days or criteria.location:
             rejected += [u for u in batch_urls if u not in good_urls]  # a failed rule, not a transient miss: take it off the list

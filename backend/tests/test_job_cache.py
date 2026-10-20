@@ -1891,3 +1891,23 @@ def test_names_no_town_means_state_only():
     assert names_no_town("PA") and names_no_town("US; PA; NJ")
     assert not names_no_town("Philadelphia, PA") and not names_no_town("Remote") and not names_no_town("")
     assert location_fit(parse_location_query("Philadelphia, PA"), "Pittsburgh, PA", None) == 0.0
+
+
+def test_ashby_workplace_type_beats_the_remote_allowed_flag():
+    from app.services.jobcache.readers import parse_ashby
+    from app.services.jobcache.text import work_type_from
+
+    jobs = {"jobs": [
+        {"id": "1", "title": "Accountant", "location": "Denver", "isRemote": True, "workplaceType": "Hybrid", "jobUrl": "https://x/1"},
+        {"id": "2", "title": "Accountant", "location": "Remote, USA", "isRemote": True, "workplaceType": "Remote", "jobUrl": "https://x/2"},
+        {"id": "3", "title": "Accountant", "location": "Remote", "isRemote": True, "jobUrl": "https://x/3"},
+    ]}
+    assert [p.work_type for p in parse_ashby(jobs, "b")] == ["hybrid", "remote", "remote"]
+    assert work_type_from("remote", "Hybrid - Denver", "Senior Accountant") == "hybrid"
+
+
+def test_the_title_typed_outranks_an_alternative_with_fewer_extra_words():
+    plan = matcher.build_plan(crit(titles="project coordinator", location=None), ["Project Manager"])
+    exact = {"title": "Project Coordinator, Market Access", "company": "A", "location": "Remote, US", "work_type": "remote", "posted_at": None}
+    other = {"title": "Project Manager", "company": "B", "location": "Remote, US", "work_type": "remote", "posted_at": None}
+    assert [s.row["company"] for s in matcher.rank(plan, [other, exact])] == ["A", "B"]

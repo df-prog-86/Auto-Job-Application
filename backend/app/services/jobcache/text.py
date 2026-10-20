@@ -194,6 +194,19 @@ def location_from_text(text_: str | None) -> str | None:
 
 # ---- work type --------------------------------------------------------------------------------------------------
 
+def remote_from_flag(flag: object, location: str | None) -> str | None:
+    """
+    "remote" for a hiring system's yes/no remote flag, but only when the job does not also name a place to go to. Several systems
+    set the flag on any job that allows some remote work, so "Baton Rouge, LA" with the flag is not a remote job: unknown (None).
+    """
+    if flag is not True:
+        return None
+    loc = fold(location)
+    if not loc.strip() or " remote " in f" {loc} " or "work from home" in loc or "anywhere" in loc or names_no_town(location):
+        return "remote"
+    return None
+
+
 def work_type_from(declared: str | None, location: str | None, title: str | None = None) -> str | None:
     """remote / hybrid / onsite when the system or the text says so, else None (unknown, never guessed as onsite)."""
     d = fold(declared)
@@ -492,6 +505,40 @@ def lead_with_place(location: str | None, wanted: list[str]) -> str | None:
 _CITY_DASH_STATE = re.compile(r"^([A-Za-z][A-Za-z .'\u2019]+)-([A-Z]{2})$")
 
 
+_COUNTRY_TAIL = re.compile(r",?\s*\b(?:USA|U\.S\.A\.|United States(?: of America)?)\s*$", re.I)
+_ZIP_TAIL = re.compile(r"\s+\d{5}(?:-\d{4})?\s*$")
+_PREFIXED_STATE = re.compile(r"^(?:USA?|United States)\s*-\s*([A-Za-z][A-Za-z ]+?)\s*-\s*(.+)$", re.I)
+_PREFIXED_CITY = re.compile(r"^(?:USA?|United States)\s*-\s*(.+)$", re.I)
+_CITY_STATE_TAIL = re.compile(r"([A-Z][A-Za-z.' ]+),\s*([A-Z]{2})$")
+_CITY_STATE_NAME = re.compile(r"^([A-Z][A-Za-z.' ]+),\s*([A-Za-z ]+)$")
+
+
+def _clean_place_part(part: str) -> str:
+    """One place written plainly: "USA-PA-Philadelphia" -> "Philadelphia, PA", "Denver, Colorado, USA" -> "Denver, CO", codes and zips dropped."""
+    if re.match(r"^\s*remote\b", part, re.I):
+        return part  # "Remote, USA" and "Remote (US or Canada)" say something the cleaning would remove
+    out = re.sub(r"\s*\([^)]*\)", "", part).strip()  # "(1250 Broadway)", "(PAH01)"
+    out = _COUNTRY_TAIL.sub("", out).strip()
+    out = _ZIP_TAIL.sub("", out).strip()
+    m = _PREFIXED_STATE.match(out)
+    if m:  # "US - North Carolina - Charlotte", "USA-PA-Philadelphia"
+        st = m.group(1).strip()
+        abbr = st.upper() if len(st) == 2 and st.upper() in US_STATES else STATE_BY_NAME.get(st.lower())
+        if abbr:
+            return f"{m.group(2).strip()}, {abbr}"
+    m = _PREFIXED_CITY.match(out)
+    if m and _CITY_STATE_TAIL.search(m.group(1)):  # "US-New York, NY"
+        out = m.group(1).strip()
+    if out.count("-") >= 2:  # "Store 1168-South Park Mall-ANN-Charlotte, NC": the place is the end of it
+        m = _CITY_STATE_TAIL.search(out.rsplit("-", 1)[-1].strip())
+        if m:
+            return f"{m.group(1).strip()}, {m.group(2)}"
+    m = _CITY_STATE_NAME.match(out)
+    if m and STATE_BY_NAME.get(m.group(2).strip().lower()):  # "Denver, Colorado" -> "Denver, CO"
+        return f"{m.group(1).strip()}, {STATE_BY_NAME[m.group(2).strip().lower()]}"
+    return out or part
+
+
 def tidy_place(location: str | None) -> str | None:
     """A place written the usual way: "Newton-MA" -> "Newton, MA", "Austin,TX" -> "Austin, TX", a list of ten cities -> three and "+7 more"."""
     if not location:
@@ -506,6 +553,7 @@ def tidy_place(location: str | None) -> str | None:
             return "Remote (" + " or ".join(names) + ")"
     parts = []
     for part in re.split(r"\s*;\s*", location.strip()):
+        part = _clean_place_part(part)
         m = _CITY_DASH_STATE.match(part)
         part = f"{m.group(1).strip()}, {m.group(2)}" if m else part
         parts.append(re.sub(r",(?=\S)", ", ", part))

@@ -385,7 +385,7 @@ class JobCache:
                 if row["location"] and is_vague_place(new_loc) and not is_vague_place(row["location"]):
                     new_loc = row["location"]  # the list only says "3 Locations": keep the real places found when the posting was opened
                 db.execute(
-                    "UPDATE postings SET title = ?, location = ?, work_type = COALESCE(?, work_type), pay_text = COALESCE(?, pay_text), "
+                    "UPDATE postings SET title = ?, location = ?, work_type = ?, pay_text = COALESCE(?, pay_text), "
                     "pay_mid = COALESCE(?, pay_mid), posted_at = COALESCE(?, posted_at), url = ?, last_seen = ?, closed_at = NULL WHERE id = ?",
                     (p.title[:300], (new_loc or None) and new_loc[:300], p.work_type, p.pay_text, p.pay_mid, posted, p.url[:1000], now, row["id"]),
                 )

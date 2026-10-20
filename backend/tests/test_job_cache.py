@@ -1911,3 +1911,23 @@ def test_the_title_typed_outranks_an_alternative_with_fewer_extra_words():
     exact = {"title": "Project Coordinator, Market Access", "company": "A", "location": "Remote, US", "work_type": "remote", "posted_at": None}
     other = {"title": "Project Manager", "company": "B", "location": "Remote, US", "work_type": "remote", "posted_at": None}
     assert [s.row["company"] for s in matcher.rank(plan, [other, exact])] == ["A", "B"]
+
+
+def test_place_text_is_written_plainly():
+    from app.services.jobcache.text import tidy_place
+
+    assert tidy_place("Store 1168-South Park Mall-ANN-Charlotte, NC 28211") == "Charlotte, NC"
+    assert tidy_place("USA-PA-Philadelphia; USA-NY-New York") == "Philadelphia, PA; New York, NY"
+    assert tidy_place("US - North Carolina - Charlotte") == "Charlotte, NC"
+    assert tidy_place("Denver, Colorado, USA") == "Denver, CO"
+    assert tidy_place("US-New York, NY (1250 Broadway)") == "New York, NY"
+    assert tidy_place("Winston-Salem, NC") == "Winston-Salem, NC"
+    assert tidy_place("Remote, USA") == "Remote, USA" and tidy_place("Remote (US or Canada)") == "Remote (US or Canada)"
+
+
+def test_a_remote_flag_on_a_job_with_a_city_does_not_make_it_remote():
+    from app.services.jobcache.text import remote_from_flag
+
+    assert remote_from_flag(True, "Baton Rouge, LA") is None
+    assert remote_from_flag(True, None) == "remote" and remote_from_flag(True, "Remote") == "remote" and remote_from_flag(True, "United States") == "remote"
+    assert remote_from_flag(False, None) is None

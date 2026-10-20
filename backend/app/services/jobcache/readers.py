@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 from app.services.jobcache.store import PostingIn
-from app.services.jobcache.text import html_to_text, is_vague_place, location_from_text, pay_from_text, pay_midpoint, work_type_from, workday_posted
+from app.services.jobcache.text import html_to_text, is_vague_place, location_from_text, pay_from_text, pay_midpoint, remote_from_flag, work_type_from, workday_posted
 
 USER_AGENT = "JobAgent/1.0 (personal job search tool; reads public job lists)"
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
@@ -298,7 +298,7 @@ def parse_ashby(data: Any, board: str) -> list[PostingIn]:
         loc = j.get("location") if isinstance(j.get("location"), str) else None
         # Ashby's isRemote only says remote work is allowed (a "Hybrid - Denver" job has it too): the workplace type decides, and
         # isRemote is used only when the job gives none.
-        declared = j.get("workplaceType") or ("remote" if j.get("isRemote") is True else None)
+        declared = j.get("workplaceType") or remote_from_flag(j.get("isRemote"), loc)
         comp = j.get("compensation") if isinstance(j.get("compensation"), dict) else {}
         pay_text = comp.get("compensationTierSummary") or comp.get("scrapeableCompensationSalarySummary")
         pay_text = pay_text if isinstance(pay_text, str) and pay_text.strip() else None
@@ -464,7 +464,7 @@ def parse_smartrecruiters(data: Any, identifier: str) -> list[PostingIn]:
         city, region, country = (str(loc_obj.get(k) or "").strip() for k in ("city", "region", "country"))
         parts = [city, region] if country.lower() in ("us", "usa", "") else [city, region, ISO_COUNTRIES.get(country.upper(), country.upper())]
         loc = ", ".join(p for p in parts if p) or ("Remote" if loc_obj.get("remote") is True else None)
-        declared = "remote" if loc_obj.get("remote") is True else "hybrid" if loc_obj.get("hybrid") is True else None
+        declared = remote_from_flag(loc_obj.get("remote"), loc) or ("hybrid" if loc_obj.get("hybrid") is True else None)
         company = j.get("company") if isinstance(j.get("company"), dict) else {}
         ident = str(company.get("identifier") or identifier)
         title = str(j["name"]).strip()
@@ -534,7 +534,7 @@ def parse_breezy(data: Any, sub: str) -> list[PostingIn]:
         out.append(
             PostingIn(
                 ext_id=str(j["id"]), title=title, url=str(j.get("url") or f"https://{sub}.breezy.hr/p/{j.get('friendly_id') or j['id']}"),
-                location=loc, work_type=work_type_from("remote" if loc_obj.get("is_remote") is True else None, loc, title),
+                location=loc, work_type=work_type_from(remote_from_flag(loc_obj.get("is_remote"), loc), loc, title),
                 pay_text=salary, pay_mid=pay_midpoint(salary), posted_at=_date(j.get("published_date")),
             )
         )
@@ -565,7 +565,7 @@ def parse_workable(data: Any, slug: str) -> list[PostingIn]:
         out.append(
             PostingIn(
                 ext_id=code, title=title, url=str(url), location=loc,
-                work_type=work_type_from("remote" if j.get("telecommuting") is True else None, loc, title),
+                work_type=work_type_from(remote_from_flag(j.get("telecommuting"), loc), loc, title),
                 posted_at=_date(j.get("published_on") or j.get("created_at")),
                 description=html_to_text(j.get("description")) or None,  # the list carries the text when asked for details
             )
@@ -595,7 +595,7 @@ def parse_bamboohr(data: Any, sub: str) -> list[PostingIn]:
         out.append(
             PostingIn(
                 ext_id=str(j["id"]), title=title, url=f"https://{sub}.bamboohr.com/careers/{j['id']}", location=loc,
-                work_type=work_type_from("remote" if j.get("isRemote") is True else None, loc, title),
+                work_type=work_type_from(remote_from_flag(j.get("isRemote"), loc), loc, title),
             )
         )
     return out

@@ -110,9 +110,6 @@ export function JobSearch() {
   const [moreAvailable, setMoreAvailable] = useState(0);
   const lastCriteria = useRef<JobSearchCriteria | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    listRef.current?.scrollTo({ top: 0 });
-  }, [currentPage]);
 
   const results = useQuery({ queryKey: ["job-search-results"], queryFn: api.listSearchResults });
   const items = (results.data ?? []).filter((r) => r.status === "new");
@@ -122,6 +119,9 @@ export function JobSearch() {
   const totalPages = Math.max(1, Math.ceil(poolSize / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageItems = shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: 0 });
+  }, [currentPage]);
   const anyAutofill = items.some((r) => autofillSite(r.url));
   const unscored = items.filter((r) => r.match_score == null);
 

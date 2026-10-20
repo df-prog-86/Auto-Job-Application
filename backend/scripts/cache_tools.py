@@ -131,13 +131,16 @@ async def _fill(args: argparse.Namespace) -> int:
     """Runs one batch of the gradual description fill now, so it can be seen working without waiting for a refresh."""
     from app.services.jobcache import service
 
-    settings.JOB_CACHE_DESCRIPTION_FILL = args.limit
     cache = JobCache()
-    before = len(cache.postings_without_description(100000, 100000, service.DESC_FILL_SYSTEMS_WITH_TEXT))
-    saved = await service.fill_descriptions_gradually(cache)
-    after = len(cache.postings_without_description(100000, 100000, service.DESC_FILL_SYSTEMS_WITH_TEXT))
-    print(f"Read up to {args.limit} postings: {saved} descriptions saved, {before - after - saved} could not be read (not tried again).")
-    print(f"Postings still waiting for a description: {after}")
+    skip = service.DESC_FILL_SYSTEMS_WITH_TEXT
+    waiting_before = cache.count_postings_without_description(skip)
+    todo = cache.postings_without_description(args.limit, service.DESC_FILL_PER_EMPLOYER, skip)
+    saved = await service.read_missing_descriptions(todo, max_chars=service.DESC_FILL_CHARS, mark_failures=True)
+    print(f"Tried {len(todo)} postings: {saved} descriptions saved, {len(todo) - saved} could not be read (not tried again).")
+    print(f"{'system':16}{'saved':>8}{'unreadable':>12}")
+    for ats_name, n in sorted(cache.description_outcomes([i for i, _u in todo]).items()):
+        print(f"{ats_name:16}{n['saved']:>8}{n['unreadable']:>12}")
+    print(f"Postings still waiting for a description: {cache.count_postings_without_description(skip)} (was {waiting_before})")
     return 0
 
 

@@ -498,6 +498,33 @@ class JobCache:
                 break
         return out
 
+    def description_outcomes(self, posting_ids: list[int]) -> dict[str, dict[str, int]]:
+        """For postings a fill tried: per hiring system, how many now have a description and how many were marked unreadable."""
+        out: dict[str, dict[str, int]] = {}
+        if not posting_ids:
+            return out
+        with self.session() as db:
+            for start in range(0, len(posting_ids), 500):
+                chunk = posting_ids[start : start + 500]
+                for r in db.execute(
+                    "SELECT e.ats AS ats, SUM(CASE WHEN p.description_z IS NOT NULL THEN 1 ELSE 0 END) AS got, "
+                    "SUM(CASE WHEN p.description_z IS NULL THEN 1 ELSE 0 END) AS missed FROM postings p JOIN employers e ON e.id = p.employer_id "
+                    f"WHERE p.id IN ({','.join('?' for _ in chunk)}) GROUP BY e.ats", chunk,
+                ):
+                    row = out.setdefault(r["ats"], {"saved": 0, "unreadable": 0})
+                    row["saved"] += r["got"] or 0
+                    row["unreadable"] += r["missed"] or 0
+        return out
+
+    def count_postings_without_description(self, skip_systems: set[str] | None = None) -> int:
+        marks = ",".join("?" for _ in (skip_systems or ()))
+        with self.session() as db:
+            return db.execute(
+                "SELECT COUNT(*) FROM postings p JOIN employers e ON e.id = p.employer_id WHERE p.closed_at IS NULL AND e.enabled = 1 "
+                "AND p.description_z IS NULL AND p.desc_hash IS NULL" + (f" AND e.ats NOT IN ({marks})" if marks else ""),
+                list(skip_systems or ()),
+            ).fetchone()[0]
+
     def mark_description_unavailable(self, posting_ids: list[int]) -> None:
         """Remembers that a posting's text could not be read, so it is not tried again on every refresh."""
         if not posting_ids:

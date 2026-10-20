@@ -282,8 +282,15 @@ def parse_location_query(text: str | None) -> LocationQuery:
     for name in STATE_BY_NAME:
         cleaned = re.sub(rf"\b{name}\b", " ", cleaned)
     chunks = [fold(c) for c in re.split(r"[,;/|]|\s+or\s+|\s+and\s+", raw)]
+    abbrs_typed = {abbr for abbr in re.findall(r"(?<![A-Za-z])([A-Z]{2})(?![A-Za-z])", raw) if abbr in US_STATES}
     for chunk in chunks:
         chunk = re.sub(r"\bremote\b|\bhybrid\b|\bonsite\b|\bunited states\b|\busa\b|\bus\b", " ", chunk).strip()
+        chunk = re.sub(r"^(new york)\s+city$|^nyc$", "new york", chunk)
+        if chunk == "new york" and ("NY" in abbrs_typed or re.search(r"\bnew york\s+city\b|\bnyc\b", folded)):
+            # "New York, NY" and "New York City" name the city: the state of the same name is not a state-wide search
+            q.cities.append("new york")
+            q.states.add("NY")
+            continue
         for name in STATE_BY_NAME:
             chunk = re.sub(rf"\b{name}\b", " ", chunk).strip()
         if chunk and chunk.upper() not in US_STATES and len(chunk) > 2:
@@ -324,6 +331,9 @@ def is_vague_place(location: str | None) -> bool:
     return not (location or "").strip() or bool(_UNKNOWN_PLACE.search(location or ""))
 
 
+REMOTE_ELSEWHERE = 0.75  # a remote job (based anywhere) in a search that names a city: kept, but behind jobs in that city
+
+
 def location_fit(q: LocationQuery, location: str | None, work_type: str | None) -> float:
     """
     How well a posting's place fits the place asked for: 1.0 right there, 0.9 remote when remote is acceptable,
@@ -335,7 +345,7 @@ def location_fit(q: LocationQuery, location: str | None, work_type: str | None) 
     remote_posting = work_type == "remote" or " remote " in f" {fold(loc)} "
     if not loc or _UNKNOWN_PLACE.search(loc):
         # "2 Locations" or no place at all: kept, since one of them may be the place asked for, but behind jobs that say so
-        return 0.9 if remote_posting else (0.4 if q.cities else 0.5)
+        return (REMOTE_ELSEWHERE if q.cities else 0.9) if remote_posting else (0.4 if q.cities else 0.5)
     folded = f" {fold(loc)} "
     wanted_states = q.states
     posting_states = _states_in(loc)
@@ -353,9 +363,8 @@ def location_fit(q: LocationQuery, location: str | None, work_type: str | None) 
         if f" {near_city} " in folded and (near_state is None or not posting_states or near_state in posting_states):
             return 0.95
     if remote_posting and (q.remote or not q.cities):
-        return 0.9
-    if remote_posting and q.remote:
-        return 0.9
+        # remote is welcome, but a job in the city asked for comes first
+        return REMOTE_ELSEWHERE if q.cities else 0.9
     if wanted_states & posting_states:
         return 0.7 if q.cities else 1.0
     if remote_posting:

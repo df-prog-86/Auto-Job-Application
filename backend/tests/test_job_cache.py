@@ -164,7 +164,7 @@ def test_places():
     assert fit("2 Locations") == 0.4 and fit(None) == 0.4  # a city search puts jobs that name no place behind jobs that do
     assert fit("2 Locations", None, "United States") == 0.5
     assert fit("Remote - US", "remote") == 0.6  # remote but remote was not asked for
-    assert fit("Remote - US", "remote", "Boston, MA or remote") == 0.9
+    assert fit("Remote - US", "remote", "Boston, MA or remote") == 0.75  # welcome, but behind jobs in Boston
     assert fit("London, United Kingdom") == 0.0 and fit("Remote - UK", "remote", "Boston, MA or remote") == 0.0
     assert text.location_fit(text.parse_location_query(None), "Anywhere", None) == 1.0
 
@@ -1780,3 +1780,29 @@ def test_a_web_result_in_the_wrong_place_is_ruled_out_like_a_saved_one():
 
 def test_a_piped_us_place_is_written_as_city_and_state():
     assert text.tidy_place("US | Illinois | Chicago") == "Chicago, IL"
+
+
+def test_a_two_word_title_keeps_alternatives_that_drop_the_field_below_a_strong_match():
+    crit = SimpleNamespace(titles="financial analyst", location="New York, NY", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10)
+    plan = matcher.build_plan(crit, ["security analyst", "senior financial analyst", "fp&a analyst"])
+    assert matcher.title_fit(plan, "Financial Analyst") > 0.9
+    assert matcher.title_fit(plan, "Senior Financial Analyst") > 0.8
+    assert 0 < matcher.title_fit(plan, "Senior Security Analyst") < 0.6  # shown at most as a weak match
+
+
+def test_remote_jobs_rank_behind_jobs_in_the_city_asked_for():
+    q = text.parse_location_query("New York, NY or remote")
+    here = text.location_fit(q, "New York, NY", None)
+    remote = text.location_fit(q, "San Francisco, CA", "remote")
+    nowhere = text.location_fit(q, "Remote", "remote")
+    assert here == 1.0 and remote == nowhere == text.REMOTE_ELSEWHERE < here
+    assert text.location_fit(text.parse_location_query("remote"), "Remote", "remote") == 0.9
+
+
+def test_new_york_city_is_a_city_search_not_the_whole_state():
+    for typed in ("New York, NY", "New York City", "NYC", "New York, NY or remote"):
+        q = text.parse_location_query(typed)
+        assert q.cities == ["new york"] and q.states == {"NY"}, typed
+    q = text.parse_location_query("New York, NY")
+    assert text.location_fit(q, "New York, New York", None) == 1.0
+    assert text.location_fit(q, "Buffalo, NY", None) == 0.7  # same state, not the city

@@ -1004,26 +1004,45 @@ async def search_page(
         available = sorted(available, key=lambda i: (i.get("posted_at") is None, -(i["posted_at"].toordinal() if i.get("posted_at") else 0)))
     elif sort == "resume" and resume_scores:  # jobs already checked against the resume first, best score first; the rest in best-match order
         available = sorted(available, key=lambda i: -(resume_scores.get(i["url_key"], -1.0)))
-    chunk = [dict(i) for i in available[offset : offset + criteria.count]]
-    if not chunk:
+    if offset >= len(available):
         return [], len(available)
     try:
         extra_titles = await cache_service.expand_titles(criteria.titles)
     except Exception:
         extra_titles = []
     plan = matcher.build_plan(criteria, extra_titles)
-    tidy_items(chunk)
-    items = merge_twin_postings(merge_same_jobs(_dedupe_by_address(chunk)))
-    items, _gone = await enrich_from_ats(items)
-    items, _old = await fill_posted_dates(items, criteria.posted_within_days, need_pay=criteria.require_salary)
-    items, _no_pay = apply_pay_rules(items, criteria)
-    kept, _closed = await drop_closed(items)
+    # The checks below (closed postings, pay or date missing once the real page is read, twin listings) can remove jobs from a
+    # page. Rather than show a short page, the next jobs in the ranking are checked too until the page is full. Jobs that fail a
+    # check are dropped from the kept list, so the total and the later pages stay honest.
+    kept: list[dict[str, Any]] = []
+    rejected: list[str] = []
+    pos = offset
+    for _round in range(5):
+        need = criteria.count - len(kept)
+        if need <= 0 or pos >= len(available):
+            break
+        batch = [dict(i) for i in available[pos : pos + need + (2 if _round == 0 else need)]]
+        pos += len(batch)
+        batch_urls = [i["url"] for i in batch]
+        tidy_items(batch)
+        items = merge_twin_postings(merge_same_jobs(_dedupe_by_address(batch)))
+        items, _gone = await enrich_from_ats(items)
+        items, _old = await fill_posted_dates(items, criteria.posted_within_days, need_pay=criteria.require_salary)
+        items, _no_pay = apply_pay_rules(items, criteria)
+        good, _closed = await drop_closed(items)
+        good_urls = {i.get("url") for i in good}
+        if criteria.require_salary or criteria.posted_within_days:
+            rejected += [u for u in batch_urls if u not in good_urls]  # a failed rule, not a transient miss: take it off the list
+        kept += good
+    kept = kept[: criteria.count]
+    if rejected:
+        await cache_service.drop_from_ranked(criteria, set(rejected))
     for item in kept:
         item["fit_score"] = item.get("fit")
         item["fit_note"] = fit_note(plan, item)
         for key in ("ats_checked", "ats_live", "site_url", "fit", "employer_id", "_desc", "read_at"):
             item.pop(key, None)
-    return kept, len(available)
+    return kept, max(len(available) - len(rejected), len(kept))
 
 
 async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]:

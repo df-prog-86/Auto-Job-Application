@@ -36,7 +36,8 @@ MIN_TITLE_FIT = 0.35  # below this a title only shares a word or two with the se
 CANDIDATE_LIMIT = 5000  # postings read from the index per search: high enough that every real match is reached, low enough to stay fast
 EXPANDED_WEIGHT = 0.92  # an alternative title counts for a little less than the one the person typed
 OTHER_FIELD_WEIGHT = 0.72  # ...and one that names none of the kind of work typed counts for clearly less
-LOOKALIKE_WEIGHT = 0.30  # ...and one that names only PART of it ("revenue operations" for "revenue cycle") is usually a different field
+SHORT_OTHER_FIELD_WEIGHT = 0.55  # an alternative to a two-word title ("financial analyst") that drops the field word: shown, but never a strong match
+LOOKALIKE_WEIGHT = 0.30 # ...and one that names only PART of it ("revenue operations" for "revenue cycle") is usually a different field
 
 STALE_DAYS = 180
 STALE_FACTOR = 0.85
@@ -94,6 +95,7 @@ def build_plan(criteria: Any, extra_titles: list[str] | None = None, extra_place
     # The kind of work in a specific title ("revenue cycle" in "revenue cycle analyst"). An alternative that has none of it ("Financial
     # Analyst") is the same role word in another field, so it counts for less than a title that names the work itself.
     domain = {s for q in queries if len(q.stems) >= 3 for s in q.stems[:-1]}
+    short_domain = {s for q in queries if len(q.stems) == 2 for s in q.stems[:-1]}  # "financial" in "financial analyst"
     for title in extra_titles or []:
         q = make_query(title, EXPANDED_WEIGHT)
         if q and len(q.stems) < 2:
@@ -103,6 +105,8 @@ def build_plan(criteria: Any, extra_titles: list[str] | None = None, extra_place
             q.weight = OTHER_FIELD_WEIGHT
         elif q and len(domain) >= 2 and shared and not domain <= set(q.stems):
             q.weight = LOOKALIKE_WEIGHT  # it borrows one word of the kind of work and drops the other: a look-alike, not an alternative
+        elif q and not domain and short_domain and not (set(q.stems) & short_domain):
+            q.weight = SHORT_OTHER_FIELD_WEIGHT  # "Security Analyst" for "financial analyst": the role word without the field
         if q and fold(title) not in seen:
             seen.add(fold(title))
             queries.append(q)

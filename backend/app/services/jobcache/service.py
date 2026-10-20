@@ -328,6 +328,14 @@ async def ranked_items(criteria: Any) -> list[dict[str, Any]]:
     return items
 
 
+async def drop_from_ranked(criteria: Any, urls: set[str]) -> None:
+    """Takes jobs that failed a check when their page was opened (no pay, too old) off this search's list, so the count and later pages are right."""
+    hit = _RANKED.get(_ranked_key(criteria))
+    if not hit or not urls:
+        return
+    _RANKED[_ranked_key(criteria)] = (hit[0], [i for i in hit[1] if i["url"] not in urls])
+
+
 async def add_to_ranked(criteria: Any, new_items: list[dict[str, Any]]) -> tuple[int, int]:
     """
     Slips jobs the web search found into this search's ranked list, at the place their match earns, so they appear on whichever

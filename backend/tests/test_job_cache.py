@@ -1825,3 +1825,12 @@ def test_a_date_window_leaves_out_a_posting_that_shows_no_date():
     assert matcher.score_row(plan, {**row, "posted_at": "2026-09-01"}, today) is None
     assert matcher.score_row(plan, {**row, "posted_at": None}, today) is None
     assert matcher.score_row(matcher.build_plan(SimpleNamespace(**{**vars(crit), "posted_within_days": None}), []), {**row, "posted_at": None}, today) is not None
+
+
+def test_a_company_name_is_taken_from_a_careers_page_title_and_generic_titles_are_refused():
+    from scripts import cache_tools
+
+    assert cache_tools.clean_found_name("KidsCare Home Health - Careers") == "KidsCare Home Health"
+    assert cache_tools.clean_found_name("Careers at Doherty Enterprises") == "Doherty Enterprises"
+    assert cache_tools.clean_found_name("PT Solutions | Jobs") == "PT Solutions"
+    assert cache_tools.clean_found_name("Search Results") is None and cache_tools.clean_found_name("Careers") is None

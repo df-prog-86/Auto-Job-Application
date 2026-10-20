@@ -43,6 +43,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import csv
+import json
 import re
 import sqlite3
 import sys
@@ -655,8 +657,130 @@ def cmd_recheck(args: argparse.Namespace) -> int:
     return 0
 
 
+_GENERIC_NAMES = {"careers", "career", "jobs", "job search", "search", "home", "search results", "career opportunities", "external", "login", "sign in", "workday", "icims", "jobvite", "bamboohr"}
+_NAME_TRAIL = re.compile(r"\s*[-|:\u2013\u2014]\s*(careers?|jobs?|job search|job openings|current openings|career opportunities|employment|join us|work with us)\b.*$|\s+(careers?|jobs?|job search|career site|career opportunities)$", re.I)
+_JOB_PREFIX = re.compile(r"^(careers?|jobs?|job search|search jobs|search results)\s*(at|[-|:\u2013\u2014])\s*", re.I)
+
+
+def clean_found_name(raw: str | None) -> str | None:
+    """A company name out of a page title ("KidsCare Home Health - Careers" -> "KidsCare Home Health"), or None when it is not a usable name."""
+    import html as _html
+
+    name = re.sub(r"\s+", " ", _html.unescape(raw or "")).strip()
+    name = _JOB_PREFIX.sub("", name)
+    name = _NAME_TRAIL.sub("", name).strip(" -|:,")
+    if not (2 <= len(name) <= 60) or name.lower() in _GENERIC_NAMES or re.search(r"\b(search|openings?|apply|login|sign in|404|not found|error)\b", name, re.I):
+        return None
+    return name
+
+
+def _home_page(ats: str, identifier: str) -> str | None:
+    """The employer's own public careers page, where its name is usually the page title."""
+    if ats == "icims":
+        return f"https://{identifier}/jobs/search?ss=1&in_iframe=1"
+    if ats == "workday" and identifier.count("|") == 2:
+        host, _tenant, site = identifier.split("|")
+        return f"https://{host}/{site}"
+    if ats == "bamboohr":
+        return f"https://{identifier}.bamboohr.com/careers"
+    if ats == "jobvite":
+        return f"https://jobs.jobvite.com/{identifier}/jobs"
+    return None
+
+
+async def _find_name(emp: dict, row_url: str | None) -> tuple[str | None, str]:
+    """(a name, where it came from). Tries the structured data of one of its job pages first, then the careers page's own title."""
+    from app.services.discovery import manual_extraction as mx
+    from app.services.jobcache.service import _description_request
+    from app.services.safe_fetch import safe_get
+
+    async def page(url: str) -> str | None:
+        try:
+            resp = await safe_get(url, headers={"User-Agent": mx._USER_AGENT, "Accept": "text/html"}, timeout=8.0)
+        except Exception:
+            return None
+        return resp.text[:400000] if resp.status_code == 200 else None
+
+    if row_url:
+        req = _description_request(row_url)
+        body = await page(req[1] if req and req[0] == "icims" else row_url)
+        for block in mx._JSONLD_PATTERN.findall(body or ""):
+            try:
+                data = json.loads(block)
+            except (ValueError, TypeError):
+                continue
+            for item in mx._flatten_jsonld(data):
+                org = item.get("hiringOrganization") if isinstance(item, dict) else None
+                found = clean_found_name(org.get("name") if isinstance(org, dict) else org if isinstance(org, str) else None)
+                if found:
+                    return found, "job page data"
+    home = _home_page(emp["ats"], emp["identifier"])
+    body = await page(home) if home else None
+    if body:
+        for pattern, label in ((r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\']([^"\']+)', "site name"), (r"<title[^>]*>([^<]+)</title>", "page title")):
+            m = re.search(pattern, body, re.I)
+            found = clean_found_name(m.group(1)) if m else None
+            if found:
+                return found, label
+    return None, ""
+
+
+async def _names_find(args: argparse.Namespace) -> int:
+    from app.services.jobcache.store import guess_name
+    from app.services.jobcache.text import clean_company
+
+    cache = JobCache()
+    with cache.session() as db:
+        emps = [dict(r) for r in db.execute("SELECT id, ats, identifier, name, open_count FROM employers WHERE enabled = 1")]
+    guessed = [e for e in emps if e["name"] == guess_name(e["ats"], e["identifier"]) and " " not in clean_company(e["name"]) and len(e["name"]) >= 7]
+    guessed.sort(key=lambda e: -(e["open_count"] or 0))
+    guessed = guessed[: args.limit]
+    print(f"Looking up the real names of {len(guessed)} employers (reads each employer's own public careers pages) ...", flush=True)
+    gate = asyncio.Semaphore(4)
+    out: list[dict] = []
+
+    async def one(e: dict) -> None:
+        async with gate:
+            with cache.session() as db:
+                r = db.execute("SELECT url FROM postings WHERE employer_id = ? AND closed_at IS NULL LIMIT 1", (e["id"],)).fetchone()
+            name, source = await _find_name(e, r["url"] if r else None)
+            await asyncio.sleep(0.7)
+        out.append({"system": e["ats"], "identifier": e["identifier"], "open_jobs": e["open_count"], "current_name": e["name"], "new_name": name or "", "found_in": source})
+
+    await asyncio.gather(*(one(e) for e in guessed))
+    out.sort(key=lambda r: -(r["open_jobs"] or 0))
+    path = Path(args.out).expanduser()
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=["system", "identifier", "open_jobs", "current_name", "new_name", "found_in"])
+        w.writeheader()
+        w.writerows(out)
+    found = sum(1 for r in out if r["new_name"])
+    print(f"Found a name for {found} of {len(out)}. Nothing has been changed yet. Review: {path}")
+    return 0
+
+
+def cmd_names_apply(args: argparse.Namespace) -> int:
+    """Writes the reviewed names from the file into the employer list (only rows with a new_name; a blank new_name changes nothing)."""
+    cache = JobCache()
+    changed = 0
+    with Path(args.apply).expanduser().open(newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    with cache.session() as db:
+        for r in rows:
+            new = (r.get("new_name") or "").strip()
+            if new and new != r["current_name"]:
+                cur = db.execute("UPDATE employers SET name = ? WHERE ats = ? AND identifier = ?", (new, r["system"], r["identifier"]))
+                changed += cur.rowcount
+    print(f"Renamed {changed} employers.")
+    return 0
+
+
 def cmd_names(args: argparse.Namespace) -> int:
-    """Shows employers whose name is still only a guess from the web address (often run together, like "Opengov"), by hiring system."""
+    """Employers whose name is still only a guess from the web address. `--find` looks the real names up and writes a file to review; `--apply FILE` saves the reviewed file."""
+    if args.apply:
+        return cmd_names_apply(args)
+    if args.find:
+        return asyncio.run(_names_find(args))
     from app.services.jobcache.store import guess_name
     from app.services.jobcache.text import clean_company
 
@@ -750,6 +874,9 @@ def main() -> None:
     f.add_argument("--retry", help="comma separated hiring systems whose unreadable postings should be tried again, e.g. icims,smartrecruiters,workable")
     nm = sub.add_parser("names")
     nm.add_argument("--limit", type=int, default=25)
+    nm.add_argument("--find", action="store_true", help="look the real names up and write a file to review (changes nothing)")
+    nm.add_argument("--out", default="~/Desktop/employer-names.csv")
+    nm.add_argument("--apply", help="save the names in this reviewed file")
     r = sub.add_parser("reread")
     r.add_argument("--db", required=True)
     r.add_argument("--only", help="comma separated hiring systems, e.g. greenhouse,lever,ashby")

@@ -1468,3 +1468,10 @@ def test_workday_address_ignores_language_and_files():
     assert employer_ref("https://3m.wd1.myworkdayjobs.com/en") is None
     assert employer_ref("https://aaaie.wd1.myworkdayjobs.com/robots.txt") is None
     assert employer_ref("https://3m.wd1.myworkdayjobs.com/en-US/Search/job/x_R1") == ("workday", "3m.wd1.myworkdayjobs.com|3m|Search")
+
+
+def test_industry_display_names_and_new_overrides():
+    from app.services.jobcache.industry import classify, DISPLAY_NAMES
+    assert classify("Hyvee", ["Produce Clerk"]) == "Retail Trade"
+    assert classify("Ngc", ["Systems Engineer"]) == "Professional, Scientific, and Technical Services"
+    assert DISPLAY_NAMES["jll"] == "JLL" and DISPLAY_NAMES["bjswholesaleclub"] == "BJ's Wholesale Club"

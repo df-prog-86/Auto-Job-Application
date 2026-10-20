@@ -50,6 +50,7 @@ import json
 import re
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 from app.config import settings
@@ -66,6 +67,62 @@ FIELDS = {
     "description": "description",
     "agency": "agency flag set",
 }
+
+
+def cmd_health(args: argparse.Namespace) -> int:
+    """One table of what still needs fixing in the saved lists, per hiring system. Reads only; changes nothing."""
+    from app.services.jobcache.store import guess_name
+    from app.services.jobcache.text import clean_company, fold, is_vague_place, names_no_town
+
+    path = Path(args.db or settings.JOB_CACHE_PATH)
+    if not path.exists():
+        print(f"No saved job lists at {path}.")
+        return 1
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=60)
+    conn.row_factory = sqlite3.Row
+    stats: dict[str, dict[str, int]] = {}
+
+    def row(ats: str) -> dict[str, int]:
+        return stats.setdefault(ats, dict.fromkeys(("employers", "guessed", "failing", "stale", "open", "vague", "state_only", "remote_city", "no_desc"), 0))
+
+    now = int(time.time())
+    for e in conn.execute("SELECT ats, identifier, name, status, enabled, last_ok FROM employers WHERE enabled = 1"):
+        r = row(e["ats"])
+        r["employers"] += 1
+        if e["name"] == guess_name(e["ats"], e["identifier"]) and " " not in clean_company(e["name"]) and len(e["name"]) >= 7:
+            r["guessed"] += 1
+        if e["status"] in ("error", "unreachable"):
+            r["failing"] += 1
+        elif e["last_ok"] is not None and now - e["last_ok"] > 3 * 86400:
+            r["stale"] += 1
+    for p in conn.execute(
+        "SELECT e.ats AS ats, p.location AS loc, p.work_type AS wt, COUNT(*) AS n, "
+        "SUM(CASE WHEN p.description_z IS NULL AND p.desc_hash IS NULL THEN 1 ELSE 0 END) AS nodesc "
+        "FROM postings p JOIN employers e ON e.id = p.employer_id WHERE p.closed_at IS NULL AND e.enabled = 1 GROUP BY e.ats, p.location, p.work_type"
+    ):
+        r = row(p["ats"])
+        r["open"] += p["n"]
+        r["no_desc"] += p["nodesc"] or 0
+        loc = p["loc"] or ""
+        if is_vague_place(loc):
+            r["vague"] += p["n"]
+        elif names_no_town(loc):
+            r["state_only"] += p["n"]
+        if p["wt"] == "remote" and loc and not names_no_town(loc) and " remote " not in f" {fold(loc)} " and "work from home" not in fold(loc):
+            r["remote_city"] += p["n"]
+    cols = [("employers", "employers"), ("guessed", "guessed names"), ("failing", "failing"), ("stale", "not read in 3d"), ("open", "open jobs"),
+            ("vague", "no real place"), ("state_only", "state only"), ("remote_city", "remote+city"), ("no_desc", "no text")]
+    print(f"Saved job lists: {path}\n{'system':16}" + "".join(f"{label:>16}" for _k, label in cols))
+    total = dict.fromkeys((k for k, _l in cols), 0)
+    for ats, r in sorted(stats.items(), key=lambda kv: -kv[1]["open"]):
+        print(f"{ats:16}" + "".join(f"{r[k]:>16,}" for k, _l in cols))
+        for k, _l in cols:
+            total[k] += r[k]
+    print(f"{'ALL':16}" + "".join(f"{total[k]:>16,}" for k, _l in cols))
+    o = total["open"] or 1
+    print(f"\nNo real place: {total['vague'] / o:.1%} of open jobs (fix: places). Guessed names: {total['guessed']} employers (fix: names). "
+          f"Remote with a city: {total['remote_city']:,} (some are real; most clear on the next read of that system).")
+    return 0
 
 
 def cmd_coverage(args: argparse.Namespace) -> int:
@@ -908,6 +965,8 @@ def main() -> None:
     sys.stdout.reconfigure(line_buffering=True)  # show each line as it happens, even when piped to a file or tee
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
+    h = sub.add_parser("health")
+    h.add_argument("--db")
     c = sub.add_parser("coverage")
     c.add_argument("--db")
     d = sub.add_parser("descriptions")
@@ -987,6 +1046,8 @@ def main() -> None:
         sys.exit(cmd_descriptions(args))
     if args.cmd == "fill":
         sys.exit(asyncio.run(_fill(args)))
+    if args.cmd == "health":
+        sys.exit(cmd_health(args))
     if args.cmd == "places":
         sys.exit(asyncio.run(_places(args)))
     if args.cmd == "reindex":

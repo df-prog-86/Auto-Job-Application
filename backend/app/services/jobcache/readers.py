@@ -444,13 +444,15 @@ def parse_smartrecruiters(data: Any, identifier: str) -> list[PostingIn]:
     return out
 
 
-async def _read_smartrecruiters(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+async def _sr_pages(identifier: str, client: httpx.AsyncClient, throttle: Throttle, extra: dict | None = None):
+    """Read one SmartRecruiters list (optionally filtered, e.g. country=us) up to the job limit. Returns (postings, name, complete)."""
     url = f"https://api.smartrecruiters.com/v1/companies/{identifier}/postings"
     postings: list[PostingIn] = []
     name: str | None = None
     complete = False
     for offset in range(0, SMARTRECRUITERS_MAX_JOBS, SMARTRECRUITERS_PAGE):
-        data = await _request(client, throttle, "smartrecruiters", "GET", url, params={"limit": SMARTRECRUITERS_PAGE, "offset": offset})
+        params = {"limit": SMARTRECRUITERS_PAGE, "offset": offset, **(extra or {})}
+        data = await _request(client, throttle, "smartrecruiters", "GET", url, params=params)
         content = data.get("content") if isinstance(data, dict) else None
         page = parse_smartrecruiters(data, identifier)
         if name is None and content:
@@ -462,7 +464,24 @@ async def _read_smartrecruiters(identifier: str, client: httpx.AsyncClient, thro
         if len(content or []) < SMARTRECRUITERS_PAGE or (isinstance(total, int) and offset + SMARTRECRUITERS_PAGE >= total):
             complete = True
             break
+    return postings, name, complete
+
+
+async def _read_smartrecruiters(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    postings, name, complete = await _sr_pages(identifier, client, throttle)
     notes = [] if complete else [f"read the first {len(postings)} jobs"]
+    if not complete:
+        # A very large employer: the list is cut off, so also read its US jobs on their own (the API filters by country)
+        # and add any the first pass missed. If this extra read fails, the first pass stands.
+        try:
+            us, _n, _done = await _sr_pages(identifier, client, throttle, {"country": "us"})
+            seen = {p.ext_id for p in postings}
+            extra = [p for p in us if p.ext_id not in seen]
+            postings.extend(extra)
+            notes = [f"read the first {len(postings) - len(extra)} jobs, plus {len(extra)} more US jobs"]
+            complete = False  # the full list is still cut off, so never treat it as complete
+        except Exception:
+            pass
     return ReadResult(postings, complete=complete, name=name, notes=notes)
 
 

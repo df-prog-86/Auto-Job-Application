@@ -50,7 +50,10 @@ _RULES: list[tuple[str, list[str], list[str]]] = [
         ["nurse", "rn", "lpn", "cna", "clinical", "patient", "physician", "therapist", "pharmacist", "pharmacy", "medical assistant",
          "surgeon", "radiology", "radiologic", "phlebotomist", "hospice", "dental", "behavioral health", "care coordinator",
          "revenue cycle", "denials", "medical coding", "prior authorization", "patient access", "clinician", "caregiver",
-         "sonographer", "paramedic", "psychiatrist", "psychologist", "counselor", "social worker", "case manager"],
+         "sonographer", "paramedic", "psychiatrist", "psychologist", "counselor", "social worker", "case manager",
+         "behavior technician", "registered behavior technician", "rbt", "bcba", "aba", "veterinarian", "veterinary", "vet tech",
+         "school psychologist", "speech language pathologist", "occupational therapist", "physical therapist", "dentist",
+         "hygienist", "optometrist", "medical receptionist", "patient service representative", "billing specialist", "coder"],
     ),
     (
         "Information",  # software publishers, internet and data companies, telecommunications, publishing, film and broadcasting

@@ -1375,3 +1375,26 @@ def test_united_states_search_means_anywhere_in_the_us():
     assert location_fit(q, "Athens, Greece", None) == 0.0
     assert location_fit(q, "Springfield", None) == 0.5  # says nothing: kept to be checked, as for any search
     assert not parse_location_query("Boston, MA").nationwide
+
+
+def test_smartrecruiters_big_employer_also_reads_us_jobs(monkeypatch):
+    """A cut-off SmartRecruiters list is topped up with the employer's US jobs, and still counts as incomplete."""
+    import asyncio
+    from app.services.jobcache import readers
+    from app.services.jobcache.readers import PostingIn
+
+    def p(i, loc):
+        return PostingIn(ext_id=str(i), title=f"Job {i}", url=f"https://x/{i}", location=loc)
+
+    calls = []
+
+    async def fake(identifier, client, throttle, extra=None):
+        calls.append(extra)
+        if extra:
+            return [p(1, "Boston, MA"), p(2, "Austin, TX")], None, True
+        return [p(1, "Boston, MA"), p(3, "Paris, France")], "Big Co", False
+
+    monkeypatch.setattr(readers, "_sr_pages", fake)
+    res = asyncio.run(readers._read_smartrecruiters("BigCo", None, None))
+    assert sorted(x.ext_id for x in res.postings) == ["1", "2", "3"]
+    assert res.complete is False and calls == [None, {"country": "us"}]

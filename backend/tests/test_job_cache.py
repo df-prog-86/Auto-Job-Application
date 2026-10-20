@@ -1398,3 +1398,12 @@ def test_smartrecruiters_big_employer_also_reads_us_jobs(monkeypatch):
     res = asyncio.run(readers._read_smartrecruiters("BigCo", None, None))
     assert sorted(x.ext_id for x in res.postings) == ["1", "2", "3"]
     assert res.complete is False and calls == [None, {"country": "us"}]
+
+
+def test_industry_hand_set_employers_win():
+    from app.services.jobcache.industry import classify
+    assert classify("AECOM", ["Project Manager"]) == "Professional, Scientific, and Technical Services"
+    assert classify("Centria Autism", ["Arabic Speaking Behavior Technician"]) == "Health Care and Social Assistance"
+    assert classify("Joyce Corp", ["Welder"]) != "Health Care and Social Assistance"  # "joya" must not catch "joyce"
+    assert classify("Accord Healthcare", ["Welder"]) != "Accommodation and Food Services"
+    assert classify("AccorHotel", ["Receptionist"]) == "Accommodation and Food Services"

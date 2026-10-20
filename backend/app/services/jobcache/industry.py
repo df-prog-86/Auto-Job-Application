@@ -173,8 +173,58 @@ NAME_WEIGHT = 0.35  # a name that says "Hospital" counts as much as a third of t
 MIN_SCORE = 0.15
 
 
+# Employers whose name and job titles do not give it away (multinationals, mixed titles, other languages), settled by hand.
+# Matched on the lower-case employer name, whole name or the start of it. A hand-set industry always wins.
+_P = "Professional, Scientific, and Technical Services"
+_M = "Manufacturing"
+_R = "Retail Trade"
+_W = "Wholesale Trade"
+_I = "Information"
+_F = "Finance and Insurance"
+_H = "Health Care and Social Assistance"
+_S = STAFFING
+_OVERRIDES: dict[str, str] = {
+    # health care
+    "centria autism": _H, "oos management": _H, "napaanesthesia": _H, "alpacahealth": _H, "allarahealth": _H, "artemed": _H,
+    "ouihelp": _H, "joya": _H, "robert bosch krankenhaus": _H,
+    # veterinary care is a professional service in NAICS (54)
+    "veterinary emergency group": _P, "veterinary practice partners": _P, "lap of love": _P, "vetevolve": _P,
+    # engineering, architecture, testing, consulting
+    "aecom": _P, "eurofins": _P, "sgs": _P, "alten": _P, "assystem": _P, "afry": _P, "socotec": _P, "cima+": _P, "olsson": _P,
+    "deloitte": _P, "labella": _P, "atwell": _P, "dlr group": _P, "woolpert": _P, "llnl": _P, "ergomed": _P, "eversana": _P,
+    "transperfect": _P, "geeks on site": _P, "actionet": _P, "credence": _P, "sosi": _P, "sqli": _P,
+    # manufacturing
+    "bosch": _M, "renesas": _M, "wabtec": _M, "aumovio": _M, "continental": _M, "syngenta": _M, "avery dennison": _M,
+    "lucid motors": _M, "kronospan": _M, "jbs": _M, "beumer": _M, "lesaffre": _M, "o-i": _M, "jacobs douwe egberts": _M, "bertelsmann-jobs": _I,
+    "gotion": _M, "stäubli": _M,
+    # retail and wholesale
+    "h&m": _R, "a.t.u": _R, "reitmans": _R, "lush": _R, "redcare": _R, "kiabi": _R, "e. breuninger": _R, "conforama": _R,
+    "groupement mousquetaires": _R, "metro/makro": _W, "baywa": _W, "rexel": _W,
+    # other sectors
+    "bertelsmann": _I, "ubisoft": _I, "zayo": _I, "informa": _I, "fluidstack": _I,
+    "acrisure": _F, "coface": _F, "xp inc": _F, "tbcbank": _F,
+    "veolia": "Utilities", "vattenfall": "Utilities", "expeditors": "Transportation and Warehousing",
+    "sixt": "Real Estate and Rental and Leasing", "renuity": "Construction", "besix": "Construction",
+    "securitas": _S, "walden security": _S, "rentokil": _S, "sutherland": _S, "wns global": _S,
+    "junior adventures": "Educational Services", "evolution": "Arts, Entertainment, and Recreation",
+    "bibibop": "Accommodation and Food Services", "accor": "Accommodation and Food Services", "accorhotel": "Accommodation and Food Services", "accorcorpo": "Accommodation and Food Services",
+    "provalliance": "Other Services (except Public Administration)", "the wonderful company": "Agriculture, Forestry, Fishing and Hunting",
+}
+
+
+def _override(name: str) -> str | None:
+    n = (name or "").strip().lower()
+    for key, sector in _OVERRIDES.items():
+        if n == key or n.startswith(key + " ") or n.startswith(key + "-") or n.startswith(key + "/"):
+            return sector
+    return None
+
+
 def classify(name: str, titles: Iterable[str]) -> str:
     """The industry of one employer, from its name and its open posting titles."""
+    fixed = _override(name)
+    if fixed:
+        return fixed
     if _STAFFING_NAME.search(name or ""):
         return STAFFING
     titles = [t for t in titles if t]

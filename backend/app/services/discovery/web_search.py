@@ -998,7 +998,7 @@ async def _check_page(criteria: JobSearchIn, plan: Any, available: list[dict[str
     page is full.
     """
     from app.services.jobcache import matcher
-    from app.services.jobcache.text import is_vague_place, lead_with_place
+    from app.services.jobcache.text import is_vague_place, lead_with_place, tidy_place
 
     kept: list[dict[str, Any]] = []
     rejected: list[str] = []
@@ -1017,8 +1017,11 @@ async def _check_page(criteria: JobSearchIn, plan: Any, available: list[dict[str
         items = merge_twin_postings(merge_same_jobs(_dedupe_by_address(batch)))
         items, _gone = await enrich_from_ats(items)
         # Opening a job often reveals where it really is (a hospital listed as "3 Locations" that is in Tacoma): check the place again now.
-        # A job that still says nothing about where it is does not belong in a search for a place. "+4 more" hides places: kept.
-        items = [i for i in items if (re.search(r"\+\d+ more", i.get("location") or "") or matcher.place_ok(plan, i.get("location"), i.get("work_type")))
+        # A job that still says nothing about where it is does not belong in a search for a place.
+        for i in items:  # places found by opening the job are the full list: the place searched goes first, then it is shortened to three
+            if i.get("location") and not is_vague_place(i["location"]):
+                i["location"] = tidy_place(lead_with_place(i["location"], wanted))
+        items = [i for i in items if matcher.place_ok(plan, i.get("location"), i.get("work_type"))
                  and not (_must_name_a_place(plan) and is_vague_place(i.get("location")) and i.get("work_type") != "remote")]
         items, _old = await fill_posted_dates(items, criteria.posted_within_days, need_pay=criteria.require_salary)
         items, _no_pay = apply_pay_rules(items, criteria)

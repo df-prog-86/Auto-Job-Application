@@ -367,7 +367,9 @@ async def resolve_vague_places(criteria: Any, items: list[dict[str, Any]], extra
     for item in todo:  # the opened pages told their dates and pay too: the next steps need not ask again
         item.pop("ats_checked", None)
         item.pop("ats_live", None)
-    return [i for i in items if id(i) not in gone]
+    # A job that still names no place was not opened (beyond the best 60, or its system did not answer): a search for a place does not
+    # show it. Each search saves the places of the next 60, so over searches the list fills in.
+    return [i for i in items if id(i) not in gone and not is_vague_place(i.get("location"))]
 
 
 async def drop_from_ranked(criteria: Any, urls: set[str]) -> None:

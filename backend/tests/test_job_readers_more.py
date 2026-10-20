@@ -351,3 +351,10 @@ def test_kpmg_cards_are_parsed_and_paged():
     res = asyncio.run(readers.read_employer("kpmg", "www.kpmguscareers.com", Client(), _NoWait()))
     assert len(res.postings) == 4 and res.complete and urls[1].endswith("?spage=2") and "spage" not in urls[0]
     assert known_name("kpmg", "www.kpmguscareers.com") == "KPMG"
+
+
+def test_workable_list_keeps_the_description_when_the_answer_carries_it():
+    w = readers.parse_workable({"name": "Acme", "jobs": [{"title": "Billing Lead", "shortcode": "AB12", "url": "https://apply.workable.com/j/AB12", "description": "<p>Own claims and denials.</p>"}]}, "acme")
+    assert "claims and denials" in w[0].description
+    plain = readers.parse_workable({"name": "Acme", "jobs": [{"title": "Billing Lead", "shortcode": "AB12"}]}, "acme")
+    assert plain[0].description is None

@@ -153,7 +153,7 @@ async def _page_description(url: str, why: dict[str, int] | None = None) -> str 
 DESC_FILL_CHARS = 2000  # the portion of a description kept when filling in gradually: what search reads, and small to store
 DESC_FILL_PER_EMPLOYER = 15  # postings read from one employer's site per refresh
 NEW_EMPLOYER_PER_EMPLOYER = 30  # postings read from a newly added employer's site, in the batch that follows its first read
-DESC_FILL_SYSTEMS_WITH_TEXT = {"greenhouse", "ashby", "lever", "jibe"}  # their lists already carry the text
+DESC_FILL_SYSTEMS_WITH_TEXT = {"greenhouse", "ashby", "lever", "jibe", "workable"}  # their lists already carry the text (Workable on each refresh)
 
 
 async def read_missing_descriptions(unread: list[tuple[int, str]], max_chars: int | None = None, mark_failures: bool = False, why: dict[str, int] | None = None) -> int:

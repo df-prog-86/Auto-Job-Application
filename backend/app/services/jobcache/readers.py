@@ -545,13 +545,14 @@ def parse_workable(data: Any, slug: str) -> list[PostingIn]:
                 ext_id=code, title=title, url=str(url), location=loc,
                 work_type=work_type_from("remote" if j.get("telecommuting") is True else None, loc, title),
                 posted_at=_date(j.get("published_on") or j.get("created_at")),
+                description=html_to_text(j.get("description")) or None,  # the list carries the text when asked for details
             )
         )
     return out
 
 
 async def _read_workable(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
-    data = await _request(client, throttle, "workable", "GET", f"https://apply.workable.com/api/v1/widget/accounts/{identifier}")
+    data = await _request(client, throttle, "workable", "GET", f"https://apply.workable.com/api/v1/widget/accounts/{identifier}?details=true")
     if not isinstance(data, dict) or "jobs" not in data:
         raise ReaderError("the site's answer was not what we expected")
     name = data.get("name") if isinstance(data.get("name"), str) and data["name"].strip() else None

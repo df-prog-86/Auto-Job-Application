@@ -1752,3 +1752,20 @@ def test_description_addresses_for_smartrecruiters_workable_and_icims_and_their_
     assert service._data_description("smartrecruiters", sr) == "Lead claims and denials work. CPC preferred."
     assert service._data_description("workable", {"description": "<p>Own billing.</p>", "requirements": "<p>Epic.</p>"}) == "<p>Own billing.</p> <p>Epic.</p>"
     assert service._data_description("workable", {}) is None
+
+
+def test_an_alternative_title_that_borrows_one_word_of_the_field_is_a_lookalike_not_an_alternative():
+    crit = SimpleNamespace(titles="revenue cycle manager", location="", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10)
+    plan = matcher.build_plan(crit, ["revenue operations manager", "revenue cycle director", "patient accounts manager"])
+    assert matcher.title_fit(plan, "Revenue Operations Manager") < matcher.MIN_TITLE_FIT  # the AI's suggestion is a different field
+    assert matcher.title_fit(plan, "Revenue Cycle Director") > 0.8  # a real alternative keeps the whole kind of work
+    assert matcher.title_fit(plan, "Patient Accounts Manager") > matcher.MIN_TITLE_FIT  # one that names none of it is another way to say the work
+
+
+def test_a_posting_open_for_over_half_a_year_ranks_below_a_fresh_one():
+    plan = matcher.build_plan(SimpleNamespace(titles="revenue cycle manager", location="", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
+    base = {"company": "X", "location": "Boston, MA", "work_type": None, "pay_mid": None, "pay_text": None, "url": "u", "title": "Revenue Cycle Manager", "description": None}
+    today = dt.date(2026, 10, 20)
+    fresh = matcher.score_row(plan, {**base, "posted_at": "2026-10-10"}, today)
+    old = matcher.score_row(plan, {**base, "posted_at": "2021-06-17"}, today)
+    assert old.fit < fresh.fit * 0.9

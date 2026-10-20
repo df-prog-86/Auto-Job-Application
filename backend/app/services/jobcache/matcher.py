@@ -36,6 +36,10 @@ MIN_TITLE_FIT = 0.35  # below this a title only shares a word or two with the se
 CANDIDATE_LIMIT = 5000  # postings read from the index per search: high enough that every real match is reached, low enough to stay fast
 EXPANDED_WEIGHT = 0.92  # an alternative title counts for a little less than the one the person typed
 OTHER_FIELD_WEIGHT = 0.72  # ...and one that names none of the kind of work typed counts for clearly less
+LOOKALIKE_WEIGHT = 0.30  # ...and one that names only PART of it ("revenue operations" for "revenue cycle") is usually a different field
+
+STALE_DAYS = 180
+STALE_FACTOR = 0.85
 
 W_TITLE, W_PLACE, W_RECENT, W_PAY, W_KEYWORD = 0.62, 0.22, 0.08, 0.04, 0.04
 W_DESC = 0.05  # added when the opening of the description names the kind of work asked for; the total is capped at 1
@@ -94,8 +98,11 @@ def build_plan(criteria: Any, extra_titles: list[str] | None = None, extra_place
         q = make_query(title, EXPANDED_WEIGHT)
         if q and len(q.stems) < 2:
             continue  # a one-word alternative ("Specialist", "Analyst") would match almost any job in the field
-        if q and domain and not (set(q.stems) & domain):
+        shared = (set(q.stems) & domain) if q else set()
+        if q and domain and not shared:
             q.weight = OTHER_FIELD_WEIGHT
+        elif q and len(domain) >= 2 and shared and not domain <= set(q.stems):
+            q.weight = LOOKALIKE_WEIGHT  # it borrows one word of the kind of work and drops the other: a look-alike, not an alternative
         if q and fold(title) not in seen:
             seen.add(fold(title))
             queries.append(q)
@@ -340,6 +347,8 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
             return None
         kw = 1.0
     fit = W_TITLE * tf + W_PLACE * lf + W_RECENT * _recency(posted, today) + W_PAY * (1.0 if mid is not None else 0.0) + W_KEYWORD * kw
+    if posted and (today - posted).days > STALE_DAYS:
+        fit *= STALE_FACTOR  # a posting open for half a year or more is often forgotten: it ranks below fresher ones
     if via_desc or desc_hit(plan, row.get("description")):
         fit += W_DESC
     return Scored(row=row, fit=round(min(fit, 1.0), 4), title_fit=tf, place_fit=lf, via_description=via_desc, needs_description=needs_text)

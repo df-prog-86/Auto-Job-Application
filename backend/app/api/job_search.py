@@ -18,6 +18,7 @@ from app.schemas.job_search import (
     ClearOut,
     CoverageOut,
     JobSearchIn,
+    JobSearchPageOut,
     JobSearchResultOut,
     JobSearchRunOut,
 )
@@ -125,6 +126,38 @@ async def run_search(payload: JobSearchIn, db: Session = Depends(get_db)) -> Job
         found += 1
     db.commit()
     return _run_out(db, found, skipped, outcome)
+
+
+@router.post("/page", response_model=JobSearchPageOut)
+async def search_page(payload: JobSearchIn, db: Session = Depends(get_db)) -> JobSearchPageOut:
+    """
+    One page of the saved-list matches (any page, quickly). The jobs shown are saved as results too, so adding, hiding and
+    scoring work on them like any other result. Jobs already in Jobs or removed are left out.
+    """
+    page = payload.page or 1
+    known: set[str] = set()
+    for (url,) in db.query(Job.canonical_application_url).all():
+        known |= loose_keys(url)
+    for (url,) in db.query(JobSearchResult.url).filter(JobSearchResult.status.in_(("removed", "added"))).all():
+        known |= loose_keys(url)
+    try:
+        items, total = await web_search.search_page(payload, known, (page - 1) * payload.count)
+    except (httpx.HTTPError, LLMError) as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="The search service didn't answer. Try again in a minute.") from exc
+    rows: list[JobSearchResult] = []
+    for item in items:
+        row = db.query(JobSearchResult).filter(JobSearchResult.url_key == item["url_key"], JobSearchResult.status == "new").first()
+        if row is None:
+            row = JobSearchResult(**item, status="new", criteria=payload.model_dump())
+            db.add(row)
+        else:
+            row.fit_score = item.get("fit_score")
+            row.fit_note = item.get("fit_note")
+        rows.append(row)
+    db.commit()
+    for row in rows:
+        db.refresh(row)
+    return JobSearchPageOut(total=total, results=[JobSearchResultOut.model_validate(r) for r in rows])
 
 
 def _get_new(db: Session, result_id: int) -> JobSearchResult:

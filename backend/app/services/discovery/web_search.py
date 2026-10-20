@@ -961,6 +961,38 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
     )
 
 
+async def search_page(criteria: JobSearchIn, known_keys: set[str], offset: int) -> tuple[list[dict[str, Any]], int]:
+    """
+    One page of the saved-list matches: (the checked results at ranks offset..offset+count, how many matches there are in all).
+    The ranked list is built once per search and reused, so any page, the last included, costs about as much as the first. Only
+    the jobs on the page are checked against the employer's system, and a recently read list needs no check at all.
+    """
+    from app.services.jobcache import matcher, service as cache_service
+
+    ranked = await cache_service.ranked_items(criteria)
+    available = [i for i in ranked if not (loose_keys(i["url"]) & known_keys)]
+    chunk = [dict(i) for i in available[offset : offset + criteria.count]]
+    if not chunk:
+        return [], len(available)
+    try:
+        extra_titles = await cache_service.expand_titles(criteria.titles)
+    except Exception:
+        extra_titles = []
+    plan = matcher.build_plan(criteria, extra_titles)
+    tidy_items(chunk)
+    items = merge_twin_postings(merge_same_jobs(_dedupe_by_address(chunk)))
+    items, _gone = await enrich_from_ats(items)
+    items, _old = await fill_posted_dates(items, criteria.posted_within_days, need_pay=criteria.require_salary)
+    items, _no_pay = apply_pay_rules(items, criteria)
+    kept, _closed = await drop_closed(items)
+    for item in kept:
+        item["fit_score"] = item.get("fit")
+        item["fit_note"] = fit_note(plan, item)
+        for key in ("ats_checked", "ats_live", "site_url", "fit", "employer_id", "_desc", "read_at"):
+            item.pop(key, None)
+    return kept, len(available)
+
+
 async def search_jobs(criteria: JobSearchIn) -> tuple[list[dict[str, Any]], int]:
     """The search as (candidate postings not yet saved, how many were dropped as closed, too old or without an original)."""
     outcome = await search_jobs_full(criteria)

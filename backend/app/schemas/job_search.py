@@ -22,6 +22,8 @@ class JobSearchIn(BaseModel):
     count: int = Field(default=10, ge=3, le=300)  # a page is 10; opening a later page asks for every job up to it at once
     # True for "Show more results": look only in the saved employer lists, which is instant and uses no AI.
     more: bool = False
+    # For the page endpoint: which page of the saved-list matches to return (10 to a page).
+    page: int | None = Field(default=None, ge=1, le=5000)
 
 
 class JobSearchResultOut(BaseModel):
@@ -71,6 +73,11 @@ class JobSearchRunOut(BaseModel):
     coverage: CoverageOut | None = None
     more_available: int = 0  # further matches in the saved lists that were not shown this time
     more_capped: bool = False
+
+
+class JobSearchPageOut(BaseModel):
+    total: int  # matches in the saved lists, not counting jobs already in Jobs or removed
+    results: list[JobSearchResultOut]  # the jobs on the requested page, best first
 
 
 class EmployerOut(BaseModel):

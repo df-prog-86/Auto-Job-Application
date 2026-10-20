@@ -95,6 +95,9 @@ export function JobSearch() {
   const [within, setWithin] = useState<JobSearchCriteria["posted_within_days"]>(saved.within ?? 0);
   const count = PAGE_SIZE;
   const [page, setPage] = useState(1);
+  // Pages after the first come from the server one at a time: the ids of the jobs on each, and how many matches there are in all.
+  const [serverPages, setServerPages] = useState<Record<number, number[]>>({});
+  const [matchTotal, setMatchTotal] = useState<number | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -114,13 +117,18 @@ export function JobSearch() {
   const results = useQuery({ queryKey: ["job-search-results"], queryFn: api.listSearchResults });
   const items = (results.data ?? []).filter((r) => r.status === "new");
   const shown = sortResults(autofillOnly ? items.filter((r) => autofillSite(r.url)) : items, sortBy);
-  // Pages of PAGE_SIZE. Pages not loaded yet are counted from the matches still waiting in the saved lists.
-  const poolSize = autofillOnly ? shown.length : shown.length + moreAvailable;
+  // Pages of PAGE_SIZE. In "Best match" order the first page is the top of what is loaded and every later page is fetched from the
+  // server on its own (so the last page is as quick as page 2). In any other order the pages are cut from what is already loaded.
+  const serverMode = sortBy === "search" && !autofillOnly;
+  const poolSize = serverMode ? (matchTotal ?? shown.length + moreAvailable) : shown.length;
   const totalPages = Math.max(1, Math.ceil(poolSize / PAGE_SIZE));
-  // Never a blank page: if some matches turned out closed and the pages ran short, the last page with jobs shows instead.
-  const loadedPages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages, loadedPages);
-  const pageItems = shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const currentPage = Math.min(page, totalPages);
+  const firstPageIds = new Set(shown.slice(0, PAGE_SIZE).map((r) => r.id));
+  const byId = new Map(items.map((r) => [r.id, r]));
+  const pageItems =
+    serverMode && currentPage > 1
+      ? (serverPages[currentPage] ?? []).map((id) => byId.get(id)).filter((r): r is JobSearchResultOut => !!r && !firstPageIds.has(r.id))
+      : shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   useEffect(() => {
     listRef.current?.scrollTo({ top: 0 });
   }, [currentPage]);
@@ -171,6 +179,8 @@ export function JobSearch() {
       setCoverage(r.coverage ?? null);
       setMoreAvailable(r.more_available ?? 0);
       setPage(1);
+      setServerPages({});
+      setMatchTotal(null);
       void qc.invalidateQueries({ queryKey: ["job-employers"] });
       setLastRun({ found: r.found });
       setNotice(
@@ -186,33 +196,27 @@ export function JobSearch() {
     onError: () => setNotice(null),
   });
 
-  /** A page not loaded yet: the next best matches from the saved employer lists, in steps of 100, until every page up to it is filled. No AI is used. */
-  const showMore = useMutation({
-    mutationFn: async ({ need }: { need: number; target: number }) => {
-      let left = need;
-      let last = await api.runJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), more: true, count: Math.max(Math.min(left, 100), PAGE_SIZE) });
-      left -= last.found;
-      while (left > 0 && last.found > 0 && (last.more_available ?? 0) > 0) {
-        last = await api.runJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), more: true, count: Math.max(Math.min(left, 100), PAGE_SIZE) });
-        left -= last.found;
-      }
-      return last;
-    },
+  /** Opens a page of the saved-list matches: only that page's jobs are fetched, so any page opens quickly. No AI is used. */
+  const openPage = useMutation({
+    mutationFn: ({ target }: { target: number }) =>
+      api.pageJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), count: PAGE_SIZE, page: target }),
     onSuccess: (r, v) => {
-      if (r.coverage) setCoverage(r.coverage);
-      setMoreAvailable(r.more_available ?? 0);
+      // the jobs go straight into the list's data, so the page shows at once while the list refreshes behind it
+      qc.setQueryData<JobSearchResultOut[]>(["job-search-results"], (old) => {
+        const have = new Set((old ?? []).map((x) => x.id));
+        return [...(old ?? []), ...r.results.filter((x) => !have.has(x.id))];
+      });
+      setServerPages((p) => ({ ...p, [v.target]: r.results.map((x) => x.id) }));
+      setMatchTotal(r.total);
       setPage(v.target);
-      setNotice(r.found > 0 ? null : { kind: "info", text: "No more matches in the saved employer lists. Search again to check the web too." });
       void qc.invalidateQueries({ queryKey: ["job-search-results"] });
     },
   });
 
-  /** Opens a page. A page that is already loaded shows at once; a later one loads the matches that lead up to it first. */
   const goToPage = (target: number) => {
-    if (showMore.isPending || target < 1 || target > totalPages || target === currentPage) return;
-    const need = target * PAGE_SIZE - shown.length;
-    if (need <= 0) setPage(target);
-    else showMore.mutate({ need, target });
+    if (openPage.isPending || target < 1 || target > totalPages || target === currentPage) return;
+    if (!serverMode || target === 1 || serverPages[target]) setPage(target);
+    else openPage.mutate({ target });
   };
 
   const add = useMutation({
@@ -549,9 +553,9 @@ export function JobSearch() {
           {errorText(search.error)}
         </p>
       )}
-      {showMore.isError && (
+      {openPage.isError && (
         <p className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700" role="alert">
-          {errorText(showMore.error)}
+          {errorText(openPage.error)}
         </p>
       )}
       {(add.isError || remove.isError || bulkError) && (
@@ -679,7 +683,7 @@ export function JobSearch() {
               </ul>
             )}
             {totalPages > 1 && (
-              <Pager page={currentPage} total={totalPages} busy={showMore.isPending} onPick={goToPage} />
+              <Pager page={currentPage} total={totalPages} busy={openPage.isPending} onPick={goToPage} />
             )}
           </div>
 

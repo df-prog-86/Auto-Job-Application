@@ -105,6 +105,40 @@ def search_sync(criteria: Any, known_keys: set[str], extra_titles: list[str] | N
     )
 
 
+# The ranked matches of a recent search, kept for ten minutes so moving between pages of one search costs almost nothing.
+_RANKED: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+RANKED_TTL_SECONDS = 600
+RANKED_KEEP = 6
+
+
+def _ranked_key(criteria: Any) -> str:
+    fields = [getattr(criteria, k, None) for k in ("titles", "location", "work_type", "keywords", "exclude_companies", "target_salary", "require_salary", "posted_within_days")]
+    return json.dumps(fields, default=str)
+
+
+async def ranked_items(criteria: Any) -> list[dict[str, Any]]:
+    """Every match in the saved lists for this search, best first. The same list is reused for ten minutes."""
+    key = _ranked_key(criteria)
+    now = time.time()
+    hit = _RANKED.get(key)
+    if hit and now - hit[0] < RANKED_TTL_SECONDS:
+        return hit[1]
+    cache = JobCache()
+    counts = await asyncio.to_thread(cache.counts)
+    if counts["postings"] == 0:
+        return []
+    extra, places = await asyncio.gather(expand_titles(criteria.titles), expand_places(getattr(criteria, "location", None)))
+    out = await asyncio.to_thread(search_sync, criteria, set(), extra, 1_000_000, places)
+    items = out.items
+    for item in items:  # the description note only tells copies of one job apart: its opening is enough, and keeps the kept lists small
+        if item.get("_desc"):
+            item["_desc"] = item["_desc"][:600]
+    _RANKED[key] = (now, items)
+    for old in sorted(_RANKED, key=lambda k: _RANKED[k][0])[: max(len(_RANKED) - RANKED_KEEP, 0)]:
+        _RANKED.pop(old, None)
+    return items
+
+
 async def expand_titles(titles: str) -> list[str]:
     """
     A few other titles employers use for the same kind of work, so a search for "revenue cycle manager" also finds

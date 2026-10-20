@@ -358,6 +358,8 @@ export interface JobSearchCriteria {
   count: number;
   /** True for "Show more results": only the saved employer lists are searched, which is instant. */
   more?: boolean;
+  /** For the page endpoint: which page of the saved-list matches to return. */
+  page?: number;
 }
 
 export interface JobSearchResultOut {
@@ -398,6 +400,11 @@ export interface JobSearchRunOut {
   coverage?: CoverageOut | null;
   more_available?: number;
   more_capped?: boolean;
+}
+
+export interface JobSearchPageOut {
+  total: number;
+  results: JobSearchResultOut[];
 }
 
 export interface EmployerOut {

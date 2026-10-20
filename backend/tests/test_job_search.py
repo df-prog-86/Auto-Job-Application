@@ -968,3 +968,45 @@ def test_pages_ask_for_many_results_and_check_enough_candidates():
     assert _pool_size(page_one) == 30  # unchanged for an ordinary search
     deep = JobSearchIn(titles="revenue cycle manager", count=190, more=True)  # opening page 20 loads everything up to it
     assert deep.count == 190 and _pool_size(deep) >= 190
+
+
+def test_any_page_of_the_saved_matches_is_cut_from_one_ranked_list(monkeypatch):
+    import asyncio
+    from app.schemas.job_search import JobSearchIn
+    from app.services.discovery import web_search as ws
+    from app.services.jobcache import service as cache_service
+
+    ranked = [
+        {"title": f"Revenue Cycle Manager {i}", "company": "Acme Health", "location": "Boston, MA", "work_type": None, "salary_text": None,
+         "posted_at": None, "summary": None, "url": f"https://acme.wd1.myworkdayjobs.com/en-US/c/job/Boston/Manager_R{i}", "url_key": f"k{i}",
+         "grounded": True, "fit": 0.9 - i / 100, "employer_id": 1, "read_at": None}
+        for i in range(25)
+    ]
+
+    async def fake_ranked(criteria):
+        return ranked
+
+    async def keep(items, *a, **k):
+        return items, 0
+
+    async def keep_dates(items, *a, **k):
+        return items, 0
+
+    monkeypatch.setattr(cache_service, "ranked_items", fake_ranked)
+    monkeypatch.setattr(ws, "enrich_from_ats", keep)
+    monkeypatch.setattr(ws, "fill_posted_dates", keep_dates)
+    monkeypatch.setattr(ws, "drop_closed", keep)
+
+    async def no_titles(titles):
+        return []
+
+    monkeypatch.setattr(cache_service, "expand_titles", no_titles)
+    c = JobSearchIn(titles="revenue cycle manager", count=10, page=3)
+    items, total = asyncio.run(ws.search_page(c, set(), 20))
+    assert total == 25 and [i["title"] for i in items] == [f"Revenue Cycle Manager {n}" for n in range(20, 25)]
+    assert all("fit" not in i and "read_at" not in i and i["fit_score"] is not None for i in items)
+    # a job already in Jobs is left out of the count and the page
+    from app.services.jobcache.keys import loose_keys
+    known = set(loose_keys(ranked[0]["url"]))
+    items, total = asyncio.run(ws.search_page(c, known, 0))
+    assert total == 24 and items[0]["title"].endswith(" 1")

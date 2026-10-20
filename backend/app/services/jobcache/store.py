@@ -417,6 +417,27 @@ class JobCache:
             )
         return result
 
+    def vague_place_postings(self, limit: int, per_employer: int) -> list[dict[str, Any]]:
+        """Open postings whose list says only "3 Locations" (or nothing): the busiest employers first, a few from each."""
+        with self.session() as db:
+            rows = db.execute(
+                "SELECT p.id, p.url, p.location, p.employer_id FROM postings p JOIN employers e ON e.id = p.employer_id "
+                "WHERE p.closed_at IS NULL AND e.enabled = 1 AND (p.location IS NULL OR p.location = '' OR p.location LIKE '%ocations%' "
+                "OR p.location LIKE '%ultiple%' OR p.location LIKE '%arious%' OR p.location LIKE '%everal%' OR p.location LIKE '%nywhere%') "
+                "ORDER BY e.hits DESC, p.first_seen DESC LIMIT ?",
+                [limit * 30],
+            ).fetchall()
+        taken: dict[int, int] = {}
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            if not is_vague_place(r["location"]) or taken.get(r["employer_id"], 0) >= per_employer:
+                continue
+            taken[r["employer_id"]] = taken.get(r["employer_id"], 0) + 1
+            out.append({"id": r["id"], "url": r["url"], "location": r["location"]})
+            if len(out) >= limit:
+                break
+        return out
+
     def set_location(self, url: str, location: str) -> bool:
         """Saves the real places of an open posting whose list only said "3 Locations" (and keeps the place index in step). False if not found."""
         location = (location or "").strip()[:300]

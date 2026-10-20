@@ -1131,3 +1131,26 @@ def test_a_page_is_filled_and_the_count_is_honest_when_jobs_fail_the_place_check
     assert total == 5 and dropped and len(dropped[0]) == 2
     _, counted = asyncio.run(ws.search_page(c, set(), 0, count_only=True))
     assert counted == 5
+
+
+def test_no_company_site_is_asked_about_more_than_three_jobs_at_once(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.services.discovery import ats, web_search
+
+    now = {"a": 0, "b": 0}
+    peak = {"a": 0, "b": 0}
+
+    async def fake_inspect(url, client, boards):
+        key = "a" if "//a." in url else "b"
+        now[key] += 1
+        peak[key] = max(peak[key], now[key])
+        await asyncio.sleep(0.01)
+        now[key] -= 1
+        return SimpleNamespace(checked=True, live=True, posted=None, pay=None, places=None)
+
+    monkeypatch.setattr(ats, "inspect", fake_inspect)
+    items = [{"url": f"https://{h}.example.com/job/{n}", "title": "x"} for h in "ab" for n in range(12)]
+    asyncio.run(web_search.enrich_from_ats(items))
+    assert 1 <= peak["a"] <= web_search.ENRICH_PER_HOST and 1 <= peak["b"] <= web_search.ENRICH_PER_HOST

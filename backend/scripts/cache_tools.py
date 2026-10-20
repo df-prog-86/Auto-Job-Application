@@ -6,6 +6,8 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
   python -m scripts.cache_tools coverage --db PATH        # the same for another copy, such as the frozen test copy
   python -m scripts.cache_tools descriptions [--title 'revenue cycle']
                                                           # how many open postings have a saved description, by hiring system (read only)
+  python -m scripts.cache_tools places [--limit 150] [--rounds 20] [--per-employer 10] [--pause 2]
+                                                          # opens postings listed as "3 Locations" and saves where they are.
   python -m scripts.cache_tools fill [--limit 150] [--system workday,icims] [--rounds 100] [--per-employer 15] [--pause 2]
                                                           # runs the description fill now: one batch, or many in a row for an overnight catch-up.
                                                           # Reads a few postings per employer per batch; safe to stop with Ctrl+C and to run again.
@@ -174,6 +176,28 @@ async def _fill(args: argparse.Namespace) -> int:
         for reason, count in sorted(why.items(), key=lambda kv: -kv[1]):
             print(f"  {count:>4}  {reason}")
     print(f"Postings still waiting for a description: {cache.count_postings_without_description(skip)} (was {waiting_before})")
+    return 0
+
+
+async def _places(args: argparse.Namespace) -> int:
+    """Finds where postings listed as "3 Locations" really are, a few from each employer at a time, so first searches are faster."""
+    from app.services.jobcache import service
+
+    cache = JobCache()
+    tried_all = saved_all = 0
+    try:
+        for n in range(1, max(args.rounds, 1) + 1):
+            tried, saved = await service.fill_places(cache, args.limit, args.per_employer)
+            if not tried:
+                print("No multi-location postings left to open.")
+                break
+            tried_all += tried
+            saved_all += saved
+            print(f"  batch {n}/{args.rounds}: opened {tried}, found places for {saved} (running total {saved_all})", flush=True)
+            await asyncio.sleep(args.pause)
+    except KeyboardInterrupt:
+        print("Stopped. What was saved is kept.")
+    print(f"Opened {tried_all} postings: {saved_all} now have their real places saved.")
     return 0
 
 
@@ -896,6 +920,11 @@ def main() -> None:
     f.add_argument("--per-employer", type=int, default=15, help="most postings read from one employer per batch")
     f.add_argument("--pause", type=float, default=2.0, help="seconds to wait between batches")
     f.add_argument("--retry", help="comma separated hiring systems whose unreadable postings should be tried again, e.g. icims,smartrecruiters,workable")
+    pl = sub.add_parser("places")
+    pl.add_argument("--limit", type=int, default=150, help="postings to open in this batch")
+    pl.add_argument("--rounds", type=int, default=1, help="how many batches to run in a row")
+    pl.add_argument("--per-employer", type=int, default=10, help="most postings opened from one employer per batch")
+    pl.add_argument("--pause", type=float, default=2.0, help="seconds to wait between batches")
     nm = sub.add_parser("names")
     nm.add_argument("--limit", type=int, default=25)
     nm.add_argument("--find", action="store_true", help="look the real names up and write a file to review (changes nothing)")
@@ -958,6 +987,8 @@ def main() -> None:
         sys.exit(cmd_descriptions(args))
     if args.cmd == "fill":
         sys.exit(asyncio.run(_fill(args)))
+    if args.cmd == "places":
+        sys.exit(asyncio.run(_places(args)))
     if args.cmd == "reindex":
         sys.exit(cmd_reindex(args))
     if args.cmd == "names":

@@ -482,12 +482,19 @@ async def upgrade_to_ats_links(items: list[dict[str, Any]]) -> list[dict[str, An
     return out
 
 
+ENRICH_PARALLEL = 16  # postings opened at the same time across all sites
+ENRICH_PER_HOST = 3  # ...and at the same time at any one company's site
+
+
 async def enrich_from_ats(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
     """
     Asks Workday, Greenhouse, Ashby and Lever themselves whether each posting is open and when it was published.
     Clearly closed ones are removed; the date fills in when the search did not give one.
     """
-    gate = asyncio.Semaphore(6)
+    # Many postings are opened at once, but never more than three at one company's site, so no site is read hard (that is also
+    # what keeps a hiring system from turning the requests away). Different sites are read side by side.
+    gate = asyncio.Semaphore(ENRICH_PARALLEL)
+    host_gates: dict[str, asyncio.Semaphore] = {}
     boards: dict[str, tuple[int, Any]] = {}
     now = time.time()
     async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
@@ -503,7 +510,8 @@ async def enrich_from_ats(items: list[dict[str, Any]]) -> tuple[list[dict[str, A
                 item["ats_checked"] = True
                 item["ats_live"] = True
                 return
-            async with gate:
+            host = urlsplit(item["url"]).netloc.lower()
+            async with host_gates.setdefault(host, asyncio.Semaphore(ENRICH_PER_HOST)), gate:
                 info = await ats.inspect(item["url"], client, boards)
             if not info.checked:
                 return

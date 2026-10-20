@@ -117,7 +117,9 @@ export function JobSearch() {
   // Pages of PAGE_SIZE. Pages not loaded yet are counted from the matches still waiting in the saved lists.
   const poolSize = autofillOnly ? shown.length : shown.length + moreAvailable;
   const totalPages = Math.max(1, Math.ceil(poolSize / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
+  // Never a blank page: if some matches turned out closed and the pages ran short, the last page with jobs shows instead.
+  const loadedPages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages, loadedPages);
   const pageItems = shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   useEffect(() => {
     listRef.current?.scrollTo({ top: 0 });
@@ -184,9 +186,18 @@ export function JobSearch() {
     onError: () => setNotice(null),
   });
 
-  /** A page not loaded yet: the next best matches from the saved employer lists, enough to fill every page up to it. No AI is used. */
+  /** A page not loaded yet: the next best matches from the saved employer lists, in steps of 100, until every page up to it is filled. No AI is used. */
   const showMore = useMutation({
-    mutationFn: ({ need }: { need: number; target: number }) => api.runJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), more: true, count: need }),
+    mutationFn: async ({ need }: { need: number; target: number }) => {
+      let left = need;
+      let last = await api.runJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), more: true, count: Math.max(Math.min(left, 100), PAGE_SIZE) });
+      left -= last.found;
+      while (left > 0 && last.found > 0 && (last.more_available ?? 0) > 0) {
+        last = await api.runJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), more: true, count: Math.max(Math.min(left, 100), PAGE_SIZE) });
+        left -= last.found;
+      }
+      return last;
+    },
     onSuccess: (r, v) => {
       if (r.coverage) setCoverage(r.coverage);
       setMoreAvailable(r.more_available ?? 0);
@@ -201,7 +212,7 @@ export function JobSearch() {
     if (showMore.isPending || target < 1 || target > totalPages || target === currentPage) return;
     const need = target * PAGE_SIZE - shown.length;
     if (need <= 0) setPage(target);
-    else showMore.mutate({ need: Math.min(Math.max(need, PAGE_SIZE), 300), target }); // never fewer than a page: the search asks for at least 3
+    else showMore.mutate({ need, target });
   };
 
   const add = useMutation({

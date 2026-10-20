@@ -97,6 +97,7 @@ async def _page_description(url: str) -> str | None:
 
 DESC_FILL_CHARS = 2000  # the portion of a description kept when filling in gradually: what search reads, and small to store
 DESC_FILL_PER_EMPLOYER = 15  # postings read from one employer's site per refresh
+NEW_EMPLOYER_PER_EMPLOYER = 30  # postings read from a newly added employer's site, in the batch that follows its first read
 DESC_FILL_SYSTEMS_WITH_TEXT = {"greenhouse", "ashby", "lever", "jibe"}  # their lists already carry the text
 
 
@@ -146,15 +147,17 @@ async def read_missing_descriptions(unread: list[tuple[int, str]], max_chars: in
     return saved
 
 
-async def fill_descriptions_gradually(cache: JobCache) -> int:
+async def fill_descriptions_gradually(cache: JobCache, employer_ids: list[int] | None = None, per_employer: int | None = None, budget: int | None = None) -> int:
     """
     After each refresh, reads a small batch of postings that have no saved description and keeps the first part of each. Over
     many refreshes the saved lists gain descriptions without any one employer's site being read hard. Returns how many were saved.
     """
-    budget = settings.JOB_CACHE_DESCRIPTION_FILL
-    if budget <= 0:
+    budget = settings.JOB_CACHE_DESCRIPTION_FILL if budget is None else budget
+    if budget <= 0 or (employer_ids is not None and not employer_ids):
         return 0
-    todo = await asyncio.to_thread(cache.postings_without_description, budget, DESC_FILL_PER_EMPLOYER, DESC_FILL_SYSTEMS_WITH_TEXT)
+    todo = await asyncio.to_thread(
+        cache.postings_without_description, budget, per_employer or DESC_FILL_PER_EMPLOYER, DESC_FILL_SYSTEMS_WITH_TEXT, employer_ids
+    )
     return await read_missing_descriptions(todo, max_chars=DESC_FILL_CHARS, mark_failures=True)
 
 
@@ -524,6 +527,7 @@ async def _refresh_async(only_ids: list[int] | None, limit: int, max_seconds: fl
     sem = asyncio.Semaphore(CONCURRENT_EMPLOYERS)
     throttle = Throttle()
     tallies = {"ok": 0, "failed": 0, "new": 0, "closed": 0, "skipped": 0}
+    first_reads: list[int] = []  # employers read for the first time: their descriptions are pulled in with them
 
     async with make_client() as client:
 
@@ -541,6 +545,8 @@ async def _refresh_async(only_ids: list[int] | None, limit: int, max_seconds: fl
                     priority = emp["source"] in ("saved_job", "user_link") or emp["hits"] > 0
                     done = cache.apply_refresh(emp["id"], result.postings, now_ts(), PRIORITY_HOURS if priority else REGULAR_HOURS, result.complete)
                     tallies["ok"] += 1
+                    if done.new and done.new >= done.total:
+                        first_reads.append(emp["id"])
                     tallies["new"] += done.new
                     tallies["closed"] += done.closed
                     log.warning(
@@ -560,7 +566,10 @@ async def _refresh_async(only_ids: list[int] | None, limit: int, max_seconds: fl
 
         await asyncio.gather(*(one(e) for e in due))
     try:
-        filled = await fill_descriptions_gradually(cache)
+        filled = 0
+        if first_reads and settings.JOB_CACHE_DESCRIPTION_FILL > 0:  # a newly found employer gets a bigger first batch, so it is searchable by meaning from the start
+            filled += await fill_descriptions_gradually(cache, first_reads, NEW_EMPLOYER_PER_EMPLOYER, NEW_EMPLOYER_PER_EMPLOYER * len(first_reads))
+        filled += await fill_descriptions_gradually(cache)
     except Exception:
         log.exception("job cache: could not fill in descriptions")
         filled = 0

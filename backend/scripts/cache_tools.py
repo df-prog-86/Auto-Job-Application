@@ -364,12 +364,14 @@ async def _add(args: argparse.Namespace) -> int:
                 eid, created = cache.upsert_employer(system, ident, res.name or "", args.source)
                 if created:
                     cache.apply_refresh(eid, res.postings, now_ts(), 6.0, res.complete)
+                    new_ids.append(eid)
                 tally["added"] += 1
                 print(f"  ADDED {spec}  {why}", flush=True)
             else:
                 tally["added"] += 1
                 print(f"  ADD   {spec}  {why}", flush=True)
 
+    new_ids: list[int] = []
     async with make_client() as client:
         await asyncio.gather(*(one(s, client) for s in specs))
     print(f"\n{tally['added']} {'added' if args.apply else 'would be added'}, {tally['skipped']} skipped.", flush=True)
@@ -378,6 +380,12 @@ async def _add(args: argparse.Namespace) -> int:
 
         with cache.session() as db:
             tag_employers(db)  # the new employers get an industry (employers that already have one are left alone)
+        if new_ids:  # a first batch of descriptions comes in with each new employer
+            from app.services.jobcache import service as _svc
+
+            per = _svc.NEW_EMPLOYER_PER_EMPLOYER
+            got = await _svc.fill_descriptions_gradually(cache, new_ids, per, per * len(new_ids))
+            print(f"Saved {got} job descriptions from the new employers' postings (the rest fill in gradually).", flush=True)
         # employers whose lists stopped at Workday's old 2,000-job cutoff are read again so the rest of their jobs come in
         with cache.session() as db:
             capped = [r["id"] for r in db.execute(

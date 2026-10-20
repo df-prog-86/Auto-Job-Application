@@ -1731,3 +1731,13 @@ def test_descriptions_are_filled_in_gradually_a_few_per_employer_and_never_retri
     pid = todo[0][0]
     assert cache.set_description(pid, "x" * 5000, max_chars=2000)
     assert pid not in [i for i, _u in cache.postings_without_description(50, 3, {"greenhouse"})]
+
+
+def test_a_new_employers_postings_can_be_filled_in_on_their_own():
+    cache = JobCache()
+    old, _ = cache.upsert_employer("icims", "oldco", "Old Co", "search")
+    new, _ = cache.upsert_employer("icims", "newco", "New Co", "search")
+    for eid, name in ((old, "oldco"), (new, "newco")):
+        cache.apply_refresh(eid, [PostingIn(ext_id=str(n), title=f"Analyst {n}", url=f"https://{name}.icims.com/jobs/{n}/job", location="Boston, MA") for n in range(5)], 1_000_000)
+    only_new = cache.postings_without_description(50, 30, None, [new])
+    assert len(only_new) == 5 and all("newco" in u for _i, u in only_new)

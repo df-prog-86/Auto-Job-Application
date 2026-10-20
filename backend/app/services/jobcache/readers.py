@@ -96,6 +96,10 @@ def employer_ref(url: str) -> tuple[str, str] | None:
             segs = segs[1:]
         if not segs or segs[0] in ("job", "jobs", "login", "apply"):
             return None
+        site = segs[0]
+        # a bare language ("en", "es"), a file ("robots.txt") or a Workday system folder is never a career site name
+        if "." in site or re.fullmatch(r"[a-z]{2}", site) or site.lower() in ("wday", "assets", "favicon", "static", "sitemap", "pages", "cxs"):
+            return None
         return "workday", f"{host}|{host.split('.')[0]}|{segs[0]}"
     if host in ("boards.greenhouse.io", "job-boards.greenhouse.io", "job-boards.eu.greenhouse.io", "boards.eu.greenhouse.io"):
         embedded = re.search(r"(?:^|&)for=([\w-]+)", parts.query or "")

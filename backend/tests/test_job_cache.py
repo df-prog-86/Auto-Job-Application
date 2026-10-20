@@ -1461,3 +1461,10 @@ def test_talentbrew_parse_and_link():
     assert readers.parse_talentbrew({"results": "", "hasJobs": True}, "x") == ([], None)
     assert readers.employer_ref("https://careers.unitedhealthgroup.com/job/minnetonka/healthcare-analytics-consultant/34088/101882693968") == ("talentbrew", "careers.unitedhealthgroup.com")
     assert readers.reader_url_allowed("https://careers.unitedhealthgroup.com/search-jobs/results?CurrentPage=1")
+
+
+def test_workday_address_ignores_language_and_files():
+    from app.services.jobcache.readers import employer_ref
+    assert employer_ref("https://3m.wd1.myworkdayjobs.com/en") is None
+    assert employer_ref("https://aaaie.wd1.myworkdayjobs.com/robots.txt") is None
+    assert employer_ref("https://3m.wd1.myworkdayjobs.com/en-US/Search/job/x_R1") == ("workday", "3m.wd1.myworkdayjobs.com|3m|Search")

@@ -340,7 +340,7 @@ def location_fit(q: LocationQuery, location: str | None, work_type: str | None) 
     wanted_states = q.states
     posting_states = _states_in(loc)
     foreign = any(f" {c} " in folded for c in _NON_US) and not posting_states and " united states " not in folded and " usa " not in folded and " us " not in folded
-    if foreign and (wanted_states or not q.cities):
+    if foreign:  # the launch market is the US: a job placed in another country is never shown, remote or not
         return 0.0
     if q.nationwide:  # anywhere in the US: a US place counts fully, a place that says nothing is kept to be checked
         us_place = bool(posting_states) or " united states " in folded or " usa " in folded
@@ -409,10 +409,19 @@ COMPANY_NAMES = {
     "appfolio": "AppFolio",
     "sofi": "SoFi",
     "athenahealth": "athenahealth",
+    "bmc": "BMC",
+    "bestwestern": "Best Western",
+    "livekit": "LiveKit",
+    "gomining": "GoMining",
+    "launchdarkly": "LaunchDarkly",
+    "brightwheel": "Brightwheel",
+    "dialysisclinic": "Dialysis Clinic",
+    "careerschwab": "Charles Schwab",
 }
 # A run-together name ("Examplehealth") gets a space before a common last word ("Example Health").
 _NAME_TAILS = ("health", "healthcare", "biosciences", "pharma", "therapeutics", "systems", "software", "labs",
-               "technologies", "medical", "financial", "capital", "solutions", "analytics", "networks")
+               "technologies", "medical", "financial", "capital", "solutions", "analytics", "networks", "clinic", "hospital",
+               "institute", "foundation", "university", "pharmacy")
 _RUN_TOGETHER = re.compile(r"^[A-Za-z]{7,}$")
 _ORG_CODE = re.compile(r"^(?:[A-Za-z]{1,4}\d{2,6}|\d{3,6})\s+(?=\S)")  # "1000 Abbott ...", "LE001 Berkeley ..."
 _TRAIL_CODE = re.compile(r"\s*\((?:[A-Za-z]{2,6})\)\s*$")  # "Inc(ALI)"
@@ -437,6 +446,23 @@ def clean_company(name: str | None) -> str:
                 return f"{out[: len(out) - len(tail)].capitalize()} {tail.capitalize()}"
         return out.capitalize()
     return out
+
+
+_CITY_DASH_STATE = re.compile(r"^([A-Za-z][A-Za-z .'\u2019]+)-([A-Z]{2})$")
+
+
+def tidy_place(location: str | None) -> str | None:
+    """A place written the usual way: "Newton-MA" -> "Newton, MA", "Austin,TX" -> "Austin, TX", a list of ten cities -> three and "+7 more"."""
+    if not location:
+        return location
+    parts = []
+    for part in re.split(r"\s*;\s*", location.strip()):
+        m = _CITY_DASH_STATE.match(part)
+        part = f"{m.group(1).strip()}, {m.group(2)}" if m else part
+        parts.append(re.sub(r",(?=\S)", ", ", part))
+    if len(parts) > 3:
+        return "; ".join(parts[:3]) + f" +{len(parts) - 3} more"
+    return "; ".join(parts)
 
 
 _REQ_CODE = re.compile(r"\s*(?:[(\[]\s*[A-Za-z]{0,6}[- ]?\d{2,8}\s*[)\]]|[-\u2013|]\s*(?:req|job|id)?\s*#?[A-Za-z]{0,5}-?\d{3,}|#\s*\d{3,})\s*$", re.I)

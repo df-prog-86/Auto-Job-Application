@@ -686,9 +686,11 @@ def merge_same_jobs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def tidy_items(items: list[dict[str, Any]]) -> None:
     """Employer names and titles in plain words, in place: no system codes, no "at <Employer>" tails."""
-    from app.services.jobcache.text import clean_company, clean_title
+    from app.services.jobcache.text import clean_company, clean_title, tidy_place
 
     for item in items:
+        if item.get("location"):
+            item["location"] = tidy_place(item["location"])
         raw_company = item.get("company") or ""
         item["title"] = clean_title(item.get("title"), raw_company) or item.get("title") or ""
         item["company"] = clean_company(raw_company) or raw_company

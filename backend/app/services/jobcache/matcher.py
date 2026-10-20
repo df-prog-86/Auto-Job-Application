@@ -241,6 +241,8 @@ def title_fit(plan: Plan, title: str) -> float:
         phrase = 1.0 if _contiguous(q.stems, p_content) else (0.6 if coverage == 1.0 else 0.0)
         precision = min(1.0, len(have) / max(len(p_content), 1))
         score = 0.5 * coverage + 0.3 * phrase + 0.2 * precision
+        if len(q.stems) >= 3 and q.stems[-2] not in p_set:
+            score *= 0.6  # the word that names the field ("cycle" in "revenue cycle manager") is missing: "Revenue Operations Manager" is not it
         if q.level is not None and p_level is not None:
             score -= min(0.3, 0.12 * abs(q.level - p_level))
         elif p_level is not None and p_level <= 1 and (q.level is None or q.level > 1):

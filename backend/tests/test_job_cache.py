@@ -1625,3 +1625,23 @@ async def test_web_finds_are_ranked_into_the_list_by_their_match_not_added_at_th
     assert (added, total) == (1, 4)
     order = [i["title"] for i in service._RANKED[service._ranked_key(crit)][1]]
     assert order == ["Analyst 1", "Analyst W", "Analyst 2", "Analyst 3"]  # between the 0.95 and the 0.80, not last
+
+
+def test_places_are_written_the_usual_way_and_long_lists_are_shortened():
+    assert text.tidy_place("Newton-MA") == "Newton, MA"
+    assert text.tidy_place("Austin,TX") == "Austin, TX"
+    assert text.tidy_place("Atlanta, GA; Boston, MA; Chicago, IL; Dallas, TX; Denver, CO") == "Atlanta, GA; Boston, MA; Chicago, IL +2 more"
+    assert text.tidy_place("Remote - US") == "Remote - US"
+    assert text.clean_company("Dialysisclinic") == "Dialysis Clinic"
+
+
+def test_a_job_in_another_country_is_never_shown_even_when_the_search_names_a_city_without_a_state():
+    california = text.parse_location_query("Boston")
+    assert text.location_fit(california, "Cyprus", "remote") == 0.0
+    assert text.location_fit(california, "Boston, MA", None) == 1.0
+
+
+def test_revenue_operations_is_not_revenue_cycle():
+    plan = matcher.build_plan(SimpleNamespace(titles="revenue cycle manager", location="", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
+    assert matcher.title_fit(plan, "Revenue Cycle Manager") > 0.9
+    assert matcher.title_fit(plan, "Senior Revenue Operations Manager") < matcher.MIN_TITLE_FIT

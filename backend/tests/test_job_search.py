@@ -921,7 +921,7 @@ def _plan(**kw):
     from app.services.jobcache import matcher
 
     base = dict(titles="consultant", location="Boston, MA", work_type="any", keywords="revenue cycle", target_salary=80000,
-                require_salary=True, posted_within_days=7, exclude_companies=None)
+                require_salary=True, posted_within_days=None, exclude_companies=None)
     extra = kw.pop("extra", None)
     base.update(kw)
     return matcher.build_plan(SimpleNamespace(**base), extra)

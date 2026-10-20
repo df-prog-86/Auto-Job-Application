@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.services.jobcache.text import (
-    REMOTE_ELSEWHERE,
     SENIORITY_ONLY,
     STATE_BY_NAME,
     STOPWORDS,
@@ -36,7 +35,6 @@ from app.services.jobcache.text import (
 
 MIN_TITLE_FIT = 0.35  # below this a title only shares a word or two with the search: left out
 CANDIDATE_LIMIT = 5000  # postings read from the index per search: high enough that every real match is reached, low enough to stay fast
-REMOTE_BEHIND = 0.6  # remote jobs in a city search rank at 60% of what the same job would score in the city
 EXPANDED_WEIGHT = 0.92  # an alternative title counts for a little less than the one the person typed
 OTHER_FIELD_WEIGHT = 0.72  # ...and one that names none of the kind of work typed counts for clearly less
 SHORT_OTHER_FIELD_WEIGHT = 0.55  # an alternative to a two-word title ("financial analyst") that drops the field word: shown, but never a strong match
@@ -362,8 +360,6 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
         fit *= STALE_FACTOR  # a posting open for half a year or more is often forgotten: it ranks below fresher ones
     if via_desc or desc_hit(plan, row.get("description")):
         fit += W_DESC
-    if plan.loc.cities and plan.loc.remote and lf == REMOTE_ELSEWHERE:
-        fit *= REMOTE_BEHIND  # "also show remote jobs": they come after the jobs in the city and its area, not mixed in with them
     return Scored(row=row, fit=round(min(fit, 1.0), 4), title_fit=tf, place_fit=lf, via_description=via_desc, needs_description=needs_text)
 
 

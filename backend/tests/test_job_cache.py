@@ -1659,3 +1659,58 @@ def test_the_description_decides_between_look_alike_titles():
     assert matcher.description_signal(plan, rev) == 1
     assert matcher.description_signal(plan, ops) == -1
     assert matcher.description_signal(plan, None) == 0 and matcher.description_signal(plan, "Short text.") == 0
+
+
+def test_a_partly_matching_title_with_no_saved_text_is_flagged_for_reading():
+    plan = matcher.build_plan(SimpleNamespace(titles="revenue cycle manager", location="", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
+    base = {"company": "X", "location": "Boston, MA", "work_type": None, "posted_at": "2026-10-18", "pay_mid": None, "pay_text": None, "url": "u"}
+    flagged = matcher.score_row(plan, {**base, "title": "Revenue Cycle Supervisor", "description": None})
+    assert flagged is not None and flagged.needs_description
+    exact = matcher.score_row(plan, {**base, "title": "Revenue Cycle Manager", "description": None})
+    assert exact is not None and not exact.needs_description
+    ops = "Own the CRM, pipeline forecasting and sales alignment for revenue growth. " * 6
+    assert matcher.score_row(plan, {**base, "title": "Revenue Cycle Supervisor", "description": ops}) is None
+
+
+def test_workday_descriptions_are_read_once_and_saved(monkeypatch):
+    import asyncio
+
+    import httpx
+
+    cache = JobCache()
+    eid, _ = cache.upsert_employer("workday", "acme.wd1.myworkdayjobs.com|acme|Careers", "Acme", "user_link")
+    url = "https://acme.wd1.myworkdayjobs.com/en-US/Careers/job/Boston/Revenue-Cycle-Supervisor_R1"
+    cache.apply_refresh(eid, [PostingIn(ext_id="/job/Boston/Revenue-Cycle-Supervisor_R1", title="Revenue Cycle Supervisor", url=url, location="Boston, MA")], 1_000_000)
+    pid = JobCache().candidates("revenue", [], 10, None)[0]["id"]
+    asked = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        asked.append(str(request.url))
+        return httpx.Response(200, json={"jobPostingInfo": {"jobDescription": "<p>Lead the revenue cycle team: claims, denials and payer follow-up.</p>" * 6}})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    assert asyncio.run(service.read_missing_descriptions([(pid, url)])) == 1
+    assert asked == ["https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/Careers/job/Boston/Revenue-Cycle-Supervisor_R1"]
+    saved = JobCache().candidates("revenue", [], 10, None)[0]["description"]
+    assert saved and "claims, denials" in saved
+
+
+def test_a_posting_page_without_an_api_gives_its_description_from_its_structured_data(monkeypatch):
+    import asyncio
+
+    from app.services import safe_fetch
+
+    page = '<html><script type="application/ld+json">{"@type": "JobPosting", "title": "Billing Lead", "description": "<p>Own claims, denials and payer follow-up.</p>"}</script></html>'
+
+    async def fake_get(url, **kw):
+        return SimpleNamespace(status_code=200, text=page)
+
+    monkeypatch.setattr(safe_fetch, "safe_get", fake_get)
+    assert "denials" in asyncio.run(service._page_description("https://careers-acme.icims.com/jobs/1/billing-lead/job"))
+
+    async def blocked(url, **kw):
+        return SimpleNamespace(status_code=403, text="")
+
+    monkeypatch.setattr(safe_fetch, "safe_get", blocked)
+    assert asyncio.run(service._page_description("https://careers-acme.icims.com/jobs/1/billing-lead/job")) is None

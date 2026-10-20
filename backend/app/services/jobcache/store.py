@@ -472,6 +472,18 @@ class JobCache:
         """True once the description index has been built for the postings already saved (see reindex_descriptions)."""
         return self.has_desc and self.meta_get(DESC_READY_KEY) == "1"
 
+    def set_description(self, posting_id: int, text_: str) -> bool:
+        """Saves the text of one posting (and its place in the description index). False when there was nothing to save."""
+        blob, fingerprint = pack_description(text_)
+        if not blob:
+            return False
+        with self.session() as db:
+            db.execute("UPDATE postings SET description_z = ?, desc_hash = ? WHERE id = ?", (blob, fingerprint, posting_id))
+            if self.has_desc and desc_lead(text_):
+                db.execute("DELETE FROM postings_desc_fts WHERE rowid = ?", (posting_id,))
+                self._desc_insert(db, [(posting_id, desc_lead(text_))])
+        return True
+
     def reindex_descriptions(self, batch: int = 2000, progress: Any = None) -> int:
         """
         Builds the description index for every open posting that has a saved description and is not in it yet. Safe to run

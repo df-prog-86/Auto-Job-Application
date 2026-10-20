@@ -42,6 +42,7 @@ def disabled_systems() -> set[str]:
 @dataclass
 class CacheOutcome:
     items: list[dict[str, Any]] = field(default_factory=list)
+    unread: list[tuple[int, str]] = field(default_factory=list)  # (posting id, link) of partly matching jobs with no saved text
     matches: int = 0  # postings that fit and were not already shown or saved
     matches_capped: bool = False  # True when the search read its limit of candidates, so there may be more
     coverage: dict[str, Any] = field(default_factory=dict)
@@ -66,6 +67,73 @@ def to_item(scored: matcher.Scored) -> dict[str, Any]:
         "employer_id": r["eid"],
         "read_at": r.get("read_ok"),  # when the employer's list was last read; lets the search skip a second check on a fresh list
     }
+
+
+UNREAD_LOOK = 400  # how far down the ranking a partly matching job is worth reading
+UNREAD_FETCH = 40  # postings read per search; each is saved, so a repeat search reads nothing new
+
+
+async def _page_description(url: str) -> str | None:
+    """The description a posting page publishes as structured data (schema.org JobPosting), or None. Pages that block or lack it are skipped."""
+    from app.services.discovery import manual_extraction as mx
+    from app.services.safe_fetch import safe_get
+
+    try:
+        resp = await safe_get(url, headers={"User-Agent": mx._USER_AGENT, "Accept": "text/html"}, timeout=8.0)
+    except Exception:
+        return None
+    if resp.status_code != 200:
+        return None
+    for block in mx._JSONLD_PATTERN.findall(resp.text[:600000]):
+        try:
+            data = json.loads(block)
+        except (ValueError, TypeError):
+            continue
+        for item in mx._flatten_jsonld(data):
+            if mx._is_job_posting(item) and isinstance(item.get("description"), str) and item["description"].strip():
+                return item["description"]
+    return None
+
+
+async def read_missing_descriptions(unread: list[tuple[int, str]]) -> int:
+    """
+    Most hiring systems' job lists carry no description, but each posting can be read on its own: Workday as data, the others
+    from the structured job details every posting page publishes for search engines. The few that only partly match the search
+    are read here and saved, so the description can decide whether they belong. Returns how many were saved.
+    """
+    import httpx
+
+    from app.services.discovery.ats import workday_api_url
+    from app.services.jobcache.readers import USER_AGENT
+    from app.services.jobcache.text import html_to_text
+
+    if not unread:
+        return 0
+    cache = JobCache()
+    gate = asyncio.Semaphore(8)
+    saved = 0
+
+    async with httpx.AsyncClient(timeout=8.0, follow_redirects=False, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}) as client:
+
+        async def one(posting_id: int, url: str) -> None:
+            nonlocal saved
+            api = workday_api_url(url)
+            try:
+                async with gate:
+                    if api:
+                        resp = await client.get(api)
+                        info = (resp.json() or {}).get("jobPostingInfo") or {} if resp.status_code == 200 else {}
+                        markup = info.get("jobDescription")
+                    else:
+                        markup = await _page_description(url)
+                text_ = html_to_text(markup)
+                if text_ and await asyncio.to_thread(cache.set_description, posting_id, text_):
+                    saved += 1
+            except Exception:  # one posting that cannot be read is simply left as it was
+                return
+
+        await asyncio.gather(*(one(i, u) for i, u in unread))
+    return saved
 
 
 def search_sync(criteria: Any, known_keys: set[str], extra_titles: list[str] | None, pool: int, extra_places: list[str] | None = None) -> CacheOutcome:
@@ -97,7 +165,9 @@ def search_sync(criteria: Any, known_keys: set[str], extra_titles: list[str] | N
     rows = [r for r in rows if r["ats"] not in off]
     scored = matcher.diversify(matcher.rank(plan, rows))
     fresh = [s for s in scored if not (loose_keys(s.row["url"]) & known_keys)]
+    unread = [(s.row["id"], s.row["url"]) for s in fresh[:UNREAD_LOOK] if s.needs_description][:UNREAD_FETCH]
     return CacheOutcome(
+        unread=unread,
         items=[to_item(s) for s in fresh[:pool]],
         matches=len(fresh),
         matches_capped=capped,
@@ -153,6 +223,12 @@ async def ranked_items(criteria: Any) -> list[dict[str, Any]]:
         return []
     extra, places = await asyncio.gather(expand_titles(criteria.titles), expand_places(getattr(criteria, "location", None)))
     out = await asyncio.to_thread(search_sync, criteria, set(), extra, 1_000_000, places)
+    if out.unread:
+        try:
+            if await read_missing_descriptions(out.unread):  # the text now saved may settle those jobs: rank again
+                out = await asyncio.to_thread(search_sync, criteria, set(), extra, 1_000_000, places)
+        except Exception:
+            log.exception("job search: could not read the descriptions of partly matching jobs")
     items = collapse_listings(out.items)
     for item in items:  # the description note only tells copies of one job apart: its opening is enough, and keeps the kept lists small
         if item.get("_desc"):

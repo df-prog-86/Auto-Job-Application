@@ -286,6 +286,7 @@ class Scored:
     title_fit: float
     place_fit: float
     via_description: bool = False  # the title alone did not match; the description opening did
+    needs_description: bool = False  # the title only partly matches and no description is saved: reading it would settle the job
 
 
 def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> Scored | None:
@@ -296,10 +297,12 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
         return None
     tf = title_fit(plan, row["title"])
     via_desc = False
+    needs_text = False
     if MIN_TITLE_FIT <= tf < BORDERLINE_TITLE and plan.desc_phrases and title_fit(plan, row["title"], typed_only=True) >= tf - 1e-9:
         # A title that only partly matches what was typed ("Revenue Operations Manager" for "revenue cycle manager"): the
         # description settles it. About the work asked for lifts it; about something else sinks it; no description changes nothing.
         signal = description_signal(plan, row.get("description"))
+        needs_text = signal == 0 and len(row.get("description") or "") < DESC_MIN_CHARS
         if signal > 0:
             tf = min(1.0, tf + DESC_CONFIRM_BONUS)
         elif signal < 0:
@@ -339,7 +342,7 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
     fit = W_TITLE * tf + W_PLACE * lf + W_RECENT * _recency(posted, today) + W_PAY * (1.0 if mid is not None else 0.0) + W_KEYWORD * kw
     if via_desc or desc_hit(plan, row.get("description")):
         fit += W_DESC
-    return Scored(row=row, fit=round(min(fit, 1.0), 4), title_fit=tf, place_fit=lf, via_description=via_desc)
+    return Scored(row=row, fit=round(min(fit, 1.0), 4), title_fit=tf, place_fit=lf, via_description=via_desc, needs_description=needs_text)
 
 
 def keyword_match(plan: Plan, text: str) -> bool:

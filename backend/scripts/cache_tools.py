@@ -6,6 +6,7 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
   python -m scripts.cache_tools coverage --db PATH        # the same for another copy, such as the frozen test copy
   python -m scripts.cache_tools descriptions [--title 'revenue cycle']
                                                           # how many open postings have a saved description, by hiring system (read only)
+  python -m scripts.cache_tools fill [--limit 150]       # runs one batch of the gradual description fill now (reads a few postings per employer)
   python -m scripts.cache_tools reread --db PATH [--only greenhouse,lever]
                                                           # re-reads employers and fills in details on postings the copy ALREADY has.
                                                           # It adds no postings and closes none, so a before and after test stays fair.
@@ -123,6 +124,20 @@ def cmd_descriptions(args: argparse.Namespace) -> int:
         with_d += r["withd"] or 0
         print(f"{r['ats']:16}{r['n']:>10}{(r['withd'] or 0):>20}{(r['withd'] or 0) / r['n']:>9.0%}")
     print(f"{'ALL':16}{total:>10}{with_d:>20}{(with_d / total if total else 0):>9.0%}")
+    return 0
+
+
+async def _fill(args: argparse.Namespace) -> int:
+    """Runs one batch of the gradual description fill now, so it can be seen working without waiting for a refresh."""
+    from app.services.jobcache import service
+
+    settings.JOB_CACHE_DESCRIPTION_FILL = args.limit
+    cache = JobCache()
+    before = len(cache.postings_without_description(100000, 100000, service.DESC_FILL_SYSTEMS_WITH_TEXT))
+    saved = await service.fill_descriptions_gradually(cache)
+    after = len(cache.postings_without_description(100000, 100000, service.DESC_FILL_SYSTEMS_WITH_TEXT))
+    print(f"Read up to {args.limit} postings: {saved} descriptions saved, {before - after - saved} could not be read (not tried again).")
+    print(f"Postings still waiting for a description: {after}")
     return 0
 
 
@@ -663,6 +678,8 @@ def main() -> None:
     d = sub.add_parser("descriptions")
     d.add_argument("--db")
     d.add_argument("--title", help="only postings whose title holds these words, e.g. 'revenue cycle'")
+    f = sub.add_parser("fill")
+    f.add_argument("--limit", type=int, default=150, help="postings to read in this batch")
     r = sub.add_parser("reread")
     r.add_argument("--db", required=True)
     r.add_argument("--only", help="comma separated hiring systems, e.g. greenhouse,lever,ashby")
@@ -718,6 +735,8 @@ def main() -> None:
         sys.exit(cmd_usshare(args))
     if args.cmd == "descriptions":
         sys.exit(cmd_descriptions(args))
+    if args.cmd == "fill":
+        sys.exit(asyncio.run(_fill(args)))
     if args.cmd == "reindex":
         sys.exit(cmd_reindex(args))
     if args.cmd == "industry":

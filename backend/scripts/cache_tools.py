@@ -524,17 +524,18 @@ async def _sites(args: argparse.Namespace) -> int:
 
 
 def cmd_industry(args: argparse.Namespace) -> int:
-    from app.services.jobcache.industry import tag_employers
+    from app.services.jobcache.industry import NAICS_CODES, tag_employers
 
     cache = JobCache()
     with cache.session() as db:
         table = tag_employers(db, retag=args.retag)
     total_e = sum(n for n, _ in table.values())
     total_j = sum(j for _, j in table.values()) or 1
-    print(f"{'industry':40s} {'employers':>10s} {'open jobs':>10s} {'share of jobs':>14s}")
+    print("Industries are the US government's NAICS sectors (2022).")
+    print(f"{'NAICS':6s} {'sector':56s} {'employers':>9s} {'open jobs':>10s} {'share':>7s}")
     for name, (n, jobs) in sorted(table.items(), key=lambda kv: -kv[1][1]):
-        print(f"{name:40s} {n:10,d} {jobs:10,d} {100 * jobs / total_j:13.1f}%")
-    print(f"{'ALL':40s} {total_e:10,d} {total_j:10,d}")
+        print(f"{NAICS_CODES.get(name, ''):6s} {name[:56]:56s} {n:9,d} {jobs:10,d} {100 * jobs / total_j:6.1f}%")
+    print(f"{'':6s} {'ALL':56s} {total_e:9,d} {total_j:10,d}")
     return 0
 
 

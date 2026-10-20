@@ -2,8 +2,9 @@
 Works out which industry each saved employer is in, using plain code (no AI, no network).
 
 The employer's name and the titles of its open postings both vote. A hospital has nurses, therapists and patient access
-roles; a bank has loan officers and underwriters; a software company has engineers and designers. The industry with the
-strongest signal wins, and an employer with no clear signal is "Other or mixed", never guessed.
+roles; a bank has loan officers and underwriters; a software company has engineers and designers. The sector with the
+strongest signal wins, and an employer with no clear signal is "Unclassified", never guessed. Sectors are the official
+NAICS sector titles used by the US government.
 """
 
 from __future__ import annotations
@@ -12,29 +13,57 @@ import re
 from collections import Counter
 from typing import Any, Iterable
 
-OTHER = "Other or mixed"
-STAFFING = "Staffing and recruiting"
+OTHER = "Unclassified"
+STAFFING = "Administrative and Support and Waste Management and Remediation Services"  # NAICS 56, where staffing agencies sit
 
-# (industry, name words, title words). All matched as whole words or word starts, lower case.
+# The 2022 North American Industry Classification System (NAICS) sectors, which the US government (Census Bureau, Bureau of
+# Labor Statistics) uses to describe employers. Names are the official sector titles. Sector 55 (holding companies) cannot be
+# told from a name or job titles, so it is not assigned.
+NAICS_CODES = {
+    "Agriculture, Forestry, Fishing and Hunting": "11",
+    "Mining, Quarrying, and Oil and Gas Extraction": "21",
+    "Utilities": "22",
+    "Construction": "23",
+    "Manufacturing": "31-33",
+    "Wholesale Trade": "42",
+    "Retail Trade": "44-45",
+    "Transportation and Warehousing": "48-49",
+    "Information": "51",
+    "Finance and Insurance": "52",
+    "Real Estate and Rental and Leasing": "53",
+    "Professional, Scientific, and Technical Services": "54",
+    STAFFING: "56",
+    "Educational Services": "61",
+    "Health Care and Social Assistance": "62",
+    "Arts, Entertainment, and Recreation": "71",
+    "Accommodation and Food Services": "72",
+    "Other Services (except Public Administration)": "81",
+    "Public Administration": "92",
+}
+
+# (NAICS sector, name words, title words). All matched as whole words, lower case.
 _RULES: list[tuple[str, list[str], list[str]]] = [
     (
-        "Healthcare",
+        "Health Care and Social Assistance",
         ["hospital", "hospitals", "health system", "healthcare", "medical center", "clinic", "clinics", "health", "medical",
-         "physicians", "pediatric", "oncology", "dental", "hospice", "behavioral"],
+         "physicians", "pediatric", "oncology", "dental", "hospice", "behavioral", "senior living", "home care", "family services"],
         ["nurse", "rn", "lpn", "cna", "clinical", "patient", "physician", "therapist", "pharmacist", "pharmacy", "medical assistant",
          "surgeon", "radiology", "radiologic", "phlebotomist", "hospice", "dental", "behavioral health", "care coordinator",
          "revenue cycle", "denials", "medical coding", "prior authorization", "patient access", "clinician", "caregiver",
-         "sonographer", "paramedic", "psychiatrist", "psychologist", "counselor"],
+         "sonographer", "paramedic", "psychiatrist", "psychologist", "counselor", "social worker", "case manager"],
     ),
     (
-        "Technology",
-        ["software", "technologies", "technology", "labs", "cloud", "digital", "cyber", "robotics"],
+        "Information",  # software publishers, internet and data companies, telecommunications, publishing, film and broadcasting
+        ["software", "technologies", "technology", "labs", "cloud", "digital", "cyber", "robotics", "telecom", "wireless", "internet",
+         "media", "studios", "games", "publishing", "broadcasting", "pictures", "network", "networks"],
         ["software", "developer", "devops", "sre", "machine learning", "data scientist", "data engineer", "backend", "frontend",
          "front end", "back end", "full stack", "platform engineer", "solutions engineer", "security engineer", "product designer",
-         "product manager", "qa engineer", "engineering manager", "site reliability", "ml engineer", "infrastructure engineer"],
+         "product manager", "qa engineer", "engineering manager", "site reliability", "ml engineer", "infrastructure engineer",
+         "editor", "producer", "journalist", "reporter", "broadcast", "animator", "game designer", "copywriter", "content creator",
+         "videographer"],
     ),
     (
-        "Finance and insurance",
+        "Finance and Insurance",
         ["bank", "bancorp", "financial", "capital", "insurance", "assurance", "credit union", "mortgage", "wealth", "investments",
          "asset management", "advisors", "payments", "lending"],
         ["accountant", "accounting", "financial analyst", "auditor", "underwriter", "actuary", "actuarial", "loan", "mortgage",
@@ -42,58 +71,86 @@ _RULES: list[tuple[str, list[str], list[str]]] = [
          "teller", "credit analyst", "risk analyst", "compliance analyst"],
     ),
     (
-        "Consulting and professional services",
-        ["consulting", "consultants", "advisory", "law", "llp"],
+        "Professional, Scientific, and Technical Services",  # consulting, legal, accounting firms, engineering, design, research
+        ["consulting", "consultants", "advisory", "law", "llp", "laboratories", "research", "architects", "engineering"],
         ["consultant", "consulting", "advisory", "attorney", "paralegal", "counsel", "engagement manager", "management consultant",
-         "strategy", "associate director", "senior associate"],
+         "strategy", "associate director", "senior associate", "research scientist", "scientist", "architect", "biostatistician"],
     ),
     (
-        "Education",
+        "Educational Services",
         ["university", "college", "school", "schools", "academy", "institute", "education", "learning"],
         ["professor", "teacher", "faculty", "lecturer", "academic", "curriculum", "instructor", "admissions", "campus", "tutor",
          "student", "registrar", "dean"],
     ),
     (
-        "Government and nonprofit",
-        ["city of", "county", "state of", "department of", "foundation", "nonprofit", "association", "ymca", "united way", "council"],
-        ["program officer", "grants", "policy analyst", "public policy", "outreach", "caseworker", "advocacy", "fundraising",
-         "development officer", "community"],
+        "Public Administration",  # federal, state and local government
+        ["city of", "county", "state of", "department of", "town of", "commonwealth of"],
+        ["policy analyst", "public policy", "public works", "police", "firefighter", "municipal"],
     ),
     (
-        "Retail and consumer",
-        ["stores", "retail", "foods", "brands", "apparel", "restaurants", "beverage", "grocery", "outfitters"],
-        ["store manager", "cashier", "merchandiser", "merchandising", "retail", "barista", "sales associate", "stylist", "buyer",
-         "shift leader", "crew member", "ecommerce", "e-commerce"],
+        "Other Services (except Public Administration)",  # nonprofits, grantmaking, civic and advocacy groups, religious organizations
+        ["foundation", "nonprofit", "association", "ymca", "united way", "council", "ministries", "church"],
+        ["program officer", "grants", "outreach", "advocacy", "fundraising", "development officer", "community"],
     ),
     (
-        "Manufacturing and industrial",
-        ["manufacturing", "industries", "industrial", "materials", "chemical", "steel", "aerospace", "automotive", "devices"],
+        "Retail Trade",
+        ["stores", "retail", "brands", "apparel", "grocery", "outfitters"],
+        ["store manager", "cashier", "merchandiser", "merchandising", "retail", "sales associate", "stylist", "buyer", "ecommerce",
+         "e-commerce"],
+    ),
+    (
+        "Accommodation and Food Services",
+        ["restaurants", "restaurant", "hotel", "hotels", "resort", "resorts", "hospitality", "cafe", "foods", "beverage"],
+        ["line cook", "chef", "server", "bartender", "barista", "housekeeper", "front desk", "concierge", "crew member", "shift leader",
+         "dishwasher", "host"],
+    ),
+    (
+        "Manufacturing",
+        ["manufacturing", "industries", "industrial", "materials", "chemical", "steel", "aerospace", "automotive", "devices",
+         "pharmaceuticals", "biosciences"],
         ["machinist", "manufacturing", "assembler", "production operator", "quality technician", "welder", "maintenance technician",
          "plant", "process engineer", "mechanical engineer", "manufacturing engineer", "tooling", "cnc"],
     ),
     (
-        "Transportation and logistics",
-        ["logistics", "freight", "transport", "shipping", "airlines", "railroad", "trucking", "delivery"],
+        "Transportation and Warehousing",
+        ["logistics", "freight", "transport", "shipping", "airlines", "railroad", "trucking", "delivery", "warehouse"],
         ["driver", "logistics", "warehouse", "dispatcher", "supply chain", "freight", "fleet", "forklift", "carrier", "courier",
          "pilot", "flight attendant"],
     ),
     (
-        "Energy and utilities",
-        ["energy", "electric", "utility", "utilities", "solar", "oil", "petroleum", "renewables"],
-        ["lineworker", "lineman", "utility", "solar", "power plant", "renewable", "grid", "pipeline", "drilling", "substation",
-         "energy"],
+        "Utilities",  # electric power, natural gas, water, and renewable generation
+        ["electric", "utility", "utilities", "solar", "renewables", "water", "power"],
+        ["lineworker", "lineman", "utility", "solar", "power plant", "renewable", "grid", "substation", "energy"],
     ),
     (
-        "Media and entertainment",
-        ["media", "entertainment", "studios", "games", "publishing", "broadcasting", "pictures"],
-        ["editor", "producer", "journalist", "reporter", "broadcast", "animator", "game designer", "copywriter", "content creator",
-         "videographer", "art director"],
+        "Mining, Quarrying, and Oil and Gas Extraction",
+        ["oil", "petroleum", "mining", "drilling", "gas exploration"],
+        ["drilling", "geologist", "mining", "wellsite", "petroleum", "reservoir"],
     ),
     (
-        "Real estate and construction",
-        ["realty", "real estate", "properties", "construction", "builders", "homes", "architects"],
-        ["property manager", "leasing", "construction", "estimator", "superintendent", "architect", "real estate", "broker",
-         "project engineer", "site manager", "carpenter", "electrician"],
+        "Arts, Entertainment, and Recreation",
+        ["entertainment", "museum", "casino", "theatre", "theater", "fitness", "golf", "sports", "recreation"],
+        ["fitness instructor", "personal trainer", "curator", "athletic", "lifeguard", "box office", "gallery"],
+    ),
+    (
+        "Real Estate and Rental and Leasing",
+        ["realty", "real estate", "properties", "rentals", "leasing"],
+        ["property manager", "leasing", "real estate", "broker", "leasing consultant", "tenant"],
+    ),
+    (
+        "Construction",
+        ["construction", "builders", "homes", "contractors"],
+        ["construction", "estimator", "superintendent", "carpenter", "electrician", "project engineer", "site manager", "foreman"],
+    ),
+    (
+        "Wholesale Trade",
+        ["wholesale", "distribution", "distributors", "supply"],
+        ["inside sales representative", "purchasing agent"],
+    ),
+    (
+        "Agriculture, Forestry, Fishing and Hunting",
+        ["farms", "farm", "agricultural", "agriculture", "forestry", "growers"],
+        ["farmhand", "agronomist", "grower", "farm manager", "forester"],
     ),
 ]
 

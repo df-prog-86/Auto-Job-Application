@@ -24,6 +24,9 @@ import {
 } from "@/lib/searchCriteria";
 import type { SavedCriteria, SavedSearch } from "@/lib/searchCriteria";
 
+/** Jobs on one page of results. */
+const PAGE_SIZE = 10;
+
 function errorText(e: unknown): string {
   if (e instanceof ApiError) return e.message;
   return "Something went wrong. Try again.";
@@ -90,7 +93,8 @@ export function JobSearch() {
   const [targetSalary, setTargetSalary] = useState(saved.targetSalary ?? "");
   const [requireSalary, setRequireSalary] = useState(saved.requireSalary ?? false);
   const [within, setWithin] = useState<JobSearchCriteria["posted_within_days"]>(saved.within ?? 0);
-  const [count, setCount] = useState(saved.count ?? 10);
+  const count = PAGE_SIZE;
+  const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -105,10 +109,19 @@ export function JobSearch() {
   const [coverage, setCoverage] = useState<CoverageOut | null>(null);
   const [moreAvailable, setMoreAvailable] = useState(0);
   const lastCriteria = useRef<JobSearchCriteria | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: 0 });
+  }, [currentPage]);
 
   const results = useQuery({ queryKey: ["job-search-results"], queryFn: api.listSearchResults });
   const items = (results.data ?? []).filter((r) => r.status === "new");
   const shown = sortResults(autofillOnly ? items.filter((r) => autofillSite(r.url)) : items, sortBy);
+  // Pages of PAGE_SIZE. Pages not loaded yet are counted from the matches still waiting in the saved lists.
+  const poolSize = autofillOnly ? shown.length : shown.length + moreAvailable;
+  const totalPages = Math.max(1, Math.ceil(poolSize / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageItems = shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const anyAutofill = items.some((r) => autofillSite(r.url));
   const unscored = items.filter((r) => r.match_score == null);
 
@@ -155,6 +168,7 @@ export function JobSearch() {
     onSuccess: (r) => {
       setCoverage(r.coverage ?? null);
       setMoreAvailable(r.more_available ?? 0);
+      setPage(1);
       void qc.invalidateQueries({ queryKey: ["job-employers"] });
       setLastRun({ found: r.found });
       setNotice(
@@ -170,16 +184,25 @@ export function JobSearch() {
     onError: () => setNotice(null),
   });
 
-  /** "Show more results": the next best matches from the saved employer lists. Instant, and no AI is used. */
+  /** A page not loaded yet: the next best matches from the saved employer lists, enough to fill every page up to it. No AI is used. */
   const showMore = useMutation({
-    mutationFn: () => api.runJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), more: true }),
-    onSuccess: (r) => {
+    mutationFn: ({ need }: { need: number; target: number }) => api.runJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), more: true, count: need }),
+    onSuccess: (r, v) => {
       if (r.coverage) setCoverage(r.coverage);
       setMoreAvailable(r.more_available ?? 0);
+      setPage(v.target);
       setNotice(r.found > 0 ? null : { kind: "info", text: "No more matches in the saved employer lists. Search again to check the web too." });
       void qc.invalidateQueries({ queryKey: ["job-search-results"] });
     },
   });
+
+  /** Opens a page. A page that is already loaded shows at once; a later one loads the matches that lead up to it first. */
+  const goToPage = (target: number) => {
+    if (showMore.isPending || target < 1 || target > totalPages || target === currentPage) return;
+    const need = target * PAGE_SIZE - shown.length;
+    if (need <= 0) setPage(target);
+    else showMore.mutate({ need: Math.min(need, 300), target });
+  };
 
   const add = useMutation({
     mutationFn: (id: number) => api.addSearchResult(id),
@@ -266,7 +289,6 @@ export function JobSearch() {
     setTargetSalary(c.targetSalary ?? "");
     setRequireSalary(c.requireSalary ?? false);
     setWithin(c.within ?? 0);
-    setCount(c.count ?? 10);
   };
 
   const deleteSavedSearch = (name: string) => {
@@ -341,7 +363,7 @@ export function JobSearch() {
   const canSave = withDraft(titles, titleDraft).length > 0 && !activeSaved;
 
   // The job shown on the right. Falls back to the first one when the chosen job is gone (added or hidden).
-  const selected = shown.find((r) => r.id === selectedId) ?? shown[0] ?? null;
+  const selected = pageItems.find((r) => r.id === selectedId) ?? pageItems[0] ?? null;
 
   // Filters in use, shown as pills under the search bar. The place lives in the search bar itself.
   const pills = filterChips.filter((c) => c.key !== "loc");
@@ -466,8 +488,6 @@ export function JobSearch() {
               setTargetSalary={setTargetSalary}
               requireSalary={requireSalary}
               setRequireSalary={setRequireSalary}
-              count={count}
-              setCount={setCount}
               onClear={clearFilters}
             />
           )}
@@ -632,6 +652,7 @@ export function JobSearch() {
           )}
 
           <div
+            ref={listRef}
             className="overflow-y-auto overscroll-contain rounded-[20px] border border-[#e9e6f4] bg-white shadow-[0_1px_2px_rgba(31,27,46,0.05),0_10px_28px_rgba(75,50,184,0.07)]"
             style={{ maxHeight: "max(480px, calc(100vh - 300px))", scrollbarWidth: "thin", scrollbarColor: "#ddd8f3 transparent" }}
           >
@@ -641,22 +662,13 @@ export function JobSearch() {
               </p>
             ) : (
               <ul>
-                {shown.map((r) => (
+                {pageItems.map((r) => (
                   <ResultRow key={r.id} r={r} selected={selected?.id === r.id} onPick={() => setSelectedId(r.id)} />
                 ))}
               </ul>
             )}
-            {moreAvailable > 0 && (
-              <div className="border-t border-[#ebe8f6] p-4 text-center">
-                <button
-                  type="button"
-                  onClick={() => showMore.mutate()}
-                  disabled={showMore.isPending}
-                  className="h-10 rounded-xl border border-[#ddd8f3] bg-white px-5 text-sm font-semibold text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50"
-                >
-                  {showMore.isPending ? "Looking..." : `Show ${Math.min(count, moreAvailable)} more results`}
-                </button>
-              </div>
+            {totalPages > 1 && (
+              <Pager page={currentPage} total={totalPages} busy={showMore.isPending} onPick={goToPage} />
             )}
           </div>
 
@@ -713,6 +725,56 @@ function BoltIcon({ className = "h-3 w-3" }: { className?: string }) {
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
       <path d="M13 2L4 14h6l-1 8 9-12h-6z" />
     </svg>
+  );
+}
+
+/** Page numbers under the list: 1 2 3 ... last, with arrows. */
+function pageNumbers(page: number, total: number): (number | "gap")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  if (page <= 3) return [1, 2, 3, "gap", total];
+  if (page >= total - 2) return [1, "gap", total - 2, total - 1, total];
+  return [1, "gap", page - 1, page, page + 1, "gap", total];
+}
+
+function Pager({ page, total, busy, onPick }: { page: number; total: number; busy: boolean; onPick: (n: number) => void }) {
+  const btn =
+    "grid h-10 min-w-[40px] place-items-center rounded-xl border border-[#ddd8f3] bg-white px-2 text-sm font-semibold text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50";
+  return (
+    <nav aria-label="Pages of results" className="sticky bottom-0 flex flex-col items-center gap-2 border-t border-[#ebe8f6] bg-white p-3">
+      <div className="flex flex-wrap items-center justify-center gap-1.5">
+        {page > 1 && (
+          <button type="button" className={btn} disabled={busy} onClick={() => onPick(page - 1)} aria-label="Previous page">
+            &lsaquo;
+          </button>
+        )}
+        {pageNumbers(page, total).map((n, i) =>
+          n === "gap" ? (
+            <span key={`g${i}`} className="px-1 text-ink-500" aria-hidden="true">
+              ...
+            </span>
+          ) : (
+            <button
+              key={n}
+              type="button"
+              disabled={busy}
+              onClick={() => onPick(n)}
+              aria-current={n === page ? "page" : undefined}
+              className={n === page ? "grid h-10 min-w-[40px] place-items-center rounded-xl bg-brand-500 px-2 text-sm font-semibold text-white" : btn}
+            >
+              {n}
+            </button>
+          ),
+        )}
+        {page < total && (
+          <button type="button" className={btn} disabled={busy} onClick={() => onPick(page + 1)} aria-label="Next page">
+            &rsaquo;
+          </button>
+        )}
+      </div>
+      <p className="text-xs text-ink-500" role="status">
+        {busy ? "Looking..." : `Page ${page} of ${total}`}
+      </p>
+    </nav>
   );
 }
 
@@ -985,8 +1047,6 @@ function FiltersPopover(p: {
   setTargetSalary: (v: string) => void;
   requireSalary: boolean;
   setRequireSalary: (v: boolean) => void;
-  count: number;
-  setCount: (v: number) => void;
   onClear: () => void;
 }) {
   const ref = useClickAway(p.onClose);
@@ -1057,16 +1117,6 @@ function FiltersPopover(p: {
           Only jobs that post their pay
         </label>
       </div>
-      <Segmented
-        label="Results per search"
-        value={p.count}
-        onPick={p.setCount}
-        options={[
-          { value: 5, label: "5" },
-          { value: 10, label: "10" },
-          { value: 15, label: "15" },
-        ]}
-      />
       <div className="flex items-center justify-between border-t border-[#ebe8f6] pt-[18px]">
         <button type="button" onClick={p.onClear} className="py-2 text-sm font-semibold text-brand-600 hover:text-brand-700 hover:underline">
           Clear all

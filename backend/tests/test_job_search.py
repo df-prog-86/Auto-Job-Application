@@ -958,3 +958,13 @@ def test_a_recently_read_saved_list_is_not_asked_again(monkeypatch):
     assert gone == 0 and len(kept) == 3
     assert asked == ["https://x.example.com/stale", "https://x.example.com/web"]
     assert items[0]["ats_checked"] is True and items[0]["ats_live"] is True
+
+
+def test_pages_ask_for_many_results_and_check_enough_candidates():
+    from app.schemas.job_search import JobSearchIn
+    from app.services.discovery.web_search import _pool_size
+
+    page_one = JobSearchIn(titles="revenue cycle manager", count=10)
+    assert _pool_size(page_one) == 30  # unchanged for an ordinary search
+    deep = JobSearchIn(titles="revenue cycle manager", count=190, more=True)  # opening page 20 loads everything up to it
+    assert deep.count == 190 and _pool_size(deep) >= 190

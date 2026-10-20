@@ -839,7 +839,7 @@ FRESH_LIST_HOURS = 24  # a saved list read within this many hours is trusted; ol
 
 def _pool_size(criteria: JobSearchIn) -> int:
     """How many candidates from the saved lists get checked against the employers' own systems. More when pay must be stated."""
-    return min(60, max(criteria.count * (4 if criteria.require_salary else 3), 24))
+    return min(max(60, criteria.count * 2), max(criteria.count * (4 if criteria.require_salary else 3), 24))
 
 
 def _dedupe_by_address(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

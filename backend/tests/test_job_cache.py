@@ -1526,3 +1526,19 @@ def test_prelabel_shows_description_opening(monkeypatch):
     msgs = eval_search.label_messages(search, rows, {"https://x/1": "You will lead patient billing and denials."})
     assert "description opens: You will lead patient billing and denials." in msgs[1]["content"]
     assert "description opens" not in eval_search.label_messages(search, rows)[1]["content"]
+
+
+def test_a_city_search_finds_local_jobs_among_many_better_worded_titles_elsewhere(monkeypatch):
+    """With a huge saved copy, the best title matches nationwide can all be in other cities; the place pull still finds the local ones."""
+    from app.services.jobcache import matcher
+
+    monkeypatch.setattr(matcher, "CANDIDATE_LIMIT", 20)
+    cache = JobCache()
+    eid, _ = cache.upsert_employer("greenhouse", "everywhere", "Everywhere Co", "search")
+    far = [post(i, "Data Analyst", "Denver, CO") for i in range(200)]
+    near = [post(5000, "Senior Data Analyst, Finance", "Boston, MA"), post(5001, "Data Analyst II", "Cambridge, MA")]
+    cache.apply_refresh(eid, far + near, 1000)
+    out = service.search_sync(crit(titles="data analyst", location="Boston, MA"), set(), None, 10)
+    titles = [i["title"] for i in out.items]
+    assert "Senior Data Analyst, Finance" in titles
+    assert all("Denver" not in (i["location"] or "") for i in out.items[:2])

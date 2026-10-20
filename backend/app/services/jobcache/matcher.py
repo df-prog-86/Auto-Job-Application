@@ -176,6 +176,33 @@ def fts_queries(plan: Plan) -> list[str]:
     return out
 
 
+def fts_place_clause(plan: Plan) -> str | None:
+    """
+    A full-text clause on the posting's place for a search that names a city: the city and the places around it. None for a
+    search with no city (nationwide, a state alone, remote). Used with the title query so a big saved copy returns the jobs
+    near the person even when thousands of better-worded titles sit elsewhere.
+    """
+    loc = plan.loc
+    if loc.nationwide or not loc.cities:
+        return None
+    names = list(loc.cities) + [c for c, _state in loc.near]
+    parts: list[str] = []
+    for name in names:
+        words_ = re.findall(r"[a-z0-9]+", fold(name))
+        if words_:
+            parts.append("(" + " AND ".join(f'"{w}"' for w in words_) + ")")
+    parts = list(dict.fromkeys(parts))
+    return "{location} : (" + " OR ".join(parts[:16]) + ")" if parts else None
+
+
+def fts_place_queries(plan: Plan) -> list[str]:
+    """The title queries (tight to broad) each narrowed to the places asked for. Empty when the search names no city."""
+    place = fts_place_clause(plan)
+    if not place:
+        return []
+    return [f"({q}) AND {place}" for q in fts_queries(plan)]
+
+
 def like_terms(plan: Plan) -> list[str]:
     out: list[str] = []
     for q in plan.queries:

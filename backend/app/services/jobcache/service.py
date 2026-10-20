@@ -80,6 +80,15 @@ def search_sync(criteria: Any, known_keys: set[str], extra_titles: list[str] | N
         if len(rows) >= matcher.ENOUGH_TIGHT:
             break
     capped = len(rows) >= matcher.CANDIDATE_LIMIT
+    # A big saved copy holds thousands of well-worded titles in other cities, so the best title matches alone can leave out
+    # every job near the person. A search that names a city also pulls the best title matches within that city and its neighbors.
+    have = {r["id"] for r in rows}
+    for query in matcher.fts_place_queries(plan):
+        near = cache.candidates(query, matcher.like_terms(plan), matcher.CANDIDATE_LIMIT, plan.earliest())
+        rows += [r for r in near if r["id"] not in have]
+        have.update(r["id"] for r in near)
+        if len(near) >= matcher.ENOUGH_TIGHT:
+            break
     desc_query = matcher.fts_desc_query(plan)
     if desc_query and cache.desc_ready():
         # postings whose title is a different one but whose description opening names this kind of work

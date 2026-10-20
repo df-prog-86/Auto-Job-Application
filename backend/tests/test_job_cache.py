@@ -1574,3 +1574,38 @@ def test_a_job_in_a_foreign_city_with_no_country_is_not_shown_for_a_us_search():
         assert text.location_fit(austin, place, "remote") == 0.0, place
     assert text.location_fit(austin, "Remote - US", "remote") > 0
     assert text.location_fit(austin, "Paris, TX", None) == 0.7  # a US town with a foreign name keeps its state
+
+
+def test_run_together_employer_names_are_shown_the_way_people_write_them():
+    assert text.clean_company("Openai") == "OpenAI"
+    assert text.clean_company("1password") == "1Password"
+    assert text.clean_company("Assorthealth") == "AssortHealth"
+    assert text.clean_company("Examplehealth") == "Example Health"
+    assert text.clean_company("Mass General Brigham") == "Mass General Brigham"
+    assert text.clean_company("McKesson") == "McKesson"  # a name with its own capitals is left alone
+
+
+def test_a_requisition_code_is_not_part_of_the_title():
+    assert text.title_without_code("Senior Product Marketing Manager (SMM194)") == "Senior Product Marketing Manager"
+    assert text.title_without_code("Analyst - R-12345") == "Analyst"
+    assert text.title_without_code("Nurse (RN)") == "Nurse (RN)"
+
+
+def test_one_job_listed_twice_is_one_result_but_two_real_openings_stay_two():
+    def job(title, desc, loc="Remote"):
+        return {"title": title, "company": "Defense Unicorns", "location": loc, "salary_text": "$142,375 - $230,000",
+                "posted_at": dt.date(2026, 10, 13), "_desc": desc, "url": f"https://x.example.com/{title}{desc}"}
+
+    same = [job("Senior Marketing Manager, Edge (SMM193)", "Lead edge product marketing for"), job("Senior Marketing Manager, Edge (SMM194)", "Lead edge product marketing for")]
+    assert len(service.collapse_listings(same)) == 1
+    other_team = [job("Senior Marketing Manager, Edge (SMM193)", "Lead edge product marketing for"), job("Senior Marketing Manager, Edge (SMM194)", "Run field events and")]
+    assert len(service.collapse_listings(other_team)) == 2
+    other_place = [job("Nurse", "Care for patients on", "Boston, MA"), job("Nurse", "Care for patients on", "Quincy, MA")]
+    assert len(service.collapse_listings(other_place)) == 2
+
+
+def test_workday_names_the_places_behind_a_three_locations_listing():
+    from app.services.discovery.ats import workday_info
+
+    info = workday_info(200, {"jobPostingInfo": {"location": "Boston, MA", "additionalLocations": ["Quincy, MA", "Boston, MA", "Salem, MA", "Lynn, MA"], "startDate": "2026-10-01"}})
+    assert info.places == "Boston, MA; Quincy, MA; Salem, MA +1 more"

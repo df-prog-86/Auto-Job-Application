@@ -53,6 +53,7 @@ class AtsInfo:
     posted: dt.date | None = None
     pay: str | None = None  # pay range the posting states, when its data includes one
     checked: bool = False  # the system itself answered, so no page check is needed
+    places: str | None = None  # the real places, when the list only said "3 Locations" (Workday names them on the posting)
 
 
 def _day_from_ms(value: Any) -> dt.date | None:
@@ -89,7 +90,10 @@ def workday_info(status: int, data: Any) -> AtsInfo:
 
     posted = parse_posted_date(info.get("startDate")) or extract_posted_date(f"Posted {info.get('postedOn', '')}")
     live = False if info.get("canApply") is False else True
-    return AtsInfo(live=live, posted=posted, pay=extract_pay_text(info.get("jobDescription")), checked=True)
+    names = [info.get("location"), *(info.get("additionalLocations") or [])]
+    cities = list(dict.fromkeys(n.strip() for n in names if isinstance(n, str) and n.strip()))
+    places = "; ".join(cities[:3]) + (f" +{len(cities) - 3} more" if len(cities) > 3 else "") if cities else None
+    return AtsInfo(live=live, posted=posted, pay=extract_pay_text(info.get("jobDescription")), checked=True, places=places)
 
 
 def greenhouse_ref(url: str) -> tuple[str, str] | None:

@@ -493,8 +493,11 @@ async def enrich_from_ats(items: list[dict[str, Any]]) -> tuple[list[dict[str, A
     async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
 
         async def one(item: dict[str, Any]) -> None:
+            from app.services.jobcache.text import is_vague_place
+
             read = item.get("read_at")
-            if read and 0 <= now - read <= FRESH_LIST_HOURS * 3600:
+            vague = bool((item.get("location") or "").strip()) and is_vague_place(item.get("location"))  # "3 Locations"
+            if read and 0 <= now - read <= FRESH_LIST_HOURS * 3600 and not vague:
                 # The saved list itself was read from the employer's system recently and still shows this posting open, so asking
                 # the employer again would repeat the same answer (it is the slow step: one web call per result).
                 item["ats_checked"] = True
@@ -510,6 +513,8 @@ async def enrich_from_ats(items: list[dict[str, Any]]) -> tuple[list[dict[str, A
                 item["posted_at"] = info.posted
             if info.pay and not item.get("salary_text"):
                 item["salary_text"] = info.pay
+            if vague and info.places:
+                item["location"] = info.places
 
         await asyncio.gather(*(one(i) for i in items))
     kept = [i for i in items if i.get("ats_live") is not False]

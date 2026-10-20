@@ -391,7 +391,29 @@ COMPANY_NAMES = {
     "bilh": "Beth Israel Lahey Health",
     "intersystems": "InterSystems",
     "genetixbiotherapeutics": "Genetix Biotherapeutics",
+    "openai": "OpenAI",
+    "1password": "1Password",
+    "assorthealth": "AssortHealth",
+    "doordash": "DoorDash",
+    "paypal": "PayPal",
+    "linkedin": "LinkedIn",
+    "github": "GitHub",
+    "gitlab": "GitLab",
+    "hubspot": "HubSpot",
+    "mongodb": "MongoDB",
+    "datadog": "Datadog",
+    "pagerduty": "PagerDuty",
+    "airbnb": "Airbnb",
+    "zoominfo": "ZoomInfo",
+    "servicenow": "ServiceNow",
+    "appfolio": "AppFolio",
+    "sofi": "SoFi",
+    "athenahealth": "athenahealth",
 }
+# A run-together name ("Examplehealth") gets a space before a common last word ("Example Health").
+_NAME_TAILS = ("health", "healthcare", "biosciences", "pharma", "therapeutics", "systems", "software", "labs",
+               "technologies", "medical", "financial", "capital", "solutions", "analytics", "networks")
+_RUN_TOGETHER = re.compile(r"^[A-Za-z]{7,}$")
 _ORG_CODE = re.compile(r"^(?:[A-Za-z]{1,4}\d{2,6}|\d{3,6})\s+(?=\S)")  # "1000 Abbott ...", "LE001 Berkeley ..."
 _TRAIL_CODE = re.compile(r"\s*\((?:[A-Za-z]{2,6})\)\s*$")  # "Inc(ALI)"
 
@@ -405,7 +427,25 @@ def clean_company(name: str | None) -> str:
     out = re.sub(r"\s+", " ", name or "").strip()
     cleaned = _TRAIL_CODE.sub("", _ORG_CODE.sub("", out)).strip(" ,-")
     out = cleaned or out
-    return COMPANY_NAMES.get(_squash(out), out)
+    known = COMPANY_NAMES.get(_squash(out))
+    if known:
+        return known
+    if _RUN_TOGETHER.match(out) and (out.islower() or out == out.capitalize()):
+        low = out.lower()
+        for tail in _NAME_TAILS:
+            if low.endswith(tail) and len(low) - len(tail) >= 3:
+                return f"{out[: len(out) - len(tail)].capitalize()} {tail.capitalize()}"
+        return out.capitalize()
+    return out
+
+
+_REQ_CODE = re.compile(r"\s*(?:[(\[]\s*[A-Za-z]{0,6}[- ]?\d{2,8}\s*[)\]]|[-\u2013|]\s*(?:req|job|id)?\s*#?[A-Za-z]{0,5}-?\d{3,}|#\s*\d{3,})\s*$", re.I)
+
+
+def title_without_code(title: str | None) -> str:
+    """A title without a trailing requisition code ("Product Marketing Manager (SMM194)" -> "Product Marketing Manager")."""
+    out = re.sub(r"\s+", " ", title or "").strip()
+    return _REQ_CODE.sub("", out).strip() or out
 
 
 def clean_title(title: str | None, company: str | None = None) -> str:

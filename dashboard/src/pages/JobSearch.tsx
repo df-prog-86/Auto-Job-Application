@@ -106,8 +106,6 @@ export function JobSearch() {
   const [autofillOnly, setAutofillOnly] = useState(false);
   const [sortBy, setSortBy] = useState<SortBy>("search");
   const [savedList, setSavedList] = useState<SavedSearch[]>(loadSavedSearches);
-  const [scoringAll, setScoringAll] = useState<{ done: number; total: number } | null>(null);
-  const [bulkError, setBulkError] = useState<string | null>(null);
   const [coverage, setCoverage] = useState<CoverageOut | null>(null);
   const lastCriteria = useRef<JobSearchCriteria | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -139,7 +137,6 @@ export function JobSearch() {
     listRef.current?.scrollTo({ top: 0 });
   }, [currentPage]);
   const anyAutofill = items.some((r) => autofillSite(r.url));
-  const unscored = items.filter((r) => r.match_score == null);
 
   const buildCriteria = (t: string[], k: string[], x: string[]): SavedCriteria => ({
     titles: t.join(", "),
@@ -279,36 +276,6 @@ export function JobSearch() {
       void qc.invalidateQueries({ queryKey: ["job-search-results"] });
     },
   });
-
-  const scoreAll = async () => {
-    const todo = unscored.map((r) => r.id);
-    if (todo.length === 0 || scoringAll) return;
-    setBulkError(null);
-    setScoringAll({ done: 0, total: todo.length });
-    let skipped = 0;
-    try {
-      for (let i = 0; i < todo.length; i++) {
-        try {
-          await api.scoreSearchResult(todo[i]);
-        } catch (e) {
-          // Setup problems (no resume, AI not connected) would repeat for every job, so stop there.
-          if (e instanceof ApiError && (e.status === 409 || e.status === 503)) throw e;
-          skipped += 1;
-        }
-        setScoringAll({ done: i + 1, total: todo.length });
-        await qc.invalidateQueries({ queryKey: ["job-search-results"] });
-      }
-      if (skipped > 0) {
-        setBulkError(
-          `${skipped} ${skipped === 1 ? "posting" : "postings"} couldn't be scored because the page is closed or couldn't be read. Open them to check.`,
-        );
-      }
-    } catch (e) {
-      setBulkError(errorText(e));
-    } finally {
-      setScoringAll(null);
-    }
-  };
 
   const saveThisSearch = () => {
     const c = settle();
@@ -585,9 +552,9 @@ export function JobSearch() {
           {errorText(openPage.error)}
         </p>
       )}
-      {(add.isError || remove.isError || bulkError) && (
+      {(add.isError || remove.isError) && (
         <p className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700" role="alert">
-          {bulkError ?? errorText(add.error ?? remove.error)}
+          {errorText(add.error ?? remove.error)}
         </p>
       )}
 
@@ -654,9 +621,6 @@ export function JobSearch() {
                 </select>
               </label>
               <MoreMenu>
-                <MenuItem onClick={() => void scoreAll()} disabled={unscored.length === 0 || scoringAll !== null}>
-                  {unscored.length > 0 ? `Check all against my resume (${unscored.length})` : "Check all against my resume"}
-                </MenuItem>
                 {anyAutofill && (
                   <MenuItem onClick={() => setAutofillOnly((v) => !v)}>
                     {autofillOnly ? "Show all jobs" : "Show only autofill ready"}
@@ -687,12 +651,6 @@ export function JobSearch() {
               </span>
             </div>
           )}
-          {scoringAll && (
-            <p className="animate-pulse px-1 text-xs text-ink-500 lg:col-span-2" role="status">
-              Checking {Math.min(scoringAll.done + 1, scoringAll.total)} of {scoringAll.total} against your resume. This can take a few minutes.
-            </p>
-          )}
-
           <div
             ref={listRef}
             className="overflow-y-auto overscroll-contain rounded-[20px] border border-[#e9e6f4] bg-white shadow-[0_1px_2px_rgba(31,27,46,0.05),0_10px_28px_rgba(75,50,184,0.07)]"
@@ -718,7 +676,7 @@ export function JobSearch() {
             <JobDetail
               key={selected.id}
               r={selected}
-              busy={busyId === selected.id || scoringAll !== null || hiding}
+              busy={busyId === selected.id || hiding}
               scoring={score.isPending && score.variables === selected.id}
               problem={score.isError && score.variables === selected.id ? errorText(score.error) : undefined}
               onScore={() => score.mutate(selected.id)}

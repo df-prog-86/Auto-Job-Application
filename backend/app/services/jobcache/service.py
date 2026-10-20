@@ -116,6 +116,28 @@ def _ranked_key(criteria: Any) -> str:
     return json.dumps(fields, default=str)
 
 
+def collapse_listings(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    One result for a job listed several times: the same employer, title (ignoring a requisition code), place, pay and posting
+    date AND the same opening words of the description. The best-ranked copy stays. Two real openings that merely share a title
+    differ in at least one of these, so they stay two results.
+    """
+    from app.services.jobcache.text import _squash, title_without_code
+
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for item in items:
+        desc = _squash((item.get("_desc") or "")[:300])
+        if item.get("location") and item.get("posted_at") and desc:
+            key = "|".join((_squash(item.get("company")), _squash(title_without_code(item.get("title"))), _squash(item["location"]),
+                            _squash(item.get("salary_text")), str(item["posted_at"]), desc))
+            if key in seen:
+                continue
+            seen.add(key)
+        out.append(item)
+    return out
+
+
 async def ranked_items(criteria: Any) -> list[dict[str, Any]]:
     """Every match in the saved lists for this search, best first. The same list is reused for ten minutes."""
     key = _ranked_key(criteria)
@@ -129,7 +151,7 @@ async def ranked_items(criteria: Any) -> list[dict[str, Any]]:
         return []
     extra, places = await asyncio.gather(expand_titles(criteria.titles), expand_places(getattr(criteria, "location", None)))
     out = await asyncio.to_thread(search_sync, criteria, set(), extra, 1_000_000, places)
-    items = out.items
+    items = collapse_listings(out.items)
     for item in items:  # the description note only tells copies of one job apart: its opening is enough, and keeps the kept lists small
         if item.get("_desc"):
             item["_desc"] = item["_desc"][:600]

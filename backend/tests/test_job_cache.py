@@ -1769,3 +1769,14 @@ def test_a_posting_open_for_over_half_a_year_ranks_below_a_fresh_one():
     fresh = matcher.score_row(plan, {**base, "posted_at": "2026-10-10"}, today)
     old = matcher.score_row(plan, {**base, "posted_at": "2021-06-17"}, today)
     assert old.fit < fresh.fit * 0.9
+
+
+def test_a_web_result_in_the_wrong_place_is_ruled_out_like_a_saved_one():
+    plan = matcher.build_plan(SimpleNamespace(titles="project manager", location="Chicago, IL", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
+    assert not matcher.place_ok(plan, "Vaesteras, Vastmanland County, Sweden; Vaasa, Finland", None)
+    assert not matcher.place_ok(plan, "Dallas, TX", None)
+    assert matcher.place_ok(plan, "Chicago, IL", None) and matcher.place_ok(plan, "Remote", "remote")
+
+
+def test_a_piped_us_place_is_written_as_city_and_state():
+    assert text.tidy_place("US | Illinois | Chicago") == "Chicago, IL"

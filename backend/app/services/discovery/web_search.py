@@ -916,6 +916,11 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
     if off_topic:
         log.warning("job search: %d web results left out as off topic", len(off_topic))
         web_items = [i for i in web_items if i not in off_topic]
+    # A web result placed where it should not be (another country, or a city that is not the one asked for) is left out, as in the saved lists.
+    wrong_place = [i for i in web_items if not matcher.place_ok(plan, i.get("location"), i.get("work_type"))]
+    if wrong_place:
+        log.warning("job search: %d web results left out for being in the wrong place", len(wrong_place))
+        web_items = [i for i in web_items if i not in wrong_place]
     # Keywords are required here too: the title, employer or one-line summary must hold every word of at least one of them.
     no_keyword = [i for i in web_items if not matcher.keyword_match(plan, f"{i['title']} {i['company']} {i.get('summary') or ''}")]
     if no_keyword:

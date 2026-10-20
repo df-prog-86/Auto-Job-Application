@@ -354,6 +354,15 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
     return Scored(row=row, fit=round(min(fit, 1.0), 4), title_fit=tf, place_fit=lf, via_description=via_desc, needs_description=needs_text)
 
 
+def place_ok(plan: Plan, location: str | None, work_type: str | None) -> bool:
+    """False when a posting's place rules it out (another country, or somewhere other than the place asked for): the saved-list rule, for web results too."""
+    if plan.work_type == "remote":
+        loc = LocationQuery(states=plan.loc.states, remote=True, empty=plan.loc.empty)
+    else:
+        loc = plan.loc
+    return location_fit(loc, location, work_type) > 0.0
+
+
 def keyword_match(plan: Plan, text: str) -> bool:
     """True when no keywords were asked for, or the text holds every word of at least one of them."""
     if not plan.keyword_phrases:

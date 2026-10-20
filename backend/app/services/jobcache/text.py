@@ -455,6 +455,9 @@ def tidy_place(location: str | None) -> str | None:
     """A place written the usual way: "Newton-MA" -> "Newton, MA", "Austin,TX" -> "Austin, TX", a list of ten cities -> three and "+7 more"."""
     if not location:
         return location
+    piped = re.match(r"^(?:US|USA|United States)\s*\|\s*([A-Za-z .]+?)\s*\|\s*([A-Za-z .'-]+)$", location.strip())
+    if piped and STATE_BY_NAME.get(piped.group(1).lower()):  # "US | Illinois | Chicago" -> "Chicago, IL"
+        return f"{piped.group(2).strip()}, {STATE_BY_NAME[piped.group(1).lower()]}"
     parts = []
     for part in re.split(r"\s*;\s*", location.strip()):
         m = _CITY_DASH_STATE.match(part)

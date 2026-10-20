@@ -25,7 +25,7 @@ from typing import Any
 
 from app.config import settings
 from app.services.jobcache.agency import is_agency
-from app.services.jobcache.text import is_vague_place
+from app.services.jobcache.text import is_vague_place, names_no_town
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS employers (
@@ -436,6 +436,25 @@ class JobCache:
             out.append({"id": r["id"], "url": r["url"], "location": r["location"]})
             if len(out) >= limit:
                 break
+        if len(out) < limit:  # then the ones that name only a state ("PA", "US; PA; NJ"): a city search cannot use them until the town is known
+            with self.session() as db:
+                short = [r[0] for r in db.execute("SELECT DISTINCT location FROM postings WHERE closed_at IS NULL AND location IS NOT NULL AND length(location) <= 40")]
+                state_only = [loc for loc in short if names_no_town(loc)]
+                rows = []
+                for i in range(0, len(state_only), 400):
+                    chunk = state_only[i : i + 400]
+                    rows += db.execute(
+                        "SELECT p.id, p.url, p.location, p.employer_id FROM postings p JOIN employers e ON e.id = p.employer_id "
+                        f"WHERE p.closed_at IS NULL AND e.enabled = 1 AND p.location IN ({','.join('?' for _ in chunk)}) ORDER BY e.hits DESC, p.first_seen DESC LIMIT ?",
+                        [*chunk, limit * 10],
+                    ).fetchall()
+            for r in rows:
+                if taken.get(r["employer_id"], 0) >= per_employer:
+                    continue
+                taken[r["employer_id"]] = taken.get(r["employer_id"], 0) + 1
+                out.append({"id": r["id"], "url": r["url"], "location": r["location"]})
+                if len(out) >= limit:
+                    break
         return out
 
     def set_location(self, url: str, location: str) -> bool:

@@ -240,7 +240,7 @@ async def fill_places(cache: JobCache, limit: int = 150, per_employer: int = 10)
     saved = 0
     for item in todo:
         loc = item.get("location")
-        if loc and loc != before[id(item)] and not is_vague_place(loc):
+        if loc and loc != before[id(item)] and not is_vague_place(loc) and not names_no_town(loc):
             if await asyncio.to_thread(cache.set_location, item["url"], loc):
                 saved += 1
     return len(todo), saved

@@ -17,6 +17,9 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
   python -m scripts.cache_tools discover --system greenhouse,lever,...|all [--pages 6] [--limit 300] [--out FILE]
                                                           # asks Common Crawl for employer boards we do not read yet and writes them to FILE.
                                                           # Read only; check them afterwards with 'add --from-file FILE' (a dry run).
+  python -m scripts.cache_tools industry [--retag]
+                                                          # works out each employer's industry from its name and job titles, saves it, and prints
+                                                          # how many employers and open jobs each industry has. Without --retag only blanks are filled.
   python -m scripts.cache_tools sites [--db PATH] [--max-hosts 60]
                                                           # asks Common Crawl's public web index which OTHER career sites each Workday
                                                           # employer we already read has (one company often runs several). Read only:
@@ -315,6 +318,10 @@ async def _add(args: argparse.Namespace) -> int:
         await asyncio.gather(*(one(s, client) for s in specs))
     print(f"\n{tally['added']} {'added' if args.apply else 'would be added'}, {tally['skipped']} skipped.", flush=True)
     if args.apply:
+        from app.services.jobcache.industry import tag_employers
+
+        with cache.session() as db:
+            tag_employers(db)  # the new employers get an industry (employers that already have one are left alone)
         # employers whose lists stopped at Workday's old 2,000-job cutoff are read again so the rest of their jobs come in
         with cache.session() as db:
             capped = [r["id"] for r in db.execute(
@@ -516,6 +523,21 @@ async def _sites(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_industry(args: argparse.Namespace) -> int:
+    from app.services.jobcache.industry import tag_employers
+
+    cache = JobCache()
+    with cache.session() as db:
+        table = tag_employers(db, retag=args.retag)
+    total_e = sum(n for n, _ in table.values())
+    total_j = sum(j for _, j in table.values()) or 1
+    print(f"{'industry':40s} {'employers':>10s} {'open jobs':>10s} {'share of jobs':>14s}")
+    for name, (n, jobs) in sorted(table.items(), key=lambda kv: -kv[1][1]):
+        print(f"{name:40s} {n:10,d} {jobs:10,d} {100 * jobs / total_j:13.1f}%")
+    print(f"{'ALL':40s} {total_e:10,d} {total_j:10,d}")
+    return 0
+
+
 def main() -> None:
     sys.stdout.reconfigure(line_buffering=True)  # show each line as it happens, even when piped to a file or tee
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -547,6 +569,8 @@ def main() -> None:
     ad.add_argument("--skip", action="append", help="leave out any employer whose address contains this text (repeatable)")
     ad.add_argument("--source", default="curated")
     ad.add_argument("--parallel", type=int, default=6, help="employers read at the same time (each is a different website)")
+    ind = sub.add_parser("industry")
+    ind.add_argument("--retag", action="store_true", help="redo every employer, not only the ones with no industry yet")
     pr = sub.add_parser("probe")
     pr.add_argument("--from-file", help="a file of specs, one per line (what 'eval_search gaps --write-probes' writes)")
     pr.add_argument("employers", nargs="*", help="system:identifier, e.g. 'workday:bilh.wd1.myworkdayjobs.com|bilh|external'")
@@ -557,6 +581,8 @@ def main() -> None:
         sys.exit(asyncio.run(_discover(args)))
     if args.cmd == "add":
         sys.exit(asyncio.run(_add(args)))
+    if args.cmd == "industry":
+        sys.exit(cmd_industry(args))
     if args.cmd == "probe":
         sys.exit(asyncio.run(_probe(args)))
     if args.cmd == "sites":

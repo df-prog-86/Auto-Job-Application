@@ -1218,3 +1218,25 @@ def test_already_judged_reads_earlier_output(tmp_path):
         "\n1 would be added, 2 skipped.\n"
     )
     assert _already_judged([str(f)]) == {"workable:acme", "bamboohr:foo", "lever:baz"}
+
+
+def test_industry_classify_and_tag(tmp_path):
+    from app.services.jobcache.industry import OTHER, STAFFING, classify, tag_employers
+    from app.services.jobcache.store import JobCache, PostingIn, now_ts
+
+    assert classify("Beth Israel Lahey Health", ["Registered Nurse", "Patient Access Rep", "Revenue Cycle Analyst"]) == "Healthcare"
+    assert classify("Acme Robotics", ["Software Engineer", "Backend Developer", "Product Designer"]) == "Technology"
+    assert classify("First Harbor Bank", ["Loan Officer", "Teller", "Credit Analyst"]) == "Finance and insurance"
+    assert classify("Apex Staffing Group", ["Registered Nurse"]) == STAFFING
+    assert classify("Quiet Co", ["Office Manager"]) == OTHER
+    assert classify("Quiet Co", []) == OTHER
+
+    cache = JobCache(str(tmp_path / "c.db"))
+    a, _ = cache.upsert_employer("greenhouse", "acmehospital", "Acme Hospital", "curated")
+    b, _ = cache.upsert_employer("greenhouse", "manual", "Manual Co", "curated", industry="Retail and consumer")
+    cache.apply_refresh(a, [PostingIn(ext_id="1", title="Registered Nurse", url="https://x/1")], now_ts(), 6.0, True)
+    with cache.session() as db:
+        table = tag_employers(db)
+        got = {r["name"]: r["industry"] for r in db.execute("SELECT name, industry FROM employers")}
+    assert got == {"Acme Hospital": "Healthcare", "Manual Co": "Retail and consumer"}  # one with an industry is left alone
+    assert table["Healthcare"][0] == 1

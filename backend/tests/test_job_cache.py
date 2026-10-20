@@ -1542,3 +1542,17 @@ def test_a_city_search_finds_local_jobs_among_many_better_worded_titles_elsewher
     titles = [i["title"] for i in out.items]
     assert "Senior Data Analyst, Finance" in titles
     assert all("Denver" not in (i["location"] or "") for i in out.items[:2])
+
+
+def test_one_employer_does_not_fill_the_screen():
+    from app.services.jobcache import matcher
+
+    plan = matcher.build_plan(crit(titles="operations coordinator", location=None))
+    rows = [{"title": "Operations Coordinator", "company": "Spam Co", "location": f"City {i}", "work_type": None} for i in range(6)]
+    rows += [{"title": "Operations Coordinator", "company": "Real Co", "location": "Boston, MA", "work_type": None},
+             {"title": "Operations Coordinator II", "company": "Other Co", "location": "Boston, MA", "work_type": None}]
+    out = matcher.diversify(matcher.rank(plan, rows))
+    companies = [s.row["company"] for s in out]
+    assert len(out) == 8  # nothing is dropped
+    assert companies[:3].count("Spam Co") == 1  # the repeated opening is shown once, the rest come after the other employers
+    assert set(companies[:3]) == {"Spam Co", "Real Co", "Other Co"}

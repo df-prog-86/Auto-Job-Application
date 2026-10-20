@@ -329,6 +329,32 @@ def rank(plan: Plan, rows: list[dict[str, Any]], today: dt.date | None = None) -
     return scored
 
 
+PER_EMPLOYER_CAP = 4  # results one employer may take before others get a turn
+PER_TITLE_CAP = 1  # the same title at the same employer (an opening repeated in many cities) counts once
+
+
+def diversify(scored: list[Scored]) -> list[Scored]:
+    """
+    Keeps the best-first order but stops one employer from filling the screen: the same title at the same employer is shown
+    once and an employer gets at most a few places; the rest follow after everyone else, so nothing is lost when there are
+    few results. A search with plenty of good matches reads as a mix of employers instead of nine copies of one posting.
+    """
+    kept: list[Scored] = []
+    later: list[Scored] = []
+    per_employer: dict[str, int] = {}
+    per_title: dict[tuple[str, str], int] = {}
+    for s in scored:
+        company = fold(s.row.get("company") or "")
+        title_key = (company, " ".join(sorted(set(all_stems(s.row.get("title") or "")))))
+        if per_employer.get(company, 0) >= PER_EMPLOYER_CAP or per_title.get(title_key, 0) >= PER_TITLE_CAP:
+            later.append(s)
+            continue
+        per_employer[company] = per_employer.get(company, 0) + 1
+        per_title[title_key] = per_title.get(title_key, 0) + 1
+        kept.append(s)
+    return kept + later
+
+
 def _date(value: Any) -> dt.date | None:
     if isinstance(value, dt.date):
         return value

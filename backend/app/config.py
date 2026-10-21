@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # It lives in its own database file so backups of job_agent.db stay small; it can always be rebuilt.
     JOB_CACHE_PATH: str = str(DEFAULT_DATA_DIR / "job_cache.db")
     JOB_CACHE_REFRESH_HOURS: int = 4  # how often the background refresh looks for employers that are due
-    JOB_CACHE_MAX_POSTINGS: int = 700_000  # oldest closed postings go first when the copy grows past this
+    JOB_CACHE_MAX_POSTINGS: int = 1_200_000  # oldest closed postings go first when the copy grows past this (open jobs are only cut after every closed one is gone)
     # Hiring systems to switch off, comma separated: workday, greenhouse, lever, ashby, smartrecruiters. A kill switch if one ever objects.
     JOB_CACHE_DISABLED_SYSTEMS: str = ""
     JOB_SEARCH_USE_DESCRIPTION: bool = True  # search also reads the opening lines of job descriptions (False turns it off)

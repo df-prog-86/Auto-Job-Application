@@ -48,7 +48,7 @@ function withDraft(values: string[], draft: string): string[] {
   return out;
 }
 
-type SortBy = "search" | "resume" | "newest";
+type SortBy = "search" | "newest";
 
 /** Time of the posting date, or null when it is missing or unreadable. */
 function postedTime(r: JobSearchResultOut): number | null {
@@ -57,7 +57,7 @@ function postedTime(r: JobSearchResultOut): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
-/** Best search match, best resume match, or newest posted. Jobs missing the value always go last. */
+/** Best search match, or newest posted. Jobs missing the value always go last. */
 function sortResults(list: JobSearchResultOut[], by: SortBy): JobSearchResultOut[] {
   const missingLast = (a: number | null, b: number | null) => {
     if (a === null && b === null) return 0;
@@ -66,10 +66,7 @@ function sortResults(list: JobSearchResultOut[], by: SortBy): JobSearchResultOut
     return b - a;
   };
   return [...list].sort((a, b) => {
-    if (by === "resume") {
-      const c = missingLast(a.match_score ?? null, b.match_score ?? null);
-      if (c !== 0) return c;
-    } else if (by === "search") {
+    if (by === "search") {
       const c = missingLast(a.fit_score ?? null, b.fit_score ?? null);
       if (c !== 0) return c;
     }
@@ -631,11 +628,10 @@ export function JobSearch() {
                 Sort:
                 <select
                   value={sortBy}
-                  onChange={(e) => changeSort(e.target.value === "resume" ? "resume" : e.target.value === "newest" ? "newest" : "search")}
+                  onChange={(e) => changeSort(e.target.value === "newest" ? "newest" : "search")}
                   className="cursor-pointer rounded-lg bg-transparent py-1 pl-1 pr-1 text-[13px] font-semibold text-ink-900 focus:outline-none focus:ring-2 focus:ring-brand-200"
                 >
                   <option value="search">Best match</option>
-                  <option value="resume">Best resume match</option>
                   <option value="newest">Newest</option>
                 </select>
               </label>

@@ -267,7 +267,7 @@ async def _icims_places(cache: JobCache, items: list[dict[str, Any]]) -> int:
 
     if not items:
         return 0
-    gate = asyncio.Semaphore(4)
+    gate = asyncio.Semaphore(8)  # these pages are on many different employers' sites, so reading more at once is not hard on any one of them
     saved = 0
     none: list[str] = []
 

@@ -301,6 +301,69 @@ def _pay(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _country(args: argparse.Namespace) -> int:
+    """
+    For employers whose job lists show no usable place, opens up to three of their job pages and reads the country each page publishes
+    (iCIMS and most systems in the page's job data, Workday in its job details). Prints a verdict per employer. Saves nothing.
+    """
+    import httpx
+
+    from app.services.discovery import manual_extraction as mx
+    from app.services.discovery.ats import workday_api_url
+    from app.services.jobcache.service import _description_request
+    from app.services.jobcache.text import country_from_page, is_us_country
+    from app.services.safe_fetch import safe_get
+
+    specs = [ln.split("#")[0].strip().strip("'") for ln in Path(args.from_file).read_text().splitlines() if ln.split("#")[0].strip()]
+    throttle, gate = Throttle(), asyncio.Semaphore(args.parallel)
+    tally = {"US": 0, "FOREIGN": 0, "UNKNOWN": 0}
+
+    async def country_of(url: str) -> str | None:
+        api = workday_api_url(url)
+        try:
+            if api:
+                resp = await safe_get(api, headers={"User-Agent": mx._USER_AGENT, "Accept": "application/json"}, timeout=10.0)
+                info = (resp.json() or {}).get("jobPostingInfo") or {} if resp.status_code == 200 else {}
+                c = info.get("country")
+                return (c.get("descriptor") if isinstance(c, dict) else c) or None
+            req = _description_request(url)
+            address = req[1] if req and req[0] == "icims" else url
+            resp = await safe_get(address, headers={"User-Agent": mx._USER_AGENT, "Accept": "text/html,application/json"}, timeout=10.0)
+            return country_from_page(resp.text) if resp.status_code == 200 else None
+        except Exception:
+            return None
+
+    async def one(spec: str, client: Any) -> None:
+        system, _, ident = spec.partition(":")
+        async with gate:
+            try:
+                res = await read_employer(system, ident, client, throttle)
+            except Exception as exc:
+                print(f"  UNKNOWN  {spec}  could not be read ({type(exc).__name__})", flush=True)
+                tally["UNKNOWN"] += 1
+                return
+            posts = res.postings
+            step = max(len(posts) // args.pages, 1)
+            picks = posts[::step][: args.pages]
+            found = []
+            for p in picks:
+                c = await country_of(p.url)
+                if c:
+                    found.append(c)
+                await asyncio.sleep(1.0)
+        if not found:
+            verdict = "UNKNOWN"
+        else:
+            verdict = "US" if sum(is_us_country(c) for c in found) * 2 >= len(found) else "FOREIGN"
+        tally[verdict] += 1
+        print(f"  {verdict:8s} {spec}  {len(posts)} jobs; countries read: {', '.join(found) or 'none'}", flush=True)
+
+    async with make_client() as client:
+        await asyncio.gather(*(one(s, client) for s in specs))
+    print(f"\nUS {tally['US']}, foreign {tally['FOREIGN']}, could not tell {tally['UNKNOWN']}. Nothing was saved.", flush=True)
+    return 0
+
+
 async def _reread(args: argparse.Namespace) -> int:
     path = Path(args.db)
     if not path.exists():
@@ -1038,6 +1101,10 @@ def main() -> None:
     dt_.add_argument("--per-employer", type=int, default=10, help="most postings opened from one employer per batch")
     dt_.add_argument("--pause", type=float, default=2.0, help="seconds to wait between batches")
     sub.add_parser("pay")
+    co = sub.add_parser("country")
+    co.add_argument("--from-file", required=True)
+    co.add_argument("--pages", type=int, default=3, help="job pages opened per employer")
+    co.add_argument("--parallel", type=int, default=4)
     nm = sub.add_parser("names")
     nm.add_argument("--limit", type=int, default=25)
     nm.add_argument("--find", action="store_true", help="look the real names up and write a file to review (changes nothing)")
@@ -1106,6 +1173,8 @@ def main() -> None:
         sys.exit(cmd_health(args))
     if args.cmd == "places":
         sys.exit(asyncio.run(_places(args)))
+    if args.cmd == "country":
+        sys.exit(asyncio.run(_country(args)))
     if args.cmd == "pay":
         sys.exit(_pay(args))
     if args.cmd == "dates":

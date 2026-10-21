@@ -2152,3 +2152,11 @@ def test_description_index_reads_the_first_two_thousand_characters_and_can_be_re
     cache.set_description(pid, ("filler words " * 100) + "revenue cycle operations " + ("more filler " * 50))  # the phrase sits past character 1,000
     assert cache.reindex_descriptions(rebuild=True) >= 1
     assert len(cache.candidates_by_description('"revenue cycle"', 10)) == 1
+
+
+def test_a_job_pages_country_is_read_from_its_published_data():
+    assert text.country_from_page('{"jobLocation":{"address":{"addressCountry":"US","addressRegion":"IL"}}}') == "US"
+    assert text.country_from_page('{"addressCountry":{"@type":"Country","name":"United Kingdom"}}') == "United Kingdom"
+    assert text.country_from_page('\\"addressCountry\\":\\"Germany\\"') == "Germany"
+    assert text.country_from_page("no job data here") is None
+    assert text.is_us_country("United States of America") and text.is_us_country("US") and not text.is_us_country("Canada")

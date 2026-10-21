@@ -668,6 +668,24 @@ def posted_from_page(page: str | None) -> dt.date | None:
     return None
 
 
+_COUNTRY = re.compile(
+    r'"addressCountry"\s*:\s*(?:"([^"]{2,60})"|\{[^{}]*?"name"\s*:\s*"([^"]{2,60})")|itemprop=["\']addressCountry["\'][^>]*content=["\']([^"\']{2,60})', re.I
+)
+_US_COUNTRY = {"us", "usa", "u.s.", "u.s.a.", "united states", "united states of america", "america"}
+
+
+def country_from_page(page: str | None) -> str | None:
+    """The country a job page publishes for search engines (jobLocation addressCountry), or None."""
+    m = _COUNTRY.search((page or "")[:800000].replace('\\"', '"'))
+    if not m:
+        return None
+    return html_lib.unescape(next(g for g in m.groups() if g)).strip() or None
+
+
+def is_us_country(country: str | None) -> bool:
+    return (country or "").strip().lower() in _US_COUNTRY
+
+
 def lead_with_place(location: str | None, wanted: list[str]) -> str | None:
     """A list of places with the ones the search asked for first, so shortening it to three ("A; B; C +4 more") never hides the place searched."""
     if not location or ";" not in location or not wanted:

@@ -1154,3 +1154,44 @@ def test_no_company_site_is_asked_about_more_than_three_jobs_at_once(monkeypatch
     items = [{"url": f"https://{h}.example.com/job/{n}", "title": "x"} for h in "ab" for n in range(12)]
     asyncio.run(web_search.enrich_from_ats(items))
     assert 1 <= peak["a"] <= web_search.ENRICH_PER_HOST and 1 <= peak["b"] <= web_search.ENRICH_PER_HOST
+
+
+def test_pages_are_cut_from_one_checked_list_so_nothing_changes_between_pages(monkeypatch):
+    import asyncio
+    import datetime as dt
+    from app.schemas.job_search import JobSearchIn
+    from app.services.discovery import web_search as ws
+    from app.services.jobcache import service as cache_service
+
+    places = ["Santa Fe, NM" if i % 3 else "Taos, NM" for i in range(30)]  # a third are in another town and fail the place check
+    ranked = [
+        {"title": f"Chef {i}", "company": "Acme", "location": p, "work_type": None, "salary_text": None, "posted_at": dt.date.today(), "summary": None,
+         "url": f"https://acme.wd1.myworkdayjobs.com/en-US/c/job/x/Chef_R{i}", "url_key": f"k{i}", "grounded": True, "fit": 0.9 - i / 100, "employer_id": 1, "read_at": None}
+        for i, p in enumerate(places)
+    ]
+
+    async def fake_ranked(criteria):
+        return ranked
+
+    async def keep(items, *a, **k):
+        return items, 0
+
+    async def no_titles(titles):
+        return []
+
+    async def fake_drop(criteria, urls):
+        return None
+
+    monkeypatch.setattr(cache_service, "ranked_items", fake_ranked)
+    monkeypatch.setattr(cache_service, "expand_titles", no_titles)
+    monkeypatch.setattr(cache_service, "drop_from_ranked", fake_drop)
+    for name in ("enrich_from_ats", "fill_posted_dates", "drop_closed"):
+        monkeypatch.setattr(ws, name, keep)
+    c = JobSearchIn(titles="chef", location="Santa Fe, NM", count=10, page=1)
+    first, total_first = asyncio.run(ws.search_page(c, set(), 0))
+    second, total_second = asyncio.run(ws.search_page(c, set(), 10))
+    again, total_again = asyncio.run(ws.search_page(c, set(), 0))
+    assert total_first == total_second == total_again == 20  # the count is true from the first page on
+    assert len(first) == 10 and len(second) == 10
+    assert [i["title"] for i in first] == [i["title"] for i in again]  # opening page 2 changed nothing on page 1
+    assert not ({i["title"] for i in first} & {i["title"] for i in second})

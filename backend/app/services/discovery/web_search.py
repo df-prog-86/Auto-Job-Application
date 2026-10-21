@@ -1048,6 +1048,46 @@ async def _check_page(criteria: JobSearchIn, plan: Any, available: list[dict[str
     return kept[: criteria.count], rejected
 
 
+FINAL_MAX = 100  # the most jobs checked and kept for one search: the list the pages are cut from
+_FINAL: dict[tuple, tuple[float, list[dict[str, Any]]]] = {}
+
+
+async def _finalized(criteria: JobSearchIn, known_keys: set[str]) -> list[dict[str, Any]]:
+    """
+    The search's final list: the best matches (up to FINAL_MAX), each already checked against the employer's own system. This is
+    done once per search, so the pages are only slices of one fixed list: opening another page never removes a job, changes the
+    count or moves the page edges. Jobs that fail a check are taken off the ranked list for good.
+    """
+    from app.services.jobcache import matcher, service as cache_service
+
+    ranked = await cache_service.ranked_items(criteria)
+    key = (cache_service._ranked_key(criteria), id(ranked), len(ranked))
+    hit = _FINAL.get(key)
+    if hit and time.time() - hit[0] < cache_service.RANKED_TTL_SECONDS:
+        return hit[1]
+    available = [i for i in ranked if not (loose_keys(i["url"]) & known_keys)]
+    try:
+        extra_titles = await cache_service.expand_titles(criteria.titles)
+    except Exception:
+        extra_titles = []
+    plan = matcher.build_plan(criteria, extra_titles)
+    kept, rejected = await _check_page(criteria.model_copy(update={"count": FINAL_MAX}), plan, available, 0)
+    for item in kept:
+        item["fit_score"] = item.get("fit")
+        item["fit_note"] = fit_note(plan, item)
+        for field_name in ("ats_checked", "ats_live", "site_url", "fit", "employer_id", "_desc", "read_at"):
+            item.pop(field_name, None)
+    if rejected:
+        await cache_service.drop_from_ranked(criteria, set(rejected))
+        ranked = await cache_service.ranked_items(criteria)  # the list was replaced without them: the final list belongs to that one
+    final_key = (cache_service._ranked_key(criteria), id(ranked), len(ranked))
+    _FINAL[final_key] = (time.time(), kept)
+    _FINAL[key] = (time.time(), kept)
+    for old in sorted(_FINAL, key=lambda k: _FINAL[k][0])[: max(len(_FINAL) - 12, 0)]:
+        _FINAL.pop(old, None)
+    return kept
+
+
 async def search_page(
     criteria: JobSearchIn,
     known_keys: set[str],
@@ -1057,51 +1097,18 @@ async def search_page(
     count_only: bool = False,
 ) -> tuple[list[dict[str, Any]], int]:
     """
-    One page of the saved-list matches: (the checked results at ranks offset..offset+count, how many matches there are in all).
-    The ranked list is built once per search and reused, so any page, the last included, costs about as much as the first. Only
-    the jobs on the page are checked against the employer's system. The count also checks the first page, so a search whose
-    first jobs all fail a rule (no pay, wrong place) does not claim matches it cannot show.
+    One page of the search's final list: (the jobs at ranks offset..offset+count, how many there are in all). The list is checked
+    once (see _finalized), so the count and the pages never change after the first result is shown.
     """
-    from app.services.jobcache import matcher, service as cache_service
-
-    ranked = await cache_service.ranked_items(criteria)
-    available = [i for i in ranked if not (loose_keys(i["url"]) & known_keys)]
-    if count_only and not (criteria.location or criteria.require_salary or criteria.posted_within_days):
-        return [], len(available)  # nothing that a page check could remove: the count is final
+    final = await _finalized(criteria, known_keys)
+    available = [i for i in final if not (loose_keys(i["url"]) & known_keys)]  # a job added or hidden since leaves the list
     if sort == "newest":  # the whole list, newest first (no date last); equal dates keep their best-match order
         available = sorted(available, key=lambda i: (i.get("posted_at") is None, -(i["posted_at"].toordinal() if i.get("posted_at") else 0)))
     elif sort == "resume" and resume_scores:  # jobs already checked against the resume first, best score first; the rest in best-match order
         available = sorted(available, key=lambda i: -(resume_scores.get(i["url_key"], -1.0)))
-    if offset >= len(available):
+    if count_only:
         return [], len(available)
-    try:
-        extra_titles = await cache_service.expand_titles(criteria.titles)
-    except Exception:
-        extra_titles = []
-    plan = matcher.build_plan(criteria, extra_titles)
-    ckey = (cache_service._ranked_key(criteria), sort, offset, criteria.count)
-    hit = _PAGE_CHECKED.get(ckey)
-    still_there = bool(hit) and {i["url"] for i in available[offset : offset + len(hit[1])]} == {i["url"] for i in hit[1]}  # the same jobs are still at this place in the list
-    if hit and still_there and time.time() - hit[0] < PAGE_CHECKED_TTL:
-        _, kept, rejected = hit
-        kept = [dict(i) for i in kept]
-        rejected = []  # already taken off the list when it was first checked
-    else:
-        kept, rejected = await _check_page(criteria, plan, available, offset)
-        for item in kept:
-            item["fit_score"] = item.get("fit")
-            item["fit_note"] = fit_note(plan, item)
-            for key in ("ats_checked", "ats_live", "site_url", "fit", "employer_id", "_desc", "read_at"):
-                item.pop(key, None)
-        _PAGE_CHECKED[ckey] = (time.time(), [dict(i) for i in kept], [])
-        for old in sorted(_PAGE_CHECKED, key=lambda k: _PAGE_CHECKED[k][0])[: max(len(_PAGE_CHECKED) - 12, 0)]:
-            _PAGE_CHECKED.pop(old, None)
-        if rejected:
-            await cache_service.drop_from_ranked(criteria, set(rejected))
-        total = max(len(available) - len(rejected), len(kept))
-        _PAGE_TOTAL[ckey] = total
-    total = _PAGE_TOTAL.get(ckey, len(available))
-    return ([], total) if count_only else (kept, total)
+    return [dict(i) for i in available[offset : offset + criteria.count]], len(available)
 
 
 _PAGE_TOTAL: dict[tuple, int] = {}

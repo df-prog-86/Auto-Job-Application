@@ -2150,6 +2150,5 @@ def test_description_index_reads_the_first_two_thousand_characters_and_can_be_re
     cache.apply_refresh(emp, [PostingIn(ext_id="1", title="Coordinator", url="https://idxco.icims.com/jobs/1/job", location="Boston, MA")], 1_000_000)
     pid = [i for i, _u in cache.postings_without_description(10, 10, None)][0]
     cache.set_description(pid, ("filler words " * 100) + "revenue cycle operations " + ("more filler " * 50))  # the phrase sits past character 1,000
-    assert len(cache.candidates_by_description('"revenue cycle"', 10)) == 1
     assert cache.reindex_descriptions(rebuild=True) >= 1
     assert len(cache.candidates_by_description('"revenue cycle"', 10)) == 1

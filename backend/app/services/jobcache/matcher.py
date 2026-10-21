@@ -128,7 +128,8 @@ def build_plan(criteria: Any, extra_titles: list[str] | None = None, extra_place
                     desc_phrases.append(item)
     loc = parse_location_query(getattr(criteria, "location", None))
     if loc.cities or loc.states:
-        loc.remote = bool(getattr(criteria, "include_remote", False))  # the place box is a city and state only: remote comes from its own checkbox
+        # "Any" work type brings remote jobs in after the jobs in the place and its area; Hybrid and On site never show remote jobs, and Remote shows only them
+        loc.remote = getattr(criteria, "work_type", "any") in (None, "any") or bool(getattr(criteria, "include_remote", False))
     if loc.cities:  # nearby places only widen a search that names a city
         loc.near = [r for r in (place_ref(p) for p in extra_places or []) if r][:15]
     return Plan(

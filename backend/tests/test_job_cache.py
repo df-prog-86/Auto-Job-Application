@@ -221,10 +221,10 @@ def test_search_applies_place_work_type_pay_dates_and_exclusions():
 
     assert ids(location="Boston, MA")[0] == "1"  # right place and recent, so first
     assert "2" not in ids(location="Boston, MA")  # Dallas is not Boston
-    assert "3" not in ids(location="Boston, MA")  # remote was not asked for: a city search shows that city and its area only
-    assert "3" not in ids(location="Boston, MA", work_type="onsite")
-    assert "3" in ids(location="Boston, MA", include_remote=True)  # the remote checkbox brings remote jobs in
-    assert "3" not in ids(location="Boston, MA or remote")  # typing it in the place box does nothing: the box is a city and state only
+    shown = ids(location="Boston, MA")
+    assert "3" in shown and shown.index("3") > shown.index("1")  # "Any" brings remote jobs in, behind the jobs in the city asked for
+    assert "3" not in ids(location="Boston, MA", work_type="onsite")  # On site and Hybrid never show remote jobs
+    assert "3" not in ids(location="Boston, MA", work_type="hybrid")
     assert ids(work_type="remote") == ["3"]
     assert "4" not in ids(location="Boston, MA", posted_within_days=30) and "4" in ids(location="Boston, MA")
     assert "5" not in ids(location="Boston, MA", target_salary=100000)
@@ -1777,8 +1777,9 @@ def test_a_web_result_in_the_wrong_place_is_ruled_out_like_a_saved_one():
     plan = matcher.build_plan(SimpleNamespace(titles="project manager", location="Chicago, IL", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
     assert not matcher.place_ok(plan, "Vaesteras, Vastmanland County, Sweden; Vaasa, Finland", None)
     assert not matcher.place_ok(plan, "Dallas, TX", None)
-    assert matcher.place_ok(plan, "Chicago, IL", None) and not matcher.place_ok(plan, "Remote", "remote")  # remote only comes with the remote checkbox
-    assert matcher.place_ok(matcher.build_plan(SimpleNamespace(titles="project manager", location="Chicago, IL", include_remote=True, work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), []), "Remote", "remote")
+    assert matcher.place_ok(plan, "Chicago, IL", None) and matcher.place_ok(plan, "Remote", "remote")  # "Any" work type brings remote jobs in
+    onsite = matcher.build_plan(SimpleNamespace(titles="project manager", location="Chicago, IL", work_type="onsite", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
+    assert not matcher.place_ok(onsite, "Remote", "remote")  # On site and Hybrid never show remote jobs
 
 
 def test_a_piped_us_place_is_written_as_city_and_state():

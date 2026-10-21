@@ -18,11 +18,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+import httpx
+
 from app.config import settings
 from app.services.jobcache import geo, matcher, onet
 from app.services.jobcache.keys import loose_keys, url_key
-from app.services.jobcache.readers import SYSTEMS, ReaderError, Throttle, employer_ref, make_client, read_employer
-from app.services.jobcache.store import JobCache, now_ts
+from app.services.jobcache.readers import SYSTEMS, USER_AGENT, ReaderError, Throttle, employer_ref, make_client, read_employer
+from app.services.jobcache.store import JobCache, guess_name, now_ts
 from app.services.jobcache.text import fold, is_vague_place, names_no_town, parse_location_query, place_ref
 
 log = logging.getLogger("job_cache")
@@ -313,6 +315,31 @@ RANKED_KEEP = 6
 def _ranked_key(criteria: Any) -> str:
     fields = [getattr(criteria, k, None) for k in ("titles", "location", "work_type", "keywords", "exclude_companies", "target_salary", "require_salary", "posted_within_days", "include_remote")]
     return json.dumps(fields, default=str)
+
+
+# A web search that just ran for exactly these criteria is not repeated within the hour: the employers it found are in the saved lists.
+_WEB_DONE: dict[str, float] = {}
+WEB_REPEAT_SECONDS = 3600
+
+
+def _web_key(criteria: Any) -> str:
+    def norm(v: Any) -> Any:
+        return re.sub(r"\s+", " ", v.strip().lower()) if isinstance(v, str) else v
+
+    fields = [norm(getattr(criteria, k, None)) for k in ("titles", "location", "work_type", "keywords", "exclude_companies", "target_salary", "require_salary", "posted_within_days", "include_remote")]
+    return json.dumps(fields, default=str)
+
+
+def web_searched_recently(criteria: Any) -> bool:
+    done = _WEB_DONE.get(_web_key(criteria))
+    return done is not None and time.time() - done < WEB_REPEAT_SECONDS
+
+
+def note_web_searched(criteria: Any) -> None:
+    now = time.time()
+    _WEB_DONE[_web_key(criteria)] = now
+    for old in [k for k, t in _WEB_DONE.items() if now - t >= WEB_REPEAT_SECONDS]:
+        _WEB_DONE.pop(old, None)
 
 
 def collapse_listings(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -627,6 +654,21 @@ WEB_NEW_EMPLOYERS_MAX = 10  # employers adopted from one web search
 _ADOPTING: set[asyncio.Task] = set()  # background reads in progress (kept so they are not dropped half way)
 
 
+async def real_name_from_posting(guess: str, url: str) -> str | None:
+    """The employer's name as one of its job pages states it, kept only when it is plainly the same employer as the guess."""
+    from app.services.jobcache.text import company_from_page, same_company
+
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True, headers={"User-Agent": USER_AGENT, "Accept": "text/html"}) as client:
+            resp = await client.get(url)
+        if resp.status_code != 200:
+            return None
+        found = company_from_page(resp.text[:500_000])
+    except Exception:
+        return None
+    return found if found and same_company(guess, found) else None
+
+
 async def adopt_employers_from_web(pairs: list[tuple[str, str | None]]) -> int:
     """
     Employers behind the jobs a web search found that the saved lists did not have yet: each one's own job list is read, and it is
@@ -671,6 +713,12 @@ async def adopt_employers_from_web(pairs: list[tuple[str, str | None]]) -> int:
                     continue
                 if result.name:
                     await asyncio.to_thread(cache.upsert_employer, system, identifier, result.name, "web_search")
+                elif " " not in (company or "") and result.postings:
+                    # The list does not name its employer and the name we have is only the address run together ("Morganlewis"):
+                    # a job page states the real one.
+                    page_name = await real_name_from_posting(guess_name(system, identifier), result.postings[0].url)
+                    if page_name:
+                        await asyncio.to_thread(cache.rename_employer, eid, page_name)
                 await asyncio.to_thread(cache.apply_refresh, eid, result.postings, now_ts(), PRIORITY_HOURS, result.complete)
                 new_ids.append(eid)
         if new_ids and settings.JOB_CACHE_DESCRIPTION_FILL > 0:

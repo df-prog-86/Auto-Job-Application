@@ -175,8 +175,11 @@ async def search_web(payload: JobSearchIn, db: Session = Depends(get_db)) -> Job
         known |= loose_keys(url)
     for (url,) in db.query(JobSearchResult.url).filter(JobSearchResult.status.in_(("removed", "added"))).all():
         known |= loose_keys(url)
+    if cache_service.web_searched_recently(payload):  # the identical search ran within the hour: its finds are already in the saved lists
+        return JobSearchWebOut(added=0, total=len(await cache_service.ranked_items(payload)))
     try:
         outcome = await web_search.search_jobs_full(payload, known_keys=known, web_only=True)
+        cache_service.note_web_searched(payload)
     except Exception:  # the web search is a bonus on top of the saved lists: any failure just means nothing is added
         total = len(await cache_service.ranked_items(payload))
         return JobSearchWebOut(added=0, total=total)

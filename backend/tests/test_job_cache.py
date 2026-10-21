@@ -1976,3 +1976,57 @@ def test_employers_behind_web_search_finds_join_the_saved_lists(app_and_db, monk
     names = [e["name"] for e in JobCache().list_employers()]
     assert names == ["Real Co"]  # the one that could not be read is not kept
     assert asyncio.run(service.adopt_employers_from_web([("https://jobs.lever.co/realco/71580e53-408b-4084-9ba6-693c69564b39", "Real Co")])) == 0  # already known
+
+
+def test_company_name_is_read_from_a_job_page_only_when_it_is_the_same_employer():
+    from app.services.jobcache import text
+
+    page = '<script type="application/ld+json">{"@context":"https://schema.org","@type":"JobPosting","hiringOrganization":{"@type":"Organization","name":"Morgan, Lewis &amp; Bockius LLP"}}</script>'
+    assert text.company_from_page(page) == "Morgan, Lewis & Bockius LLP"
+    graph = '<script type="application/ld+json">{"@graph":[{"@type":"WebSite"},{"@type":["JobPosting"],"hiringOrganization":"Hospice.com"}]}</script>'
+    assert text.company_from_page(graph) == "Hospice.com"
+    assert text.company_from_page('<meta property="og:site_name" content="Acme Careers">') == "Acme Careers"
+    assert text.company_from_page("<html>nothing</html>") is None and text.company_from_page(None) is None
+    assert text.same_company("Morganlewis", "Morgan, Lewis & Bockius LLP")
+    assert text.same_company("Hospicecom", "Hospice.com")
+    assert not text.same_company("Hklaw", "Holland & Knight LLP")  # not plainly the same: the guess stays
+
+
+def test_web_adopted_employer_gets_the_name_its_job_page_states(app_and_db, monkeypatch):
+    import asyncio
+
+    from app.config import settings
+
+    async def fake_read(system, identifier, http, throttle):
+        return readers.ReadResult([post(1, "Paralegal")])  # the list does not name its employer
+
+    async def fake_name(guess, url):
+        return "Morgan, Lewis & Bockius LLP"
+
+    monkeypatch.setattr(service, "read_employer", fake_read)
+    monkeypatch.setattr(service, "real_name_from_posting", fake_name)
+    monkeypatch.setattr(settings, "JOB_CACHE_DESCRIPTION_FILL", 0)
+
+    async def go():
+        await service.adopt_employers_from_web([("https://jobs.lever.co/morganlewis/71580e53-408b-4084-9ba6-693c69564b39", "MorganLewis")])
+        await asyncio.gather(*list(service._ADOPTING))
+
+    asyncio.run(go())
+    assert [e["name"] for e in JobCache().list_employers()] == ["Morgan, Lewis & Bockius LLP"]
+
+
+def test_the_web_search_is_not_repeated_within_the_hour_unless_something_changes(monkeypatch):
+    from types import SimpleNamespace
+
+    base = dict(titles="Paralegal", location="Philadelphia, PA", work_type="any", keywords=None, exclude_companies=None,
+                target_salary=None, require_salary=False, posted_within_days=0, include_remote=False)
+    service._WEB_DONE.clear()
+    first = SimpleNamespace(**base)
+    assert not service.web_searched_recently(first)
+    service.note_web_searched(first)
+    assert service.web_searched_recently(SimpleNamespace(**{**base, "titles": " paralegal "}))  # spacing and case do not matter
+    for change in ({"location": "Pittsburgh, PA"}, {"include_remote": True}, {"posted_within_days": 7}, {"keywords": "litigation"}, {"target_salary": 60000}):
+        assert not service.web_searched_recently(SimpleNamespace(**{**base, **change}))
+    real = service.time.time
+    monkeypatch.setattr(service.time, "time", lambda: real() + 3601)
+    assert not service.web_searched_recently(first)  # an hour later it runs again

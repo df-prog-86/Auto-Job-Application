@@ -237,6 +237,10 @@ class JobCache:
             )
             return int(cur.lastrowid), True
 
+    def rename_employer(self, employer_id: int, name: str) -> None:
+        with self.session() as db:
+            db.execute("UPDATE employers SET name = ? WHERE id = ?", (name, employer_id))
+
     def find_employer(self, ats: str, identifier: str) -> int | None:
         """The id of an employer already in the saved lists, or None."""
         with self.session() as db:

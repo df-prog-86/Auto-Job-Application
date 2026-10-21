@@ -6,6 +6,8 @@ Everything here is pure (no network, no database) so it is easy to test and fast
 from __future__ import annotations
 
 import datetime as dt
+import html as html_lib
+import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -502,6 +504,58 @@ def clean_company(name: str | None) -> str:
                 return f"{out[: len(out) - len(tail)].capitalize()} {tail.capitalize()}"
         return out.capitalize()
     return out
+
+
+_LD_JSON = re.compile(r"<script[^>]+application/ld\+json[^>]*>(.*?)</script>", re.S | re.I)
+_SITE_NAME = (
+    re.compile(r"<meta[^>]+property=[\"']og:site_name[\"'][^>]+content=[\"']([^\"']+)", re.I),
+    re.compile(r"<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+property=[\"']og:site_name[\"']", re.I),
+)
+
+
+def _hiring_org(node: object) -> str | None:
+    if isinstance(node, list):
+        for n in node:
+            found = _hiring_org(n)
+            if found:
+                return found
+    elif isinstance(node, dict):
+        kind = node.get("@type")
+        kinds = kind if isinstance(kind, list) else [kind]
+        org = node.get("hiringOrganization")
+        if "JobPosting" in kinds and org:
+            name = org.get("name") if isinstance(org, dict) else org
+            if isinstance(name, str) and name.strip():
+                return name
+        for key in ("@graph", "mainEntity"):
+            found = _hiring_org(node.get(key))
+            if found:
+                return found
+    return None
+
+
+def company_from_page(page: str | None) -> str | None:
+    """The employer's own name as a job page states it: the hiring organisation in the posting's data, else the site name."""
+    if not page:
+        return None
+    for m in _LD_JSON.finditer(page):
+        try:
+            name = _hiring_org(json.loads(html_lib.unescape(m.group(1)).strip()))
+        except ValueError:
+            continue
+        if name:
+            return re.sub(r"\s+", " ", html_lib.unescape(name)).strip()[:80] or None
+    for pattern in _SITE_NAME:
+        m = pattern.search(page)
+        if m:
+            return re.sub(r"\s+", " ", html_lib.unescape(m.group(1))).strip()[:80] or None
+    return None
+
+
+def same_company(guess: str | None, found: str | None) -> bool:
+    """True when a name read from a page is the same employer as the one guessed from its address ("Morganlewis" and "Morgan, Lewis & Bockius LLP")."""
+    a, b = _squash(guess), _squash(found)
+    return len(a) >= 4 and len(b) >= 4 and (a in b or b in a)
 
 
 def lead_with_place(location: str | None, wanted: list[str]) -> str | None:

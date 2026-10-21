@@ -24,6 +24,7 @@ from app.services.jobcache.text import (
     all_stems,
     content_stems,
     effective_work_type,
+    name_excluded,
     fold,
     is_vague_place,
     level_of,
@@ -312,7 +313,7 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
     """A candidate's overall fit, or None when it should not be shown at all (wrong title, place, work type, pay or date)."""
     today = today or dt.date.today()
     company = (row.get("company") or "").lower()
-    if any(e in company or company in e for e in plan.excluded if company):
+    if company and name_excluded(company, list(plan.excluded)):
         return None
     tf = title_fit(plan, row["title"])
     via_desc = False

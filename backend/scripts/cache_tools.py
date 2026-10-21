@@ -280,6 +280,27 @@ async def _dates(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pay(args: argparse.Namespace) -> int:
+    """Looks for pay in the descriptions already saved (no web requests) and saves what it finds on postings that show none."""
+    from app.services.jobcache.text import pay_from_text
+
+    cache = JobCache()
+    after = seen = found = 0
+    while True:
+        batch = cache.descriptions_without_pay(after, 2000)
+        if not batch:
+            break
+        for posting_id, body in batch:
+            after = posting_id
+            seen += 1
+            pay_text, pay_mid = pay_from_text(body)
+            if pay_text and pay_mid and cache.set_pay(posting_id, pay_text, pay_mid):
+                found += 1
+        print(f"  looked at {seen} descriptions, pay found for {found}", flush=True)
+    print(f"Done. Looked at {seen} saved descriptions with no pay; {found} now show their pay.")
+    return 0
+
+
 async def _reread(args: argparse.Namespace) -> int:
     path = Path(args.db)
     if not path.exists():
@@ -1016,6 +1037,7 @@ def main() -> None:
     dt_.add_argument("--rounds", type=int, default=1, help="how many batches to run in a row")
     dt_.add_argument("--per-employer", type=int, default=10, help="most postings opened from one employer per batch")
     dt_.add_argument("--pause", type=float, default=2.0, help="seconds to wait between batches")
+    sub.add_parser("pay")
     nm = sub.add_parser("names")
     nm.add_argument("--limit", type=int, default=25)
     nm.add_argument("--find", action="store_true", help="look the real names up and write a file to review (changes nothing)")
@@ -1083,6 +1105,8 @@ def main() -> None:
         sys.exit(cmd_health(args))
     if args.cmd == "places":
         sys.exit(asyncio.run(_places(args)))
+    if args.cmd == "pay":
+        sys.exit(_pay(args))
     if args.cmd == "dates":
         sys.exit(asyncio.run(_dates(args)))
     if args.cmd == "reindex":

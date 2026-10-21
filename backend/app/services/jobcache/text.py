@@ -82,28 +82,85 @@ def split_titles(text: str) -> list[str]:
 
 # ---- pay --------------------------------------------------------------------------------------------------------
 
-_MONEY = re.compile(r"\$?\s*(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*([kK])?")
+_NUM = r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*([kK](?![a-zA-Z]))?"
+_PAIR = re.compile(r"\$?\s*" + _NUM + r"\s*(?:-|\u2013|\u2014|to)\s*\$?\s*" + _NUM, re.I)
+_ONE = re.compile(r"\$?\s*" + _NUM)
+_FOREIGN = re.compile(r"[\u20ac\u00a3\u00a5\u20b9\u20a9\u20bd]|\b(?:EUR|GBP|HUF|CAD|AUD|INR|JPY|CNY|CHF|SEK|NOK|DKK|PLN|MXN|BRL|SGD|NZD|ZAR|PHP|CZK|RON|AED)\b")
+_PER_MONTH = re.compile(r"^\W{0,3}(?:/|per|a|each|every)?\s*(?:month|mo)\b|^\W{0,3}monthly", re.I)
+_PER_BIWEEK = re.compile(r"^\W{0,3}(?:/|per|every)?\s*(?:bi-?weekly|two weeks|pay period)", re.I)
+_PER_WEEK = re.compile(r"^\W{0,3}(?:/|per|a|each)?\s*(?:week|wk)\b|^\W{0,3}weekly", re.I)
+_PER_HOUR = re.compile(r"^\W{0,3}(?:/|per|an|a|each)?\s*(?:hour|hr)\b|^\W{0,3}hourly", re.I)
 HOURS_PER_YEAR = 2080
 
 
 def pay_midpoint(text: str | None) -> float | None:
     """
     Midpoint of a pay range written as text, as a yearly figure: "$80,000 - $100,000", "$43,800.00 - $51,100.00", "85k".
-    An hourly range ("$17.71 - $24.28") is turned into a yearly one (2,080 hours). None when unclear.
+    Hourly ("$17.71 - $24.28", 2,080 hours), monthly (x12), weekly (x52) and bi-weekly (x26) pay is turned into a yearly figure.
+    Only the first range (or else the first figure) counts, so a bonus mentioned afterwards cannot change it. Money in another
+    currency gives None, as does anything unclear.
     """
-    if not text:
+    if not text or _FOREIGN.search(text):
         return None
-    values: list[float] = []
-    for number, k in _MONEY.findall(text)[:2]:
-        value = float(number.replace(",", ""))
-        values.append(value * 1000 if k else value)
-    if not values:
-        return None
-    if min(values) >= 1000:
-        return sum(values) / len(values)
-    if 8 <= min(values) and max(values) <= 250:  # small numbers read as an hourly rate
-        return sum(values) / len(values) * HOURS_PER_YEAR
+    m = _PAIR.search(text)
+    if m:
+        lo, k1, hi, k2 = float(m.group(1).replace(",", "")), m.group(2), float(m.group(3).replace(",", "")), m.group(4)
+        if k1 and not k2 and hi < 1000:
+            hi *= 1000
+        elif k2 and not k1 and lo < 1000:
+            lo *= 1000
+        lo, hi = (lo * 1000 if k1 else lo), (hi * 1000 if k2 else hi)
+        if lo > hi:
+            return None
+        end = m.end()
+    else:
+        m = _ONE.search(text)
+        if not m:
+            return None
+        lo = hi = float(m.group(1).replace(",", "")) * (1000 if m.group(2) else 1)
+        end = m.end()
+    mid, after = (lo + hi) / 2, text[end : end + 30]
+    if _PER_BIWEEK.match(after):
+        return mid * 26 if 200 <= lo and hi <= 10000 else None
+    if _PER_WEEK.match(after):
+        return mid * 52 if 100 <= lo and hi <= 20000 else None
+    if _PER_MONTH.match(after):
+        return mid * 12 if 500 <= lo and hi <= 60000 else None
+    if _PER_HOUR.match(after):
+        return mid * HOURS_PER_YEAR if 2 <= lo and hi <= 250 else None
+    if lo >= 1000:
+        return mid
+    if 8 <= lo and hi <= 250:  # small numbers read as an hourly rate
+        return mid * HOURS_PER_YEAR
     return None
+
+
+_LEGAL_WORDS = {"inc", "llc", "ltd", "corp", "co", "company", "corporation", "the", "plc", "lp", "llp", "incorporated", "limited"}
+
+
+def _name_words(name: str | None) -> list[str]:
+    cleaned = (name or "").lower().replace("&", " and ").replace("'", "").replace("\u2019", "")
+    return [w for w in re.findall(r"[a-z0-9]+", cleaned) if w not in _LEGAL_WORDS]
+
+
+def _has_run(big: list[str], small: list[str]) -> bool:
+    n = len(small)
+    return n > 0 and any(big[i : i + n] == small for i in range(len(big) - n + 1))
+
+
+def name_excluded(company: str | None, excluded: list[str]) -> bool:
+    """
+    Whether a company is one the person asked to leave out. Whole words only, ignoring case, punctuation and "Inc"/"LLC":
+    "Care" leaves out "Care.com" but not "Vertexcareers", "Acme" leaves out "Acme Corp", and "Amazon Web Services" leaves out "Amazon".
+    """
+    words = _name_words(company)
+    if not words:
+        return False
+    for e in excluded:
+        theirs = _name_words(e)
+        if _has_run(words, theirs) or _has_run(theirs, words):
+            return True
+    return False
 
 
 # Pay written inside a posting's text ("The salary range is $85,000 - $110,000 per year", "$42 to $55 an hour").

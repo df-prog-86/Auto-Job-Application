@@ -2106,3 +2106,37 @@ def test_hybrid_and_on_site_searches_use_the_labels_shown():
     assert ids(work_type="onsite") == {"1": "onsite", "3": None}
     shown = ids()
     assert shown["1"] == "onsite" and shown["2"] == "hybrid"
+
+
+def test_pay_is_scaled_to_a_year_and_other_currencies_and_bonuses_do_not_confuse_it():
+    assert text.pay_midpoint("$10K per month") == 120000 and text.pay_midpoint("$3,000 per month") == 36000
+    assert round(text.pay_midpoint("$3,557.69/week")) == 184999 and text.pay_midpoint("$4,000 bi-weekly") == 104000
+    assert text.pay_midpoint("$36 per hour \u2022 Offers Equity \u2022 $1.5K Bonus") == 36 * 2080  # the bonus is not read as pay
+    assert text.pay_midpoint("$100,000 - $120,000 + $20,000 bonus") == 110000
+    assert text.pay_midpoint("$5\u2013$15 per hour") == 10 * 2080
+    assert text.pay_midpoint("\u20ac50,000 - \u20ac60,000") is None and text.pay_midpoint("HUF 500,000") is None
+    assert text.pay_midpoint("$85K - 110") == 97500
+
+
+def test_company_exclusion_matches_whole_words_only():
+    out = text.name_excluded
+    assert out("Care.com", ["Care"]) and out("Acme Corp", ["acme"]) and out("Acme", ["Acme, Inc."])
+    assert out("Amazon", ["Amazon Web Services"]) and out("Macy's", ["macys"])
+    assert not out("Vertexcareers Atriumworks", ["care"]) and not out("Healthcare Partners", ["health"])
+    assert not out("Booz Allen Hamilton", ["Google", "Meta"]) and not out("", ["x"])
+
+
+def test_pay_found_in_a_posting_is_saved_only_where_the_list_showed_none():
+    cache = JobCache()
+    emp, _ = cache.upsert_employer("icims", "payco", "Pay Co", "user_link")
+    cache.apply_refresh(emp, [PostingIn(ext_id="1", title="Analyst", url="https://payco.icims.com/jobs/1/job", location="Boston, MA"),
+                              PostingIn(ext_id="2", title="Clerk", url="https://payco.icims.com/jobs/2/job", location="Boston, MA", pay_text="$50,000", pay_mid=50000)], 1_000_000)
+    ids = [i for i, _u in cache.postings_without_description(10, 10, None)]
+    for i in ids:
+        assert cache.set_description(i, "The salary range is $85,000 - $105,000 per year, plus a bonus.")
+    todo = cache.descriptions_without_pay()
+    assert len(todo) == 1  # the posting whose list already showed pay is not touched
+    pid, body = todo[0]
+    pay_text, pay_mid = text.pay_from_text(body)
+    assert pay_mid == 95000 and cache.set_pay(pid, pay_text, pay_mid)
+    assert cache.descriptions_without_pay() == [] and not cache.set_pay(pid, "$1 / year", 1)

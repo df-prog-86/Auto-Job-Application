@@ -661,6 +661,25 @@ class JobCache:
                 self._desc_insert(db, [(posting_id, desc_lead(text_))])
         return True
 
+    def set_pay(self, posting_id: int, pay_text: str, pay_mid: float) -> bool:
+        """Saves pay found in a posting's text, only when the posting has no pay yet (pay from the job list is never replaced)."""
+        with self.session() as db:
+            cur = db.execute(
+                "UPDATE postings SET pay_text = ?, pay_mid = ? WHERE id = ? AND pay_mid IS NULL AND COALESCE(pay_text, '') = ''",
+                (pay_text[:200], pay_mid, posting_id),
+            )
+            return cur.rowcount > 0
+
+    def descriptions_without_pay(self, after_id: int = 0, limit: int = 2000) -> list[tuple[int, str]]:
+        """Open postings that have a saved description but no pay, in id order from after_id: [(id, description text)]."""
+        with self.session() as db:
+            rows = db.execute(
+                "SELECT id, description_z FROM postings WHERE id > ? AND closed_at IS NULL AND pay_mid IS NULL AND COALESCE(pay_text, '') = '' "
+                "AND description_z IS NOT NULL AND desc_hash <> 'unavailable' ORDER BY id LIMIT ?",
+                (after_id, limit),
+            ).fetchall()
+        return [(r["id"], unpack_description(r["description_z"]) or "") for r in rows]
+
     def reindex_descriptions(self, batch: int = 2000, progress: Any = None) -> int:
         """
         Builds the description index for every open posting that has a saved description and is not in it yet. Safe to run

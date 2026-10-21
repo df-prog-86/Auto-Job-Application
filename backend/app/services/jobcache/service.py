@@ -187,7 +187,7 @@ async def read_missing_descriptions(unread: list[tuple[int, str]], max_chars: in
 
     from app.services.discovery.ats import workday_api_url
     from app.services.jobcache.readers import USER_AGENT
-    from app.services.jobcache.text import html_to_text
+    from app.services.jobcache.text import html_to_text, pay_from_text
 
     if not unread:
         return 0
@@ -221,6 +221,9 @@ async def read_missing_descriptions(unread: list[tuple[int, str]], max_chars: in
                 text_ = html_to_text(markup)
                 if text_ and await asyncio.to_thread(cache.set_description, posting_id, text_, max_chars):
                     saved += 1
+                    pay_text, pay_mid = pay_from_text(text_)  # read from the whole text, even where only the start of it is kept
+                    if pay_text and pay_mid:
+                        await asyncio.to_thread(cache.set_pay, posting_id, pay_text, pay_mid)
                 else:
                     failed.append(posting_id)
             except Exception:  # one posting that cannot be read is simply left as it was

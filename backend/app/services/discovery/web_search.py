@@ -73,8 +73,9 @@ def excluded_companies(criteria: JobSearchIn) -> list[str]:
 
 
 def is_excluded(company: str, excluded: list[str]) -> bool:
-    name = company.lower()
-    return any(e.lower() in name or name in e.lower() for e in excluded)
+    from app.services.jobcache.text import name_excluded
+
+    return name_excluded(company, excluded)
 
 
 _CLOSED_PHRASES = re.compile(

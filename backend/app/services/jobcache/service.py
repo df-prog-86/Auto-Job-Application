@@ -9,6 +9,7 @@ every site (see readers.py); searching the saved copy is instant and costs nothi
 from __future__ import annotations
 
 import asyncio
+from itertools import zip_longest
 import datetime as dt
 import json
 import logging
@@ -267,6 +268,7 @@ async def _icims_places(cache: JobCache, items: list[dict[str, Any]]) -> int:
 
     if not items:
         return 0
+    host_gates: dict[str, asyncio.Semaphore] = {}
     gate = asyncio.Semaphore(8)  # these pages are on many different employers' sites, so reading more at once is not hard on any one of them
     saved = 0
     none: list[str] = []
@@ -275,11 +277,13 @@ async def _icims_places(cache: JobCache, items: list[dict[str, Any]]) -> int:
         nonlocal saved
         req = _description_request(item["url"])
         address = req[1] if req and req[0] == "icims" else item["url"]
-        async with gate:
+        host = urlsplit(item["url"]).hostname or ""
+        async with host_gates.setdefault(host, asyncio.Semaphore(2)), gate:  # never more than two at once on one employer's site
             try:
                 resp = await safe_get(address, headers={"User-Agent": mx._USER_AGENT, "Accept": "text/html"}, timeout=10.0)
             except Exception:
                 return
+            await asyncio.sleep(0.5)
         if resp.status_code in (404, 410):
             none.append(item["url"])
             return
@@ -291,7 +295,11 @@ async def _icims_places(cache: JobCache, items: list[dict[str, Any]]) -> int:
         else:
             none.append(item["url"])
 
-    await asyncio.gather(*(one(i) for i in items))
+    by_host: dict[str, list[dict[str, Any]]] = {}
+    for i in items:
+        by_host.setdefault(urlsplit(i["url"]).hostname or "", []).append(i)
+    spread = [x for group in zip_longest(*by_host.values()) for x in group if x]
+    await asyncio.gather(*(one(i) for i in spread))
     await asyncio.to_thread(cache.mark_place_tried, none)
     return saved
 

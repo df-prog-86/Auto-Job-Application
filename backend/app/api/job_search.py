@@ -181,6 +181,10 @@ async def search_web(payload: JobSearchIn, db: Session = Depends(get_db)) -> Job
         total = len(await cache_service.ranked_items(payload))
         return JobSearchWebOut(added=0, total=total)
     fresh = [i for i in outcome.items if not (loose_keys(i["url"]) & known)]
+    try:  # the employers behind what the web search found join the saved lists, so later searches find their other jobs without the web
+        await cache_service.adopt_employers_from_web([(i["url"], i.get("company")) for i in outcome.items])
+    except Exception:
+        pass
     added, total = await cache_service.add_to_ranked(payload, fresh)
     return JobSearchWebOut(added=added, total=total)
 

@@ -237,6 +237,12 @@ class JobCache:
             )
             return int(cur.lastrowid), True
 
+    def find_employer(self, ats: str, identifier: str) -> int | None:
+        """The id of an employer already in the saved lists, or None."""
+        with self.session() as db:
+            row = db.execute("SELECT id FROM employers WHERE ats = ? AND identifier = ?", (ats, identifier)).fetchone()
+        return int(row["id"]) if row else None
+
     def get_employer(self, employer_id: int) -> dict[str, Any] | None:
         with self.session() as db:
             row = db.execute("SELECT * FROM employers WHERE id = ?", (employer_id,)).fetchone()

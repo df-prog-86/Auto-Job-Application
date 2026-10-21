@@ -1948,3 +1948,29 @@ def test_bamboohr_description_comes_from_its_detail_data():
     assert service._description_request("https://acme.bamboohr.com/careers/146") == ("bamboohr", "https://acme.bamboohr.com/careers/146/detail")
     assert service._data_description("bamboohr", {"result": {"jobOpening": {"description": "<p>Do things</p>"}}}) == "<p>Do things</p>"
     assert service._data_description("bamboohr", {"result": {}}) is None
+
+
+def test_employers_behind_web_search_finds_join_the_saved_lists(app_and_db, monkeypatch):
+    import asyncio
+
+    async def fake_read(system, identifier, http, throttle):
+        if identifier == "deadco":
+            raise readers.ReaderError("no list")
+        return readers.ReadResult([post(1, "Revenue Cycle Manager")], name="Real Co")
+
+    monkeypatch.setattr(service, "read_employer", fake_read)
+    monkeypatch.setattr(settings, "JOB_CACHE_DESCRIPTION_FILL", 0)
+
+    async def go():
+        n = await service.adopt_employers_from_web([
+            ("https://jobs.lever.co/realco/71580e53-408b-4084-9ba6-693c69564b39", "Real Co"),
+            ("https://jobs.lever.co/deadco/71580e53-408b-4084-9ba6-693c69564b40", "Dead Co"),
+            ("https://www.linkedin.com/jobs/view/1", "Nobody"),
+        ])
+        await asyncio.gather(*list(service._ADOPTING))
+        return n
+
+    assert asyncio.run(go()) == 2  # two readable-looking links were tried; the LinkedIn one is not a hiring system
+    names = [e["name"] for e in JobCache().list_employers()]
+    assert names == ["Real Co"]  # the one that could not be read is not kept
+    assert asyncio.run(service.adopt_employers_from_web([("https://jobs.lever.co/realco/71580e53-408b-4084-9ba6-693c69564b39", "Real Co")])) == 0  # already known

@@ -623,6 +623,70 @@ def seed_from_app(db: Any) -> int:
     return added
 
 
+WEB_NEW_EMPLOYERS_MAX = 10  # employers adopted from one web search
+_ADOPTING: set[asyncio.Task] = set()  # background reads in progress (kept so they are not dropped half way)
+
+
+async def adopt_employers_from_web(pairs: list[tuple[str, str | None]]) -> int:
+    """
+    Employers behind the jobs a web search found that the saved lists did not have yet: each one's own job list is read, and it is
+    kept only when that list has open jobs (so a wrong or dead link adds nothing). Their jobs are then in every later search. The
+    read runs in the background; returns how many employers will be tried.
+    """
+    cache = JobCache()
+    off = disabled_systems()
+    todo: list[tuple[str, str, str | None]] = []
+    seen: set[tuple[str, str]] = set()
+    for url, company in pairs:
+        ref = employer_ref(url) if url else None
+        if not ref or ref in seen or ref[0] in off:
+            continue
+        seen.add(ref)
+        todo.append((ref[0], ref[1], company))
+    fresh = []
+    for system, identifier, company in todo:
+        exists = await asyncio.to_thread(cache.find_employer, system, identifier)
+        if not exists:
+            fresh.append((system, identifier, company))
+        if len(fresh) >= WEB_NEW_EMPLOYERS_MAX:
+            break
+    if not fresh:
+        return 0
+
+    async def read_all() -> None:
+        new_ids: list[int] = []
+        async with make_client() as client:
+            throttle = Throttle()
+            for system, identifier, company in fresh:
+                eid, created = await asyncio.to_thread(cache.upsert_employer, system, identifier, company or "", "web_search")
+                if not created:
+                    continue
+                try:
+                    result = await read_employer(system, identifier, client, throttle)
+                except Exception:  # a list we cannot read: the employer is not kept
+                    await asyncio.to_thread(cache.delete_employer, eid)
+                    continue
+                if not result.postings:
+                    await asyncio.to_thread(cache.delete_employer, eid)
+                    continue
+                if result.name:
+                    await asyncio.to_thread(cache.upsert_employer, system, identifier, result.name, "web_search")
+                await asyncio.to_thread(cache.apply_refresh, eid, result.postings, now_ts(), PRIORITY_HOURS, result.complete)
+                new_ids.append(eid)
+        if new_ids and settings.JOB_CACHE_DESCRIPTION_FILL > 0:
+            try:
+                await fill_descriptions_gradually(cache, new_ids, NEW_EMPLOYER_PER_EMPLOYER, NEW_EMPLOYER_PER_EMPLOYER * len(new_ids))
+                await fill_places(cache, 150, 10)
+            except Exception:
+                log.exception("job cache: could not fill in details for employers found by the web search")
+        log.warning("job cache: web search added %d employers", len(new_ids))
+
+    task = asyncio.create_task(read_all())
+    _ADOPTING.add(task)
+    task.add_done_callback(_ADOPTING.discard)
+    return len(fresh)
+
+
 class AddEmployerError(Exception):
     """The employer could not be added; the message is safe to show."""
 

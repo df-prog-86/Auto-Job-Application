@@ -258,6 +258,28 @@ async def _places(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _dates(args: argparse.Namespace) -> int:
+    """Reads the posted date from the job pages of systems whose lists show none (iCIMS, BambooHR, TalentBrew, Jobvite and others)."""
+    from app.services.jobcache import service
+
+    cache = JobCache()
+    tried_all = saved_all = 0
+    try:
+        for n in range(1, max(args.rounds, 1) + 1):
+            tried, saved = await service.fill_dates(cache, args.limit, args.per_employer)
+            if not tried:
+                print("No undated postings left to open.")
+                break
+            tried_all += tried
+            saved_all += saved
+            print(f"  batch {n}/{args.rounds}: opened {tried}, found dates for {saved} (running total {saved_all})", flush=True)
+            await asyncio.sleep(args.pause)
+    except KeyboardInterrupt:
+        print("Stopped. What was saved is kept.")
+    print(f"Opened {tried_all} postings: {saved_all} now have their posted date saved.")
+    return 0
+
+
 async def _reread(args: argparse.Namespace) -> int:
     path = Path(args.db)
     if not path.exists():
@@ -989,6 +1011,11 @@ def main() -> None:
     pl.add_argument("--rounds", type=int, default=1, help="how many batches to run in a row")
     pl.add_argument("--per-employer", type=int, default=10, help="most postings opened from one employer per batch")
     pl.add_argument("--pause", type=float, default=2.0, help="seconds to wait between batches")
+    dt_ = sub.add_parser("dates")
+    dt_.add_argument("--limit", type=int, default=150, help="postings to open in this batch")
+    dt_.add_argument("--rounds", type=int, default=1, help="how many batches to run in a row")
+    dt_.add_argument("--per-employer", type=int, default=10, help="most postings opened from one employer per batch")
+    dt_.add_argument("--pause", type=float, default=2.0, help="seconds to wait between batches")
     nm = sub.add_parser("names")
     nm.add_argument("--limit", type=int, default=25)
     nm.add_argument("--find", action="store_true", help="look the real names up and write a file to review (changes nothing)")
@@ -1056,6 +1083,8 @@ def main() -> None:
         sys.exit(cmd_health(args))
     if args.cmd == "places":
         sys.exit(asyncio.run(_places(args)))
+    if args.cmd == "dates":
+        sys.exit(asyncio.run(_dates(args)))
     if args.cmd == "reindex":
         sys.exit(cmd_reindex(args))
     if args.cmd == "names":

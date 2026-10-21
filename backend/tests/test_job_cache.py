@@ -2030,3 +2030,48 @@ def test_the_web_search_is_not_repeated_within_the_hour_unless_something_changes
     real = service.time.time
     monkeypatch.setattr(service.time, "time", lambda: real() + 3601)
     assert not service.web_searched_recently(first)  # an hour later it runs again
+
+
+def test_posted_dates_are_read_in_every_format_the_job_pages_use():
+    from app.services.jobcache.text import parse_posted_value, posted_from_page
+
+    assert parse_posted_value("2026-05-13") == dt.date(2026, 5, 13)
+    assert parse_posted_value("2026-10-15 00:00:00.0") == dt.date(2026, 10, 15)
+    assert parse_posted_value("2026-01-02T15:49:12+00:00") == dt.date(2026, 1, 2)
+    assert parse_posted_value("Oct 1, 2026") == dt.date(2026, 10, 1)
+    assert parse_posted_value("Sun Oct 18 02:00:00 UTC 2026") == dt.date(2026, 10, 18)
+    assert parse_posted_value("10/15/2026") == dt.date(2026, 10, 15)
+    assert parse_posted_value("2099-01-01") is None and parse_posted_value("1999-01-01") is None and parse_posted_value("soon") is None
+    assert posted_from_page('{"@type":"JobPosting","datePosted":"2026-08-25","title":"x"}') == dt.date(2026, 8, 25)
+    assert posted_from_page('var d = "{\\"directApply\\":true,\\"datePosted\\":\\"2026-10-12T14:00:00.000Z\\",\\"title\\":\\"RN\\"}";') == dt.date(2026, 10, 12)
+    assert posted_from_page('<meta itemprop="datePosted" content="Oct 1, 2026">') == dt.date(2026, 10, 1)
+    assert posted_from_page("<html>no date</html>") is None and posted_from_page(None) is None
+
+
+def test_job_pages_without_a_list_date_get_one_and_a_page_with_none_is_not_opened_again(tmp_path, monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(service.settings, "JOB_CACHE_PATH", str(tmp_path / "d.db"))
+    cache = JobCache()
+    eid, _ = cache.upsert_employer("icims", "careers-acme.icims.com", "Acme", "search")
+    rows = [PostingIn(ext_id=str(i), title="Nurse", url=f"https://careers-acme.icims.com/jobs/{i}/nurse/job", location="Boston, MA") for i in (1, 2, 3)]
+    cache.apply_refresh(eid, rows, 1000)
+    eid2, _ = cache.upsert_employer("greenhouse", "acme", "Acme GH", "search")
+    cache.apply_refresh(eid2, [post(9, "Nurse", posted_at=dt.date(2026, 1, 1))], 1000)
+
+    async def fake_page(url):
+        if url.endswith("/1/nurse/job"):
+            return "date", dt.date(2026, 10, 12)
+        if url.endswith("/2/nurse/job"):
+            return "none", None
+        return "error", None
+
+    monkeypatch.setattr(service, "_page_posted_date", fake_page)
+    assert asyncio.run(service.fill_dates(cache, 50, 10)) == (3, 1)  # the greenhouse job already has a date and is not opened
+    with cache.session() as db:
+        got = {r["ext_id"]: r["posted_at"] for r in db.execute("SELECT ext_id, posted_at FROM postings")}
+    assert got["1"] == "2026-10-12" and got["2"] is None and got["9"] == "2026-01-01"
+    assert asyncio.run(service.fill_dates(cache, 50, 10)) == (1, 0)  # only the page that could not be read is tried again
+    with cache.session() as db:
+        gh_id = db.execute("SELECT id FROM postings WHERE ext_id = '9'").fetchone()["id"]
+    assert not cache.set_posted_at(gh_id, dt.date(2026, 2, 2))  # a date the list gave is never replaced

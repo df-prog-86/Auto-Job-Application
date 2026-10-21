@@ -253,6 +253,56 @@ async def fill_places(cache: JobCache, limit: int = 150, per_employer: int = 10)
     return len(todo), saved
 
 
+DATE_GAP_SYSTEMS = ["icims", "bamboohr", "talentbrew", "jobvite", "taleo", "deloitte", "kpmg", "successfactors", "pinpoint"]  # their lists carry no posted date; the job page does
+
+
+async def _page_posted_date(url: str) -> tuple[str, Any]:
+    """("date", day) when the job page shows one, ("none", None) when the page was read and shows none, ("error", None) when it could not be read."""
+    from app.services.discovery import manual_extraction as mx
+    from app.services.jobcache.text import posted_from_page
+    from app.services.safe_fetch import safe_get
+
+    req = _description_request(url)
+    address = req[1] if req and req[0] in ("icims", "bamboohr") else url  # iCIMS shows its details on the ?in_iframe=1 page; BambooHR in its detail data
+    try:
+        resp = await safe_get(address, headers={"User-Agent": mx._USER_AGENT, "Accept": "text/html,application/json"}, timeout=10.0)
+    except Exception:
+        return "error", None
+    if resp.status_code in (404, 410):
+        return "none", None
+    if resp.status_code != 200:
+        return "error", None
+    day = posted_from_page(resp.text[:800000])
+    return ("date", day) if day else ("none", None)
+
+
+async def fill_dates(cache: JobCache, limit: int = 150, per_employer: int = 10) -> tuple[int, int]:
+    """
+    Opens postings whose list shows no posted date (iCIMS, BambooHR, TalentBrew, Jobvite, Taleo, Deloitte, KPMG, SuccessFactors,
+    Pinpoint) and saves the date their page publishes. A few from each employer per batch, gently. A page that shows no date is
+    marked so it is not opened again; a page that could not be read is tried again later. Returns (tried, dates saved).
+    """
+    todo = await asyncio.to_thread(cache.undated_postings, DATE_GAP_SYSTEMS, limit, per_employer)
+    if not todo:
+        return 0, 0
+    gate = asyncio.Semaphore(4)
+    saved = 0
+    none: list[int] = []
+
+    async def one(posting_id: int, url: str) -> None:
+        nonlocal saved
+        async with gate:
+            kind, day = await _page_posted_date(url)
+        if kind == "date" and await asyncio.to_thread(cache.set_posted_at, posting_id, day):
+            saved += 1
+        elif kind == "none":
+            none.append(posting_id)
+
+    await asyncio.gather(*(one(i, u) for i, u in todo))
+    await asyncio.to_thread(cache.mark_date_tried, none)
+    return len(todo), saved
+
+
 async def fill_descriptions_gradually(cache: JobCache, employer_ids: list[int] | None = None, per_employer: int | None = None, budget: int | None = None) -> int:
     """
     After each refresh, reads a small batch of postings that have no saved description and keeps the first part of each. Over
@@ -853,6 +903,11 @@ async def _refresh_async(only_ids: list[int] | None, limit: int, max_seconds: fl
             await fill_places(cache, settings.JOB_CACHE_PLACE_FILL, 10)
     except Exception:
         log.exception("job cache: could not fill in places")
+    try:  # postings whose list shows no posted date get it from their page, so date windows and "newest" can use them
+        if settings.JOB_CACHE_DATE_FILL > 0:
+            await fill_dates(cache, settings.JOB_CACHE_DATE_FILL, 10)
+    except Exception:
+        log.exception("job cache: could not fill in posted dates")
     removed = cache.cleanup()
     return (
         f"saved {filled} descriptions, read {tallies['ok']} employers ({tallies['new']} new postings, {tallies['closed']} closed), "

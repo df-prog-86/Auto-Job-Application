@@ -558,6 +558,47 @@ def same_company(guess: str | None, found: str | None) -> bool:
     return len(a) >= 4 and len(b) >= 4 and (a in b or b in a)
 
 
+_DATE_POSTED = (
+    re.compile(r'datePosted\\?"\s*:\s*\\?"([^"\\]+)', re.I),  # structured details, plain or inside an escaped string (iCIMS)
+    re.compile(r"itemprop=[\"']datePosted[\"'][^>]*content=[\"']([^\"']+)", re.I),
+    re.compile(r"content=[\"']([^\"']+)[\"'][^>]*itemprop=[\"']datePosted[\"']", re.I),
+)
+_MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+
+
+def parse_posted_value(value: str | None) -> dt.date | None:
+    """
+    A posted date as employers write it: 2026-10-15, 2026-10-15 00:00:00.0, 2026-01-02T15:49:12+00:00, "Oct 1, 2026",
+    "Sun Oct 18 02:00:00 UTC 2026", 10/15/2026. None when it is not a date, in the future, or before 2015.
+    """
+    v = html_lib.unescape(value or "").strip()
+    day: dt.date | None = None
+    try:
+        if re.match(r"\d{4}-\d{2}-\d{2}", v):
+            day = dt.date.fromisoformat(v[:10])
+        elif m := re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})", v):
+            day = dt.date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+        elif m := re.search(r"(?i)\b([a-z]{3})[a-z]*\.? (\d{1,2}),? (?:[\d:]+ [A-Z]{2,4} )?(\d{4})", v):
+            day = dt.date(int(m.group(3)), _MONTHS[m.group(1).lower()], int(m.group(2)))
+        elif m := re.search(r"(?i)\b([a-z]{3}) (\d{1,2}) [\d:]+ [A-Z]{2,4} (\d{4})", v):
+            day = dt.date(int(m.group(3)), _MONTHS[m.group(1).lower()], int(m.group(2)))
+    except (ValueError, KeyError):
+        return None
+    if day is None or day < dt.date(2015, 1, 1) or day > dt.date.today() + dt.timedelta(days=1):
+        return None
+    return day
+
+
+def posted_from_page(page: str | None) -> dt.date | None:
+    """The posted date a job page publishes for search engines (datePosted), or None."""
+    for pattern in _DATE_POSTED:
+        for m in pattern.finditer(page or ""):
+            day = parse_posted_value(m.group(1))
+            if day:
+                return day
+    return None
+
+
 def lead_with_place(location: str | None, wanted: list[str]) -> str | None:
     """A list of places with the ones the search asked for first, so shortening it to three ("A; B; C +4 more") never hides the place searched."""
     if not location or ";" not in location or not wanted:

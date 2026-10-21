@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS lookups (
 """
 
 # Columns added after the first release: (name, definition)
-MIGRATIONS = (("description_z", "BLOB"), ("desc_hash", "TEXT"), ("agency", "INTEGER"), ("seen_date", "TEXT"))
+MIGRATIONS = (("description_z", "BLOB"), ("desc_hash", "TEXT"), ("agency", "INTEGER"), ("seen_date", "TEXT"), ("date_tried", "INTEGER"))
 TRUST_GAP_HOURS = 48  # a posting's first-seen day counts as a date only when the board was also read within this many hours before
 DESCRIPTION_CAP = 8000  # characters of a posting's text kept (pay is read from the whole text before this)
 
@@ -568,6 +568,41 @@ class JobCache:
             if len(out) >= limit:
                 break
         return out
+
+    def undated_postings(self, systems: list[str], limit: int, per_employer: int) -> list[tuple[int, str]]:
+        """(id, link) of open postings of these hiring systems with no posted date that were not looked at before: busiest employers first."""
+        marks = ",".join("?" for _ in systems)
+        with self.session() as db:
+            rows = db.execute(
+                "SELECT p.id, p.url, p.employer_id FROM postings p JOIN employers e ON e.id = p.employer_id "
+                f"WHERE p.closed_at IS NULL AND e.enabled = 1 AND (p.posted_at IS NULL OR p.posted_at = '') AND p.date_tried IS NULL AND e.ats IN ({marks}) "
+                "ORDER BY e.hits DESC, p.first_seen DESC LIMIT ?",
+                [*systems, limit * 20],
+            ).fetchall()
+        taken: dict[int, int] = {}
+        out: list[tuple[int, str]] = []
+        for r in rows:
+            if taken.get(r["employer_id"], 0) >= per_employer:
+                continue
+            taken[r["employer_id"]] = taken.get(r["employer_id"], 0) + 1
+            out.append((r["id"], r["url"]))
+            if len(out) >= limit:
+                break
+        return out
+
+    def set_posted_at(self, posting_id: int, day: dt.date) -> bool:
+        """Saves a posted date a job page published. A date the employer's list already gave is never replaced."""
+        with self.session() as db:
+            cur = db.execute(
+                "UPDATE postings SET posted_at = ?, date_tried = 1 WHERE id = ? AND (posted_at IS NULL OR posted_at = '')", (day.isoformat(), posting_id)
+            )
+        return cur.rowcount > 0
+
+    def mark_date_tried(self, posting_ids: list[int]) -> None:
+        """Remembers that a posting's page was read and showed no date, so it is not opened again."""
+        if posting_ids:
+            with self.session() as db:
+                db.executemany("UPDATE postings SET date_tried = 1 WHERE id = ?", [(i,) for i in posting_ids])
 
     def description_outcomes(self, posting_ids: list[int]) -> dict[str, dict[str, int]]:
         """For postings a fill tried: per hiring system, how many now have a description and how many were marked unreadable."""

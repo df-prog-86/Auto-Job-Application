@@ -682,6 +682,55 @@ def country_from_page(page: str | None) -> str | None:
     return html_lib.unescape(next(g for g in m.groups() if g)).strip() or None
 
 
+_LD_JSON = re.compile(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.I | re.S)
+
+
+def _ld_items(data: object) -> list[dict]:
+    """Every object inside a page's structured data, including lists and @graph."""
+    if isinstance(data, list):
+        return [x for d in data for x in _ld_items(d)]
+    if isinstance(data, dict):
+        return [data] + _ld_items(data.get("@graph") or [])
+    return []
+
+
+def place_from_page(page: str | None) -> str | None:
+    """
+    Where a job page says the job is (its published jobLocation): "Joliet, IL" for a US place, "Leeds, United Kingdom" elsewhere, up to three
+    places joined with "; ". None when the page names no town or state.
+    """
+    out: list[str] = []
+    for block in _LD_JSON.findall(page or ""):
+        try:
+            data = json.loads(html_lib.unescape(block).strip())
+        except (ValueError, TypeError):
+            continue
+        for item in _ld_items(data):
+            kind = item.get("@type")
+            if "JobPosting" not in (kind if isinstance(kind, list) else [kind]):
+                continue
+            locs = item.get("jobLocation")
+            for loc in locs if isinstance(locs, list) else [locs]:
+                addr = loc.get("address") if isinstance(loc, dict) else None
+                if not isinstance(addr, dict):
+                    continue
+                city = str(addr.get("addressLocality") or "").strip()
+                region = str(addr.get("addressRegion") or "").strip()
+                country = addr.get("addressCountry")
+                country = str((country.get("name") if isinstance(country, dict) else country) or "").strip()
+                if not (city or region):
+                    continue
+                if region.lower() in STATE_BY_NAME:
+                    region = STATE_BY_NAME[region.lower()]
+                if is_us_country(country) or (not country and region.upper() in US_STATES):
+                    place = ", ".join(x for x in (city, region.upper() if len(region) == 2 else region) if x)
+                else:
+                    place = ", ".join(x for x in (city, region if not city else "", country) if x)
+                if place and place not in out:
+                    out.append(place)
+    return "; ".join(out[:3]) or None
+
+
 def is_us_country(country: str | None) -> bool:
     return (country or "").strip().lower() in _US_COUNTRY
 

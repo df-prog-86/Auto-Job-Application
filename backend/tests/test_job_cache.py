@@ -2160,3 +2160,22 @@ def test_a_job_pages_country_is_read_from_its_published_data():
     assert text.country_from_page('\\"addressCountry\\":\\"Germany\\"') == "Germany"
     assert text.country_from_page("no job data here") is None
     assert text.is_us_country("United States of America") and text.is_us_country("US") and not text.is_us_country("Canada")
+
+
+def test_a_job_pages_published_place_is_read_as_city_and_state():
+    page = '<script type="application/ld+json">{"@type":"JobPosting","jobLocation":{"address":{"addressLocality":"Joliet","addressRegion":"IL","addressCountry":"US"}}}</script>'
+    assert text.place_from_page(page) == "Joliet, IL"
+    many = ('<script type="application/ld+json">{"@graph":[{"@type":"JobPosting","jobLocation":[{"address":{"addressLocality":"Leeds","addressCountry":"United Kingdom"}},'
+            '{"address":{"addressLocality":"Tucson","addressRegion":"Arizona","addressCountry":{"name":"United States"}}}]}]}</script>')
+    assert text.place_from_page(many) == "Leeds, United Kingdom; Tucson, AZ"
+    assert text.place_from_page("<html>no data</html>") is None
+
+
+def test_postings_with_no_place_can_be_filled_in_and_a_page_without_one_is_not_opened_again():
+    cache = JobCache()
+    emp, _ = cache.upsert_employer("icims", "placeco", "Place Co", "user_link")
+    cache.apply_refresh(emp, [PostingIn(ext_id=str(n), title=f"Nurse {n}", url=f"https://careers-placeco.icims.com/jobs/{n}/nurse/job", location=None) for n in (1, 2)], 1_000_000)
+    assert len(cache.vague_place_postings(10, 10)) == 2
+    assert cache.set_location("https://careers-placeco.icims.com/jobs/1/nurse/job", "Joliet, IL")
+    cache.mark_place_tried(["https://careers-placeco.icims.com/jobs/2/nurse/job"])
+    assert cache.vague_place_postings(10, 10) == []  # one has its place, the other was read and names none

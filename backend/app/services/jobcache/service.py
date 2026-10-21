@@ -17,6 +17,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -245,15 +246,54 @@ async def fill_places(cache: JobCache, limit: int = 150, per_employer: int = 10)
     todo = await asyncio.to_thread(cache.vague_place_postings, limit, per_employer)
     if not todo:
         return 0, 0
+    icims = [i for i in todo if (urlsplit(i["url"]).hostname or "").endswith(".icims.com")]
+    todo = [i for i in todo if i not in icims]
+    saved = await _icims_places(cache, icims)
     before = {id(i): i["location"] for i in todo}
     await web_search.enrich_from_ats(todo)
-    saved = 0
     for item in todo:
         loc = item.get("location")
         if loc and loc != before[id(item)] and not is_vague_place(loc) and not names_no_town(loc):
             if await asyncio.to_thread(cache.set_location, item["url"], loc):
                 saved += 1
-    return len(todo), saved
+    return len(todo) + len(icims), saved
+
+
+async def _icims_places(cache: JobCache, items: list[dict[str, Any]]) -> int:
+    """iCIMS job lists often show no place; the job page publishes it. Saves what the pages say and marks the pages that say none."""
+    from app.services.discovery import manual_extraction as mx
+    from app.services.jobcache.text import place_from_page
+    from app.services.safe_fetch import safe_get
+
+    if not items:
+        return 0
+    gate = asyncio.Semaphore(4)
+    saved = 0
+    none: list[str] = []
+
+    async def one(item: dict[str, Any]) -> None:
+        nonlocal saved
+        req = _description_request(item["url"])
+        address = req[1] if req and req[0] == "icims" else item["url"]
+        async with gate:
+            try:
+                resp = await safe_get(address, headers={"User-Agent": mx._USER_AGENT, "Accept": "text/html"}, timeout=10.0)
+            except Exception:
+                return
+        if resp.status_code in (404, 410):
+            none.append(item["url"])
+            return
+        if resp.status_code != 200:
+            return
+        place = place_from_page(resp.text[:800000])
+        if place and not is_vague_place(place) and await asyncio.to_thread(cache.set_location, item["url"], place):
+            saved += 1
+        else:
+            none.append(item["url"])
+
+    await asyncio.gather(*(one(i) for i in items))
+    await asyncio.to_thread(cache.mark_place_tried, none)
+    return saved
 
 
 DATE_GAP_SYSTEMS = ["icims", "bamboohr", "talentbrew", "jobvite", "taleo", "deloitte", "kpmg", "successfactors", "pinpoint"]  # their lists carry no posted date; the job page does

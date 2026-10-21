@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS lookups (
 """
 
 # Columns added after the first release: (name, definition)
-MIGRATIONS = (("description_z", "BLOB"), ("desc_hash", "TEXT"), ("agency", "INTEGER"), ("seen_date", "TEXT"), ("date_tried", "INTEGER"))
+MIGRATIONS = (("description_z", "BLOB"), ("desc_hash", "TEXT"), ("agency", "INTEGER"), ("seen_date", "TEXT"), ("date_tried", "INTEGER"), ("place_tried", "INTEGER"))
 TRUST_GAP_HOURS = 48  # a posting's first-seen day counts as a date only when the board was also read within this many hours before
 DESCRIPTION_CAP = 8000  # characters of a posting's text kept (pay is read from the whole text before this)
 
@@ -432,7 +432,7 @@ class JobCache:
         with self.session() as db:
             rows = db.execute(
                 "SELECT p.id, p.url, p.location, p.employer_id FROM postings p JOIN employers e ON e.id = p.employer_id "
-                "WHERE p.closed_at IS NULL AND e.enabled = 1 AND (p.location IS NULL OR p.location = '' OR p.location LIKE '%ocations%' "
+                "WHERE p.closed_at IS NULL AND e.enabled = 1 AND COALESCE(p.place_tried, 0) = 0 AND (p.location IS NULL OR p.location = '' OR p.location LIKE '%ocations%' "
                 "OR p.location LIKE '%ultiple%' OR p.location LIKE '%arious%' OR p.location LIKE '%everal%' OR p.location LIKE '%nywhere%') "
                 "ORDER BY e.hits DESC, p.first_seen DESC LIMIT ?",
                 [limit * 30],
@@ -466,6 +466,12 @@ class JobCache:
                 if len(out) >= limit:
                     break
         return out
+
+    def mark_place_tried(self, urls: list[str]) -> None:
+        """Marks postings whose page was read and names no place, so they are not opened again."""
+        if urls:
+            with self.session() as db:
+                db.executemany("UPDATE postings SET place_tried = 1 WHERE url = ? AND closed_at IS NULL", [(u,) for u in urls])
 
     def set_location(self, url: str, location: str) -> bool:
         """Saves the real places of an open posting whose list only said "3 Locations" (and keeps the place index in step). False if not found."""

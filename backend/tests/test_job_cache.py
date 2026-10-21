@@ -2110,7 +2110,7 @@ def test_hybrid_and_on_site_searches_use_the_labels_shown():
 
 def test_pay_is_scaled_to_a_year_and_other_currencies_and_bonuses_do_not_confuse_it():
     assert text.pay_midpoint("$10K per month") == 120000 and text.pay_midpoint("$3,000 per month") == 36000
-    assert round(text.pay_midpoint("$3,557.69/week")) == 184999 and text.pay_midpoint("$4,000 bi-weekly") == 104000
+    assert round(text.pay_midpoint("$3,557.69/week")) == 185000 and text.pay_midpoint("$4,000 bi-weekly") == 104000
     assert text.pay_midpoint("$36 per hour \u2022 Offers Equity \u2022 $1.5K Bonus") == 36 * 2080  # the bonus is not read as pay
     assert text.pay_midpoint("$100,000 - $120,000 + $20,000 bonus") == 110000
     assert text.pay_midpoint("$5\u2013$15 per hour") == 10 * 2080

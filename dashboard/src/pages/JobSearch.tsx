@@ -186,7 +186,7 @@ export function JobSearch() {
   };
 
   const search = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const c = settle();
       try {
         window.localStorage.setItem(SAVED_KEY, JSON.stringify(c));
@@ -195,46 +195,31 @@ export function JobSearch() {
       }
       const apiCriteria = toApiCriteria(c);
       lastCriteria.current = apiCriteria;
-      return api.runJobSearch({ ...apiCriteria, web: "saved" }); // the saved lists first: results show in a couple of seconds
+      // Nothing is shown until every check is done: the saved lists, then the web search, then the first page checked against the
+      // employers' own systems. What appears is the final list, so the number and the jobs never change under the person.
+      const run = await api.runJobSearch({ ...apiCriteria, web: "saved" });
+      await api.webJobSearch(apiCriteria).catch(() => undefined);
+      const first = await api.pageJobSearch({ ...apiCriteria, count: PAGE_SIZE, page: 1, sort: "search" });
+      return { run, first, crit: apiCriteria };
     },
-    onSuccess: (r) => {
-      setCoverage(r.coverage ?? null);
+    onSuccess: ({ run, first, crit }) => {
+      if (lastCriteria.current !== crit) return;
+      setCoverage(run.coverage ?? null);
       setPage(1);
-      setServerPages({});
-      setMatchTotal(null);
-      setWebMerged(false);
-      // The web search runs on behind the results and, when it finishes, its finds are ranked into the list quietly.
-      const crit = lastCriteria.current ?? toApiCriteria(current);
-      api
-        .webJobSearch(crit)
-        .then(async (w) => {
-          if (lastCriteria.current !== crit || w.added === 0) return;
-          const first = await api.pageJobSearch({ ...crit, count: PAGE_SIZE, page: 1, sort: "search" });
-          if (lastCriteria.current !== crit) return;
-          qc.setQueryData<JobSearchResultOut[]>(["job-search-results"], (old) => {
-            const have = new Set((old ?? []).map((x) => x.id));
-            return [...(old ?? []), ...first.results.filter((x) => !have.has(x.id))];
-          });
-          if (sortRef.current === "search") {
-            setServerPages((p) => ({ [pageRef.current]: p[pageRef.current] ?? [], 1: first.results.map((x) => x.id) }));
-          }
-          setMatchTotal(first.total);
-          setWebMerged(true);
-          void qc.invalidateQueries({ queryKey: ["job-search-results"] });
-        })
-        .catch(() => undefined);
-      // the number of pages comes from the server (and this warms its list), so it matches whichever order is chosen
-      api
-        .pageJobSearch({ ...(lastCriteria.current ?? toApiCriteria(current)), count: PAGE_SIZE, page: 0 })
-        .then((t) => setMatchTotal(t.total))
-        .catch(() => undefined);
+      qc.setQueryData<JobSearchResultOut[]>(["job-search-results"], (old) => {
+        const have = new Set((old ?? []).map((x) => x.id));
+        return [...(old ?? []), ...first.results.filter((x) => !have.has(x.id))];
+      });
+      setServerPages({ 1: first.results.map((x) => x.id) });
+      setMatchTotal(first.total);
+      setWebMerged(true);
       void qc.invalidateQueries({ queryKey: ["job-employers"] });
       setNotice(
-        r.found > 0
+        first.results.length > 0
           ? null
           : {
               kind: "info",
-              text: `No new matches. ${r.skipped ? `${r.skipped} skipped because you already have them, removed them, or they are no longer open.` : "Try broader words."}`,
+              text: `No new matches. ${run.skipped ? `${run.skipped} skipped because you already have them, removed them, or they are no longer open.` : "Try broader words."}`,
             },
       );
       void qc.invalidateQueries({ queryKey: ["job-search-results"] });
@@ -413,7 +398,7 @@ export function JobSearch() {
   /** The one line above the results: what was searched and how many matches there are. */
   let status = "";
   if (search.isPending) {
-    status = "Searching your saved employer lists and the web. This can take up to a minute.";
+    status = "Searching your saved employer lists and the web, then checking each job. Results appear when every check is done, which can take up to a minute.";
   } else if (coverage && coverage.employers > 0) {
     const n = totalMatches;
     const matches = coverage.matches_capped && matchTotal === null ? `${n.toLocaleString("en-US")}+` : n.toLocaleString("en-US");
@@ -613,7 +598,7 @@ export function JobSearch() {
 
       {results.isLoading ? (
         <p className="text-sm text-ink-500">Loading...</p>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 || search.isPending ? (
         <div className="rounded-[20px] border border-[#e9e6f4] bg-white p-10 text-center shadow-[0_1px_2px_rgba(31,27,46,0.05),0_10px_28px_rgba(75,50,184,0.07)]">
           {search.isPending ? (
             <p className="animate-pulse text-sm font-semibold text-brand-700" role="status">

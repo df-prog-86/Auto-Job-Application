@@ -1861,7 +1861,10 @@ def test_a_city_search_is_a_filter_for_the_city_and_its_area_only():
     plan = matcher.build_plan(SimpleNamespace(titles="chef", location="Santa Fe, NM", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [], ["Pojoaque, NM"])
     ok = lambda loc, wt=None: matcher.place_ok(plan, loc, wt)
     assert ok("Santa Fe, NM") and ok("Pojoaque, NM")
-    assert not ok("Albuquerque, NM") and not ok("Remote - US", "remote") and not ok("Dallas, TX")
+    assert not ok("Albuquerque, NM") and not ok("Dallas, TX")
+    assert ok("Remote - US", "remote")  # "Any" work type brings remote jobs in, ranked behind the jobs in the place
+    onsite = matcher.build_plan(SimpleNamespace(titles="chef", location="Santa Fe, NM", work_type="onsite", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [], ["Pojoaque, NM"])
+    assert not matcher.place_ok(onsite, "Remote - US", "remote")  # On site and Hybrid never show remote jobs
     assert ok("2 Locations") and ok("New Mexico")  # no town named: kept only to be checked when the job is opened
     nationwide = matcher.build_plan(SimpleNamespace(titles="chef", location="United States", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
     assert matcher.place_ok(nationwide, "Albuquerque, NM", None) and matcher.place_ok(nationwide, "Remote - US", "remote")

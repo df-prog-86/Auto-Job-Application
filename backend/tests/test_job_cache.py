@@ -1953,6 +1953,8 @@ def test_bamboohr_description_comes_from_its_detail_data():
 def test_employers_behind_web_search_finds_join_the_saved_lists(app_and_db, monkeypatch):
     import asyncio
 
+    from app.config import settings
+
     async def fake_read(system, identifier, http, throttle):
         if identifier == "deadco":
             raise readers.ReaderError("no list")

@@ -838,6 +838,11 @@ async def _names_find(args: argparse.Namespace) -> int:
     with cache.session() as db:
         emps = [dict(r) for r in db.execute("SELECT id, ats, identifier, name, open_count FROM employers WHERE enabled = 1")]
     guessed = [e for e in emps if e["name"] == guess_name(e["ats"], e["identifier"]) and " " not in clean_company(e["name"]) and len(e["name"]) >= 7]
+    done_before: set[tuple[str, str]] = set()
+    for name_file in args.exclude or []:  # employers listed in an earlier file (taken or rejected) are not looked up again
+        with Path(name_file).expanduser().open(newline="", encoding="utf-8") as fh:
+            done_before |= {(r["system"], r["identifier"]) for r in csv.DictReader(fh)}
+    guessed = [e for e in guessed if (e["ats"], e["identifier"]) not in done_before]
     guessed.sort(key=lambda e: -(e["open_count"] or 0))
     guessed = guessed[: args.limit]
     print(f"Looking up the real names of {len(guessed)} employers (reads each employer's own public careers pages) ...", flush=True)
@@ -989,6 +994,7 @@ def main() -> None:
     nm.add_argument("--find", action="store_true", help="look the real names up and write a file to review (changes nothing)")
     nm.add_argument("--out", default="~/Desktop/employer-names.csv")
     nm.add_argument("--apply", help="save the names in this reviewed file")
+    nm.add_argument("--exclude", action="append", help="with --find: leave out employers listed in this earlier file (repeatable)")
     r = sub.add_parser("reread")
     r.add_argument("--db", required=True)
     r.add_argument("--only", help="comma separated hiring systems, e.g. greenhouse,lever,ashby")

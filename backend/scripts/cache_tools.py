@@ -1004,7 +1004,7 @@ def cmd_reindex(args: argparse.Namespace) -> int:
         print("This copy of SQLite has no full-text search, so descriptions cannot be indexed. Nothing was changed.")
         return 1
     print(f"Indexing the opening lines of job descriptions in {cache.path} ...", flush=True)
-    n = cache.reindex_descriptions(progress=lambda done: print(f"  {done:,} postings indexed", flush=True) if done % 10000 < 2000 else None)
+    n = cache.reindex_descriptions(rebuild=getattr(args, "rebuild", False), progress=lambda done: print(f"  {done:,} postings indexed", flush=True) if done % 10000 < 2000 else None)
     print(f"Done: {n:,} postings added to the description index. Search now reads descriptions (switch off with JOB_SEARCH_USE_DESCRIPTION=false).")
     return 0
 
@@ -1080,6 +1080,7 @@ def main() -> None:
     us.add_argument("--disable", action="store_true", help="turn the listed employers off (they stay saved, and --restore turns them back on)")
     us.add_argument("--restore", action="store_true", help="turn back on the employers this command turned off")
     ri = sub.add_parser("reindex")
+    ri.add_argument("--rebuild", action="store_true", help="write every posting's entry again (needed once after search began reading more of each description)")
     ri.add_argument("--db", help="another copy of the saved lists, such as the frozen test copy (default: the live one)")
     ind = sub.add_parser("industry")
     ind.add_argument("--retag", action="store_true", help="redo every employer, not only the ones with no industry yet")

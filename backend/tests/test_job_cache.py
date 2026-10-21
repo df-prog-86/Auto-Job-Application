@@ -2140,3 +2140,16 @@ def test_pay_found_in_a_posting_is_saved_only_where_the_list_showed_none():
     pay_text, pay_mid = text.pay_from_text(body)
     assert pay_mid == 95000 and cache.set_pay(pid, pay_text, pay_mid)
     assert cache.descriptions_without_pay() == [] and not cache.set_pay(pid, "$1 / year", 1)
+
+
+def test_description_index_reads_the_first_two_thousand_characters_and_can_be_rebuilt():
+    cache = JobCache()
+    if not cache.has_desc:
+        return
+    emp, _ = cache.upsert_employer("icims", "idxco", "Idx Co", "user_link")
+    cache.apply_refresh(emp, [PostingIn(ext_id="1", title="Coordinator", url="https://idxco.icims.com/jobs/1/job", location="Boston, MA")], 1_000_000)
+    pid = [i for i, _u in cache.postings_without_description(10, 10, None)][0]
+    cache.set_description(pid, ("filler words " * 100) + "revenue cycle operations " + ("more filler " * 50))  # the phrase sits past character 1,000
+    assert len(cache.candidates_by_description('"revenue cycle"', 10)) == 1
+    assert cache.reindex_descriptions(rebuild=True) >= 1
+    assert len(cache.candidates_by_description('"revenue cycle"', 10)) == 1

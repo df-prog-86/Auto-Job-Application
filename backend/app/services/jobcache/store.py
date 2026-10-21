@@ -92,7 +92,7 @@ CLOSED_KEEP_DAYS = 30
 DESC_FTS_SCHEMA = (
     "CREATE VIRTUAL TABLE IF NOT EXISTS postings_desc_fts USING fts5(body, tokenize = 'porter unicode61 remove_diacritics 2')"
 )
-DESC_INDEX_CHARS = 600  # the opening lines of a posting's description that search can read
+DESC_INDEX_CHARS = 2000  # the opening lines of a posting's description that search can read
 DESC_READY_KEY = "desc_index_ready"
 _INIT_LOCK = threading.Lock()
 _INITIALISED: dict[str, bool] = {}  # path -> whether full-text search is available
@@ -680,13 +680,16 @@ class JobCache:
             ).fetchall()
         return [(r["id"], unpack_description(r["description_z"]) or "") for r in rows]
 
-    def reindex_descriptions(self, batch: int = 2000, progress: Any = None) -> int:
+    def reindex_descriptions(self, batch: int = 2000, progress: Any = None, rebuild: bool = False) -> int:
         """
         Builds the description index for every open posting that has a saved description and is not in it yet. Safe to run
-        again and to stop part way: it only adds what is missing. Returns how many postings it added.
+        again and to stop part way: it only adds what is missing. With rebuild, every open posting's entry is written again
+        (after the amount of text that search reads changed). Returns how many postings it added.
         """
         if not self.has_desc:
             return 0
+        if rebuild:
+            return self._rebuild_desc_index(batch, progress)
         added = 0
         while True:
             with self.session() as db:
@@ -705,6 +708,25 @@ class JobCache:
                 progress(added)
         self.meta_set(DESC_READY_KEY, "1")
         return added
+
+    def _rebuild_desc_index(self, batch: int, progress: Any) -> int:
+        done, after = 0, 0
+        while True:
+            with self.session() as db:
+                rows = db.execute(
+                    "SELECT id, description_z FROM postings WHERE id > ? AND closed_at IS NULL AND description_z IS NOT NULL ORDER BY id LIMIT ?",
+                    (after, batch),
+                ).fetchall()
+                if not rows:
+                    break
+                db.executemany("DELETE FROM postings_desc_fts WHERE rowid = ?", [(r["id"],) for r in rows])
+                self._desc_insert(db, [(r["id"], desc_lead(unpack_description(r["description_z"]))) for r in rows])
+            after = rows[-1]["id"]
+            done += len(rows)
+            if progress:
+                progress(done)
+        self.meta_set(DESC_READY_KEY, "1")
+        return done
 
     def candidates_by_description(
         self, match: str, limit: int, earliest_posted: dt.date | None = None, exclude_ids: set[int] | None = None

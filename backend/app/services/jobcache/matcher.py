@@ -49,7 +49,7 @@ STALE_FACTOR = 0.85
 W_TITLE, W_PLACE, W_RECENT, W_PAY, W_KEYWORD = 0.62, 0.22, 0.08, 0.04, 0.04
 W_DESC = 0.05  # added when the opening of the description names the kind of work asked for; the total is capped at 1
 DESC_TITLE_FLOOR = 0.40  # the title credit of a posting found only through its description: above the cut-off, below a real title match
-DESC_CHARS = 600  # how much of the opening of a description is read
+DESC_CHARS = 2000  # how much of the opening of a description is read
 DESC_CANDIDATE_LIMIT = 600  # postings added from the description index per search
 
 
@@ -279,7 +279,7 @@ BORDERLINE_TITLE = 0.70  # a title fit below this is "partly matches": the descr
 DESC_MIN_CHARS = 300  # a description shorter than this says too little to count against a job
 DESC_CONFIRM_BONUS = 0.15
 DESC_DEMOTE = 0.6
-DESC_READ_CHARS = 2500  # how much of a description is read when it confirms or demotes a partly matching title
+DESC_READ_CHARS = 4000  # how much of a description is read when it confirms or demotes a partly matching title
 
 
 def description_signal(plan: Plan, description: str | None) -> int:

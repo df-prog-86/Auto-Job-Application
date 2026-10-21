@@ -2075,3 +2075,30 @@ def test_job_pages_without_a_list_date_get_one_and_a_page_with_none_is_not_opene
     with cache.session() as db:
         gh_id = db.execute("SELECT id FROM postings WHERE ext_id = '9'").fetchone()["id"]
     assert not cache.set_posted_at(gh_id, dt.date(2026, 2, 2))  # a date the list gave is never replaced
+
+
+def test_work_type_is_on_site_unless_the_employer_says_otherwise():
+    from app.services.jobcache.text import effective_work_type as eff
+
+    assert eff("remote", "Boston, MA") == "remote" and eff("hybrid", "Denver, CO") == "hybrid" and eff("onsite", "Denver, CO") == "onsite"
+    assert eff(None, "Philadelphia, PA") == "onsite"
+    assert eff(None, "3 Locations") is None and eff(None, None) is None and eff(None, "PA") is None  # the place itself is unknown
+
+
+def test_hybrid_and_on_site_searches_use_the_labels_shown():
+    cache = JobCache()
+    eid, _ = cache.upsert_employer("lever", "acme", "Acme Health", "search")
+    cache.apply_refresh(eid, [
+        post(1, "Revenue Cycle Manager", "Boston, MA"),  # nothing said: on site
+        post(2, "Revenue Cycle Manager", "Boston, MA", work_type="hybrid"),
+        post(3, "Revenue Cycle Manager", "3 Locations"),  # place unknown: kept, labeled nothing
+    ], 1000)
+
+    def ids(**kw):
+        out = service.search_sync(crit(location="Boston, MA", **kw), set(), None, 20)
+        return {i["url"].rsplit("/", 1)[1]: i["work_type"] for i in out.items}
+
+    assert ids(work_type="hybrid") == {"2": "hybrid", "3": None}  # the unlabeled Boston job is on site, not hybrid
+    assert ids(work_type="onsite") == {"1": "onsite", "3": None}
+    shown = ids()
+    assert shown["1"] == "onsite" and shown["2"] == "hybrid"

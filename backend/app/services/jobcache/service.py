@@ -25,7 +25,7 @@ from app.services.jobcache import geo, matcher, onet
 from app.services.jobcache.keys import loose_keys, url_key
 from app.services.jobcache.readers import SYSTEMS, USER_AGENT, ReaderError, Throttle, employer_ref, make_client, read_employer
 from app.services.jobcache.store import JobCache, guess_name, now_ts
-from app.services.jobcache.text import fold, is_vague_place, names_no_town, parse_location_query, place_ref
+from app.services.jobcache.text import effective_work_type, fold, is_vague_place, names_no_town, parse_location_query, place_ref
 
 log = logging.getLogger("job_cache")
 
@@ -72,7 +72,7 @@ def to_item(scored: matcher.Scored) -> dict[str, Any]:
         "title": r["title"],
         "company": r["company"],
         "location": r.get("location"),
-        "work_type": r.get("work_type"),
+        "work_type": effective_work_type(r.get("work_type"), r.get("location")),
         "salary_text": r.get("pay_text"),
         "posted_at": dt.date.fromisoformat(posted[:10]) if isinstance(posted, str) and len(posted) >= 10 else None,
         "summary": None,

@@ -326,7 +326,7 @@ export function JobSearch() {
     const names = { remote: "Remote", hybrid: "Hybrid", onsite: "On site" } as const;
     filterChips.push({ key: "wt", text: names[workType as keyof typeof names] ?? String(workType), clear: () => setWorkType("any") });
   }
-  if (includeRemote && workType !== "remote") filterChips.push({ key: "inclrem", text: "Remote jobs included", clear: () => setIncludeRemote(false) });
+  if (includeRemote && workType === "any") filterChips.push({ key: "inclrem", text: "Remote jobs included", clear: () => setIncludeRemote(false) });
   if (within) filterChips.push({ key: "within", text: `Last ${within} days`, clear: () => setWithin(0) });
   const salaryNumber = parseInt(targetSalary.replace(/[^0-9]/g, ""), 10);
   if (Number.isFinite(salaryNumber) && salaryNumber > 0) {
@@ -727,6 +727,13 @@ function agoText(date?: string | null): string {
 
 const WORK_NAMES: Record<string, string> = { remote: "Remote", hybrid: "Hybrid", onsite: "On site" };
 
+// The work type as text: not repeated when the place already says it ("Remote, Ohio"), and none when it is not known.
+function workTypeText(r: { work_type?: string | null; location?: string | null }): string | null {
+  if (!r.work_type) return null;
+  const name = WORK_NAMES[r.work_type] ?? r.work_type;
+  return r.location && r.location.toLowerCase().includes(name.toLowerCase()) ? null : name;
+}
+
 /** How well the posting fits the search, in words and a color. Never shown as a number. */
 function fitWord(score: number | null | undefined): { word: string; color: string } {
   if (score == null) return { word: "Possible match", color: "#6b6a88" };
@@ -795,7 +802,7 @@ function Pager({ page, total, busy, onPick }: { page: number; total: number; bus
 
 function ResultRow({ r, selected, onPick }: { r: JobSearchResultOut; selected: boolean; onPick: () => void }) {
   const fit = fitWord(r.fit_score);
-  const meta = [r.location, r.work_type ? (WORK_NAMES[r.work_type] ?? r.work_type) : null, r.salary_text].filter(Boolean).join(" | ");
+  const meta = [r.location, workTypeText(r), r.salary_text].filter(Boolean).join(" | ");
   return (
     <li>
       <button
@@ -920,7 +927,7 @@ function JobDetail({
 
       <div className="flex flex-wrap items-center gap-x-[26px] gap-y-1.5 border-y border-[#ebe8f6] py-2.5 text-sm font-semibold text-ink-900">
         <Fact icon="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z M12 7a2.5 2.5 0 100 5 2.5 2.5 0 000-5">{r.location || "Location not listed"}</Fact>
-        <Fact icon="M4 9h16v10H4z M9 9V6h6v3">{r.work_type ? (WORK_NAMES[r.work_type] ?? r.work_type) : "Work type not stated"}</Fact>
+        {(workTypeText(r) || !r.work_type) && <Fact icon="M4 9h16v10H4z M9 9V6h6v3">{workTypeText(r) ?? "Work type not stated"}</Fact>}
         <Fact icon="M12 4a8 8 0 100 16 8 8 0 000-16z M12 8v8 M14.5 9.5h-3.2a1.5 1.5 0 000 3h1.4a1.5 1.5 0 010 3H9.5">{r.salary_text || "Pay not listed"}</Fact>
         <Fact icon="M12 4a8 8 0 100 16 8 8 0 000-16z M12 8v4l3 2">{posted ? `Posted ${posted}` : "Posted date not listed"}</Fact>
       </div>
@@ -1085,7 +1092,7 @@ function FiltersPopover(p: {
           { value: "onsite", label: "On site" },
         ]}
       />
-      {p.workType !== "remote" && (
+      {p.workType === "any" && (
         <label className="-mt-2 flex items-start gap-2.5 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5 text-sm text-ink-700">
           <input
             type="checkbox"

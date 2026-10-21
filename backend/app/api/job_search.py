@@ -65,6 +65,9 @@ def _save_item(db: Session, item: dict, payload: JobSearchIn) -> JobSearchResult
     The result row for a found job. A job already on the list is reused, and one set aside by an earlier search comes back
     with its resume score intact, so a job is never saved twice and never scored twice.
     """
+    from app.services.jobcache.text import effective_work_type
+
+    item = {**item, "work_type": effective_work_type(item.get("work_type"), item.get("location"))}  # on site unless the employer says otherwise
     row = (
         db.query(JobSearchResult)
         .filter(JobSearchResult.url_key == item["url_key"], JobSearchResult.status.in_(("new", "stale")))

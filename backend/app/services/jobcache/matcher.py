@@ -23,6 +23,7 @@ from app.services.jobcache.text import (
     title_names_foreign,
     all_stems,
     content_stems,
+    effective_work_type,
     fold,
     is_vague_place,
     level_of,
@@ -329,9 +330,9 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
             tf, via_desc = DESC_TITLE_FLOOR, True  # "Business Analyst" whose description is about revenue cycle work
         else:
             return None
-    wt = row.get("work_type")
+    wt = effective_work_type(row.get("work_type"), row.get("location"))  # on site unless the employer says remote or hybrid; unknown only when the place is
     if plan.work_type != "any" and wt is not None and wt != plan.work_type:
-        return None  # a posting that does not say how it works is kept; one that says something else is not
+        return None  # a job whose place is unknown is kept; one that is something else is not
     if plan.work_type == "remote" and wt is None and not is_vague_place(row.get("location")):
         return None  # it names a city and never says remote, so it is not a remote job
     if plan.work_type == "remote":

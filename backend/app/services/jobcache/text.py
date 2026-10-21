@@ -349,6 +349,18 @@ def is_vague_place(location: str | None) -> bool:
     return not (location or "").strip() or bool(_UNKNOWN_PLACE.search(location or ""))
 
 
+def effective_work_type(work_type: str | None, location: str | None) -> str | None:
+    """
+    The work type a job is shown and filtered by, as on LinkedIn and Indeed: remote or hybrid only when the employer says so, on site
+    for every other job that has a place, and unknown only when the place itself is unknown ("3 Locations", a state alone, nothing).
+    """
+    if work_type:
+        return work_type
+    if is_vague_place(location) or names_no_town(location):
+        return None
+    return "onsite"
+
+
 def title_names_foreign(title: str | None) -> bool:
     """True when a remote job's title puts it in another country ("REMOTE (INDIA): Project Coordinator") and says nothing of the US."""
     folded = f" {fold(title)} "

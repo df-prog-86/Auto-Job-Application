@@ -237,14 +237,14 @@ async def read_missing_descriptions(unread: list[tuple[int, str]], max_chars: in
     return saved
 
 
-async def fill_places(cache: JobCache, limit: int = 150, per_employer: int = 10) -> tuple[int, int]:
+async def fill_places(cache: JobCache, limit: int = 150, per_employer: int = 10, only_systems: list[str] | None = None) -> tuple[int, int]:
     """
     Opens postings whose list says only "3 Locations" and saves where they really are, so a search for a city finds them without
     waiting. A few from each employer per batch. Returns (tried, places saved).
     """
     from app.services.discovery import web_search
 
-    todo = await asyncio.to_thread(cache.vague_place_postings, limit, per_employer)
+    todo = await asyncio.to_thread(cache.vague_place_postings, limit, per_employer, only_systems)
     if not todo:
         return 0, 0
     icims = [i for i in todo if (urlsplit(i["url"]).hostname or "").endswith(".icims.com")]
@@ -252,11 +252,18 @@ async def fill_places(cache: JobCache, limit: int = 150, per_employer: int = 10)
     saved = await _icims_places(cache, icims)
     before = {id(i): i["location"] for i in todo}
     await web_search.enrich_from_ats(todo)
+    unresolved: list[str] = []
     for item in todo:
         loc = item.get("location")
         if loc and loc != before[id(item)] and not is_vague_place(loc) and not names_no_town(loc):
             if await asyncio.to_thread(cache.set_location, item["url"], loc):
                 saved += 1
+                continue
+        host = urlsplit(item["url"]).hostname or ""
+        asked_system = host.endswith(("myworkdayjobs.com", "greenhouse.io", "ashbyhq.com", "lever.co"))
+        if item.get("ats_checked") or not asked_system:  # the employer's system answered with no better place, or cannot be asked: do not open it again
+            unresolved.append(item["url"])
+    await asyncio.to_thread(cache.mark_place_tried, unresolved)
     return len(todo) + len(icims), saved
 
 

@@ -2179,3 +2179,14 @@ def test_postings_with_no_place_can_be_filled_in_and_a_page_without_one_is_not_o
     assert cache.set_location("https://careers-placeco.icims.com/jobs/1/nurse/job", "Joliet, IL")
     cache.mark_place_tried(["https://careers-placeco.icims.com/jobs/2/nurse/job"])
     assert cache.vague_place_postings(10, 10) == []  # one has its place, the other was read and names none
+
+
+def test_the_place_fill_can_be_limited_to_one_hiring_system():
+    cache = JobCache()
+    a, _ = cache.upsert_employer("icims", "onlyic", "Only IC", "user_link")
+    b, _ = cache.upsert_employer("workday", "wd.wd1.myworkdayjobs.com|wd|Careers", "Only WD", "user_link")
+    cache.apply_refresh(a, [PostingIn(ext_id="1", title="Nurse", url="https://careers-onlyic.icims.com/jobs/1/nurse/job", location=None)], 1_000_000)
+    cache.apply_refresh(b, [PostingIn(ext_id="/job/1", title="Analyst", url="https://wd.wd1.myworkdayjobs.com/en-US/Careers/job/1", location="3 Locations")], 1_000_000)
+    assert len(cache.vague_place_postings(10, 10)) == 2
+    only = cache.vague_place_postings(10, 10, ["icims"])
+    assert len(only) == 1 and ".icims.com" in only[0]["url"]

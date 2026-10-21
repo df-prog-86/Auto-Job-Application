@@ -244,7 +244,7 @@ async def _places(args: argparse.Namespace) -> int:
     tried_all = saved_all = 0
     try:
         for n in range(1, max(args.rounds, 1) + 1):
-            tried, saved = await service.fill_places(cache, args.limit, args.per_employer)
+            tried, saved = await service.fill_places(cache, args.limit, args.per_employer, [x.strip() for x in args.system.split(',') if x.strip()] if args.system else None)
             if not tried:
                 print("No multi-location postings left to open.")
                 break
@@ -1094,6 +1094,7 @@ def main() -> None:
     pl.add_argument("--limit", type=int, default=150, help="postings to open in this batch")
     pl.add_argument("--rounds", type=int, default=1, help="how many batches to run in a row")
     pl.add_argument("--per-employer", type=int, default=10, help="most postings opened from one employer per batch")
+    pl.add_argument("--system", help="only these hiring systems, e.g. icims or workday,bamboohr")
     pl.add_argument("--pause", type=float, default=2.0, help="seconds to wait between batches")
     dt_ = sub.add_parser("dates")
     dt_.add_argument("--limit", type=int, default=150, help="postings to open in this batch")

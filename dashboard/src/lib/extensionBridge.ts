@@ -1,4 +1,4 @@
-/** Talks to the Job Agent browser extension through the page (see extension/src/content/dashboard-bridge.ts). */
+/** Talks to the OtterApply browser extension through the page (see extension/src/content/dashboard-bridge.ts). */
 
 const SOURCE = "job-agent-dashboard";
 const REPLY = "job-agent-extension";

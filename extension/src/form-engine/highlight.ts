@@ -39,8 +39,8 @@ export function showBanner(doc: Document, filled: number, needYou: number): void
   const body = doc.createElement("div");
   body.textContent =
     needYou > 0
-      ? `${needYou} ${needYou === 1 ? "needs" : "need"} you (dashed amber). Check everything before you submit. Job Agent never submits for you.`
-      : "Check everything before you submit. Job Agent never submits for you.";
+      ? `${needYou} ${needYou === 1 ? "needs" : "need"} you (dashed amber). Check everything before you submit. OtterApply never submits for you.`
+      : "Check everything before you submit. OtterApply never submits for you.";
   const close = doc.createElement("button");
   close.type = "button";
   close.textContent = "Clear highlights";
@@ -53,7 +53,7 @@ export function showBanner(doc: Document, filled: number, needYou: number): void
     /* not running inside the extension (tests) */
   }
   if (version) {
-    build.textContent = `Job Agent extension ${version}`;
+    build.textContent = `OtterApply extension ${version}`;
     build.style.cssText = "margin-top:6px;font-size:11px;opacity:.55";
   }
   banner.append(title, body, close);

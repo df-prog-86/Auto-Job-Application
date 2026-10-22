@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { NavLink, Outlet } from "react-router-dom";
 
 import { api } from "@/api/client";
+import { Otter } from "@/components/Otter";
 import { Badge } from "@/components/ui";
 
 interface NavItem {
@@ -24,14 +25,8 @@ const BOTTOM: NavItem[] = [
 
 function LogoMark() {
   return (
-    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 shadow-glow">
-      <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 text-white" aria-hidden="true">
-        <path
-          d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"
-          fill="currentColor"
-        />
-        <path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z" fill="currentColor" opacity="0.8" />
-      </svg>
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#15122e] shadow-glow">
+      <Otter size={32} />
     </div>
   );
 }
@@ -74,8 +69,8 @@ export function NavShell() {
         <div className="mb-3 flex items-center gap-3 px-2 md:mb-9">
           <LogoMark />
           <div>
-            <div className="text-base font-bold leading-tight text-ink-900">Job Agent</div>
-            <div className="text-xs text-ink-400">Your job search, organized</div>
+            <div className="text-base font-bold leading-tight text-ink-900">OtterApply</div>
+            <div className="text-xs leading-snug text-ink-400">Applying for jobs shouldn&apos;t suck</div>
           </div>
         </div>
         <nav className="flex gap-2 overflow-x-auto md:min-h-0 md:flex-1 md:flex-col md:overflow-visible">

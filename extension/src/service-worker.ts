@@ -463,7 +463,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
 
     case "WORKDAY_WAITING":
       if (sender.id === chrome.runtime.id && sender.tab) {
-        notify("Sign in to Workday", "Sign in (or create your account) on that tab. Job Agent carries on by itself afterwards.");
+        notify("Sign in to Workday", "Sign in (or create your account) on that tab. OtterApply carries on by itself afterwards.");
       }
       return false;
 

@@ -45,7 +45,7 @@ export function Pairing() {
         <ol className="mb-6 space-y-4">
           {[
             "Create a pairing code below.",
-            "Open the Job Agent extension in Chrome.",
+            "Open the OtterApply extension in Chrome.",
             "Paste the code there. It works once, so use it right away.",
           ].map((text, i) => (
             <li key={text} className="flex items-center gap-3 text-sm text-ink-700">

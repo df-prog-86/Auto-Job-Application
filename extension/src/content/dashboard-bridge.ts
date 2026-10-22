@@ -1,5 +1,5 @@
 /**
- * Runs only on the Job Agent dashboard (http://127.0.0.1:8765/app/*). Lets
+ * Runs only on the OtterApply dashboard (http://127.0.0.1:8765/app/*). Lets
  * the dashboard's "Complete application" button reach the extension. It
  * relays exactly two message kinds and nothing else; the service worker
  * re-checks everything (sender, job id, destination site).

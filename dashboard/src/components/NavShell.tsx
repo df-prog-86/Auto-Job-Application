@@ -70,7 +70,7 @@ export function NavShell() {
           <LogoMark />
           <div>
             <div className="text-base font-bold leading-tight text-ink-900">OtterApply</div>
-            <div className="text-xs leading-snug text-ink-400">Applying for jobs shouldn&apos;t suck</div>
+            <div className="text-xs leading-snug text-ink-400">Because applying shouldn&apos;t suck</div>
           </div>
         </div>
         <nav className="flex gap-2 overflow-x-auto md:min-h-0 md:flex-1 md:flex-col md:overflow-visible">

@@ -553,30 +553,25 @@ class JobCache:
 
     def postings_without_description(self, limit: int, per_employer: int, skip_systems: set[str] | None = None, employer_ids: list[int] | None = None, only_systems: list[str] | None = None) -> list[tuple[int, str]]:
         """
-        (id, link) of open postings that have no saved description and were not tried before: the busiest employers (the ones
-        searches reach) first, newest postings first, and no more than `per_employer` from any one employer.
+        (id, link) of open postings that have no saved description and were not tried before. At most `per_employer` from any one
+        employer (newest first), and the batch is spread across as many employers as possible: one posting from each employer
+        (the busiest employers, the ones searches reach, first), then a second from each, and so on. A few very busy employers
+        can no longer fill the whole batch, which kept batches tiny once they were close to done.
         """
         marks = ",".join("?" for _ in (skip_systems or ()))
         with self.session() as db:
             rows = db.execute(
-                "SELECT p.id, p.url, p.employer_id FROM postings p JOIN employers e ON e.id = p.employer_id "
-                "WHERE p.closed_at IS NULL AND e.enabled = 1 AND p.description_z IS NULL AND p.desc_hash IS NULL"
+                "SELECT id, url FROM ("
+                " SELECT p.id, p.url, e.hits AS hits, ROW_NUMBER() OVER (PARTITION BY p.employer_id ORDER BY p.first_seen DESC) AS rn"
+                " FROM postings p JOIN employers e ON e.id = p.employer_id"
+                " WHERE p.closed_at IS NULL AND e.enabled = 1 AND p.description_z IS NULL AND p.desc_hash IS NULL"
                 + (f" AND e.ats NOT IN ({marks})" if marks else "")
                 + (f" AND e.id IN ({','.join('?' for _ in employer_ids)})" if employer_ids else "")
                 + (f" AND e.ats IN ({','.join('?' for _ in only_systems)})" if only_systems else "")
-                + " ORDER BY e.hits DESC, p.first_seen DESC LIMIT ?",
-                [*(skip_systems or ()), *(employer_ids or ()), *(only_systems or ()), limit * 20],
+                + ") WHERE rn <= ? ORDER BY rn, hits DESC LIMIT ?",
+                [*(skip_systems or ()), *(employer_ids or ()), *(only_systems or ()), max(per_employer, 1), limit],
             ).fetchall()
-        taken: dict[int, int] = {}
-        out: list[tuple[int, str]] = []
-        for r in rows:
-            if taken.get(r["employer_id"], 0) >= per_employer:
-                continue
-            taken[r["employer_id"]] = taken.get(r["employer_id"], 0) + 1
-            out.append((r["id"], r["url"]))
-            if len(out) >= limit:
-                break
-        return out
+        return [(r["id"], r["url"]) for r in rows]
 
     def undated_postings(self, systems: list[str], limit: int, per_employer: int) -> list[tuple[int, str]]:
         """(id, link) of open postings of these hiring systems with no posted date that were not looked at before: busiest employers first."""

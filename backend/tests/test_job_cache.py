@@ -1744,6 +1744,19 @@ def test_descriptions_are_filled_in_gradually_a_few_per_employer_and_never_retri
     assert pid not in [i for i, _u in cache.postings_without_description(50, 3, {"greenhouse"})]
 
 
+def test_a_fill_batch_spreads_across_many_employers_instead_of_a_few_busy_ones():
+    cache = JobCache()
+    ids = []
+    for k in range(8):
+        eid, _ = cache.upsert_employer("icims", f"co{k}", f"Co {k}", "search")
+        ids.append(eid)
+        cache.apply_refresh(eid, [PostingIn(ext_id=str(n), title=f"Analyst {n}", url=f"https://co{k}.icims.com/jobs/{n}/job", location="Boston, MA") for n in range(4)], 1_000_000)
+    batch = cache.postings_without_description(8, 4, None)
+    assert len(batch) == 8 and len({u.split(".")[0] for _i, u in batch}) == 8  # one posting from each employer, not four from each of two
+    assert len(cache.postings_without_description(100, 4, None)) == 32  # and every employer still gets its share over the next batches
+    assert len(cache.postings_without_description(100, 2, None)) == 16  # the per-employer limit still holds
+
+
 def test_a_new_employers_postings_can_be_filled_in_on_their_own():
     cache = JobCache()
     old, _ = cache.upsert_employer("icims", "oldco", "Old Co", "search")

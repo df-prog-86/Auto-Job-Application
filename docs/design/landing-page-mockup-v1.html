@@ -1,0 +1,120 @@
+<title>OtterApply Landing Page</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=DM+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one centered column. Logo lockup, typed line, button, quiet footnote. The glow behind the otter is the only loud thing. */
+:root{
+  --bg:#f7f5ff; --bg2:#ffffff; --ink:#17133a; --ink2:#5d5887; --line:#e3dff6; --t1:#7c5cf0; --t2:#4f6bf0; --t3:#0c9e8e;
+  --peach:#ffc59a; --lav:#a49dff; --teal:#46dccb;
+  --display:"Bricolage Grotesque","Trebuchet MS",system-ui,sans-serif;
+  --body:"DM Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:light;
+}
+:root{--g1:rgba(164,157,255,.30);--g2:rgba(70,220,203,.20);--g3:rgba(190,170,255,.32);--shadow:rgba(76,60,190,.28);--btn:linear-gradient(100deg,#c9c2ff,#b9ccff 52%,#6fe3d2);--btnglow:rgba(106,92,240,.32)}
+:root[data-look="midnight"]{--bg:#0c0a22;--bg2:#15122e;--ink:#f4f2ff;--ink2:#a9a4d0;--line:#2a2650;--t1:#ffc59a;--t2:#a49dff;--t3:#46dccb;--g1:rgba(164,157,255,.28);--g2:rgba(70,220,203,.14);--g3:rgba(255,197,154,.13);--shadow:rgba(164,157,255,.45);--btnglow:rgba(164,157,255,.45);color-scheme:dark}
+:root[data-look="seafoam"]{--bg:#eefaf8;--bg2:#fff;--ink:#0c2e32;--ink2:#4a7176;--line:#cfeae6;--t1:#0a9a8a;--t2:#2c7be5;--t3:#6a5cf0;--g1:rgba(70,220,203,.32);--g2:rgba(120,190,255,.24);--g3:rgba(164,157,255,.22);--shadow:rgba(12,120,120,.28);--btn:linear-gradient(100deg,#7fe9da,#a9d6ff 55%,#cfc9ff);--btnglow:rgba(20,150,150,.32)}
+:root[data-look="blush"]{--bg:#fff5f2;--bg2:#fff;--ink:#2b1233;--ink2:#7b5a80;--line:#f4dde0;--t1:#f0703a;--t2:#d6409f;--t3:#7a4cf0;--g1:rgba(255,150,175,.28);--g2:rgba(255,197,154,.34);--g3:rgba(164,157,255,.22);--shadow:rgba(190,60,120,.26);--btn:linear-gradient(100deg,#ffc59a,#ffb3cf 52%,#cfc2ff);--btnglow:rgba(214,64,159,.30)}
+.themes{position:absolute;top:max(14px,env(safe-area-inset-top,0px));right:max(16px,env(safe-area-inset-right,0px));z-index:5;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;max-width:calc(100% - 32px)}
+.themes button{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px 0 8px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);color:var(--ink2);font:600 13px/1 var(--body);cursor:pointer}
+.themes button i{width:18px;height:18px;border-radius:50%;border:1px solid rgba(0,0,0,.12);display:block}
+.themes button[aria-pressed="true"]{color:var(--ink);border-color:var(--t2);box-shadow:0 0 0 2px var(--t2) inset}
+.themes button:focus-visible{outline:2px solid var(--t2);outline-offset:2px}
+*{box-sizing:border-box}
+html,body{min-height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 var(--body);overflow-x:hidden}
+.page{position:relative;min-height:calc(100vh - 2px);display:flex;flex-direction:column;align-items:center;justify-content:center;isolation:isolate;
+  padding-block:72px 140px;padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px))}
+/* atmosphere */
+.glow{position:absolute;inset:0;z-index:-2;pointer-events:none;
+  background:
+   radial-gradient(560px 380px at 50% 26%,var(--g1),transparent 70%),
+   radial-gradient(440px 330px at 16% 80%,var(--g2),transparent 70%),
+   radial-gradient(480px 350px at 86% 72%,var(--g3),transparent 70%)}
+.grid{position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:56px 56px;
+  -webkit-mask-image:radial-gradient(ellipse 70% 60% at 50% 40%,#000 20%,transparent 75%);mask-image:radial-gradient(ellipse 70% 60% at 50% 40%,#000 20%,transparent 75%)}
+.lockup{display:flex;align-items:center;gap:clamp(10px,2.4vw,20px)}
+.lockup svg{width:clamp(84px,17vw,132px);height:auto;flex:none;filter:drop-shadow(0 16px 30px var(--shadow))}
+.word{font-family:var(--display);font-weight:800;letter-spacing:-.035em;line-height:1;font-size:clamp(40px,9vw,84px);margin:0}
+.type{margin:clamp(28px,5vw,44px) 0 0;min-height:1.3em;font-family:var(--display);font-weight:700;letter-spacing:-.02em;
+  font-size:clamp(24px,4.6vw,42px);line-height:1.2;text-align:center;
+  background:linear-gradient(90deg,var(--t1),var(--t2) 55%,var(--t3));-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent}
+.caret{display:inline-block;width:.08em;height:.95em;margin-left:.08em;vertical-align:-.08em;background:var(--t2);border-radius:2px;animation:blink 1s steps(1) infinite;-webkit-text-fill-color:initial}
+@keyframes blink{50%{opacity:0}}
+.cta{margin-top:clamp(28px,5vw,44px);display:inline-flex;align-items:center;justify-content:center;min-height:56px;padding:0 34px;border:0;border-radius:999px;cursor:pointer;
+  font:700 18px/1 var(--display);letter-spacing:-.01em;color:#16123a;text-decoration:none;
+  background:var(--btn);
+  box-shadow:0 0 0 1px rgba(255,255,255,.4) inset,0 10px 30px var(--btnglow);transition:transform .18s ease,box-shadow .18s ease}
+.cta:hover{transform:translateY(-2px);box-shadow:0 0 0 1px rgba(255,255,255,.35) inset,0 16px 40px rgba(106,92,240,.42)}
+.cta:active{transform:translateY(0)}
+.cta:focus-visible{outline:3px solid var(--t2);outline-offset:4px}
+.price{margin:18px 0 0;color:var(--ink2);font-size:15px;text-align:center}
+.price strong{color:var(--ink);font-weight:600}
+.foot{position:absolute;left:max(20px,env(safe-area-inset-left,0px));right:max(20px,env(safe-area-inset-right,0px));bottom:0;padding-block:24px;display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--ink2);font-size:14px;border-top:1px solid var(--line)}
+.foot nav{display:flex;flex-wrap:wrap;justify-content:center;gap:8px 28px}
+.foot a{color:var(--ink2);text-decoration:none;padding:4px 2px;border-radius:4px;transition:color .15s}
+.foot a:hover{color:var(--ink)}
+.foot a:focus-visible{outline:2px solid var(--lav);outline-offset:3px}
+.foot small{font-size:13px;opacity:.8}
+.static{display:none}
+.otter-blink{animation:eye 5s infinite;transform-box:fill-box;transform-origin:center}
+@keyframes eye{0%,94%,100%{transform:scaleY(1)}96%{transform:scaleY(.08)}}
+@media (prefers-reduced-motion:reduce){
+  .caret,.otter-blink{animation:none}
+  .cta{transition:none}
+}
+</style>
+<main class="page">
+  <div class="glow"></div><div class="grid"></div>
+  <div class="themes" role="group" aria-label="Preview theme">
+    <button type="button" data-t="lavender" aria-pressed="true"><i style="background:linear-gradient(135deg,#f7f5ff,#a49dff)"></i>Lavender</button>
+    <button type="button" data-t="midnight" aria-pressed="false"><i style="background:linear-gradient(135deg,#15122e,#6a5cf0)"></i>Midnight</button>
+    <button type="button" data-t="seafoam" aria-pressed="false"><i style="background:linear-gradient(135deg,#eefaf8,#46dccb)"></i>Seafoam</button>
+    <button type="button" data-t="blush" aria-pressed="false"><i style="background:linear-gradient(135deg,#fff5f2,#ff9fc0)"></i>Blush</button>
+  </div>
+  <div class="lockup">
+    <svg viewBox="0 0 120 120" aria-hidden="true" style="overflow:visible"><defs><linearGradient id="og" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffc59a"/><stop offset=".5" stop-color="#a49dff"/><stop offset="1" stop-color="#46dccb"/></linearGradient></defs><rect x="6" y="22" width="108" height="92" rx="32" fill="#15122e"/><g transform="translate(9 2) translate(60 61) scale(1.1) translate(-60 -61)"><circle cx="23" cy="41" r="6.8" fill="url(#og)"/><circle cx="97" cy="41" r="6.8" fill="url(#og)"/><path fill="url(#og)" d="M60 27C90 25 108 42 106 63.5C104 85 86 98.5 59 96.5C33 94.5 14 84 14 61C14 40 32 29 60 27Z"><animate attributeName="d" dur="6s" repeatCount="indefinite" calcMode="spline" keyTimes="0;.5;1" keySplines=".4 0 .6 1;.4 0 .6 1" values="M60 27C90 25 108 42 106 63.5C104 85 86 98.5 59 96.5C33 94.5 14 84 14 61C14 40 32 29 60 27Z;M62 29.5C88 28 105 44.5 103 64.5C101 83.5 84 95.5 60 94C36 92.5 17 82.5 17.5 62C18 43 35 30.5 62 29.5Z;M60 27C90 25 108 42 106 63.5C104 85 86 98.5 59 96.5C33 94.5 14 84 14 61C14 40 32 29 60 27Z"/></path><path d="M37 43.5q23-11 46 0" stroke="#fff" stroke-opacity=".35" stroke-width="5.5" stroke-linecap="round" fill="none"/><ellipse cx="60" cy="77.5" rx="26.5" ry="14.5" fill="#fff" fill-opacity=".52"/><circle cx="49" cy="78.5" r="10" fill="#fff" fill-opacity=".22"/><circle cx="71" cy="78.5" r="10" fill="#fff" fill-opacity=".22"/><path d="M36 76.5L18 72.5M36 81.5L18 84.5M84 76.5L102 72.5M84 81.5L102 84.5" stroke="#fff" stroke-opacity=".8" stroke-width="1.8" stroke-linecap="round"/><g fill="#1d1844" fill-opacity=".5"><circle cx="43" cy="75.5" r="1.3"/><circle cx="40" cy="79.5" r="1.3"/><circle cx="44" cy="82.5" r="1.3"/><circle cx="77" cy="75.5" r="1.3"/><circle cx="80" cy="79.5" r="1.3"/><circle cx="76" cy="82.5" r="1.3"/></g><g class="otter-blink"><circle cx="44" cy="61" r="5" fill="#1d1844"/><circle cx="76" cy="61" r="5" fill="#1d1844"/></g><circle cx="45.4" cy="59.3" r="1.6" fill="#fff"/><circle cx="77.4" cy="59.3" r="1.6" fill="#fff"/><path d="M52 68.5q8-5.5 16 0q-2.2 6.8-8 7.8q-6.8-1-8-7.8z" fill="#1d1844"/><path d="M60 76.5v3M53 81.5q3.5 4 7 0q3.5 4 7 0" fill="none" stroke="#1d1844" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></g><g transform="translate(51 103.5) rotate(-4)"><ellipse cy="3.6" rx="9" ry="3.4" fill="url(#og)" stroke="#1d1844" stroke-opacity=".32" stroke-width="1.1"/><ellipse cy="6" rx="9.4" ry="2.4" fill="url(#og)"/><circle cx="-7.5" cy="8.4" r="3.5" fill="url(#og)" stroke="#1d1844" stroke-opacity=".32" stroke-width="1.1"/><circle cx="-2.5" cy="9.6" r="3.5" fill="url(#og)" stroke="#1d1844" stroke-opacity=".32" stroke-width="1.1"/><circle cx="2.5" cy="9.6" r="3.5" fill="url(#og)" stroke="#1d1844" stroke-opacity=".32" stroke-width="1.1"/><circle cx="7.5" cy="8.4" r="3.5" fill="url(#og)" stroke="#1d1844" stroke-opacity=".32" stroke-width="1.1"/><ellipse cx="-7.5" cy="12" rx="1.5" ry="1.9" fill="#f6efe2" stroke="#1d1844" stroke-opacity=".3" stroke-width=".8"/><ellipse cx="-2.5" cy="13.2" rx="1.5" ry="1.9" fill="#f6efe2" stroke="#1d1844" stroke-opacity=".3" stroke-width=".8"/><ellipse cx="2.5" cy="13.2" rx="1.5" ry="1.9" fill="#f6efe2" stroke="#1d1844" stroke-opacity=".3" stroke-width=".8"/><ellipse cx="7.5" cy="12" rx="1.5" ry="1.9" fill="#f6efe2" stroke="#1d1844" stroke-opacity=".3" stroke-width=".8"/></g><g transform="translate(89 103.5) rotate(4)"><ellipse cy="3.6" rx="9" ry="3.4" fill="url(#og)" stroke="#1d1844" stroke-opacity=".32" stroke-width="1.1"/><ellipse cy="6" rx="9.4" ry="2.4" fill="url(#og)"/><circle cx="-7.5" cy="8.4" r="3.5" fill="url(#og)" stroke="#1d1844" stroke-opacity=".32" stroke-width="1.1"/><circle cx="-2.5" cy="9.6" r="3.5" fill="url(#og)" stroke="#1d1844" stroke-opacity=".32" stroke-width="1.1"/><circle cx="2.5" cy="9.6" r="3.5" fill="url(#og)" stroke="#1d1844" stroke-opacity=".32" stroke-width="1.1"/><circle cx="7.5" cy="8.4" r="3.5" fill="url(#og)" stroke="#1d1844" stroke-opacity=".32" stroke-width="1.1"/><ellipse cx="-7.5" cy="12" rx="1.5" ry="1.9" fill="#f6efe2" stroke="#1d1844" stroke-opacity=".3" stroke-width=".8"/><ellipse cx="-2.5" cy="13.2" rx="1.5" ry="1.9" fill="#f6efe2" stroke="#1d1844" stroke-opacity=".3" stroke-width=".8"/><ellipse cx="2.5" cy="13.2" rx="1.5" ry="1.9" fill="#f6efe2" stroke="#1d1844" stroke-opacity=".3" stroke-width=".8"/><ellipse cx="7.5" cy="12" rx="1.5" ry="1.9" fill="#f6efe2" stroke="#1d1844" stroke-opacity=".3" stroke-width=".8"/></g></svg>
+    <h1 class="word">OtterApply</h1>
+  </div>
+  <p class="type" id="type" aria-live="off"><span id="t">Search for open jobs</span><span class="caret" aria-hidden="true"></span></p>
+  <ul class="static" id="list"><li>Search for open jobs</li><li>Tailor resumes and cover letters</li><li>Beat ATS screeners</li><li>Autofill applications</li><li>Track and manage applications</li></ul>
+  <a class="cta" href="#try">Try it for free today</a>
+  <p class="price"><strong>$7.99</strong> per month. Cancel anytime.</p>
+  <footer class="foot">
+    <nav aria-label="Footer"><a href="#contact">Contact</a><a href="#privacy">Privacy</a><a href="#terms">Terms</a></nav>
+    <small>&copy; 2026 OtterApply. All rights reserved.</small>
+  </footer>
+</main>
+<script>
+(function(){
+  var lines=["Search for open jobs","Tailor resumes and cover letters","Beat ATS screeners","Autofill applications","Track and manage applications"];
+  var el=document.getElementById("t");
+  var reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if(reduce){ // still page: show all four lines
+    var p=document.getElementById("type");p.innerHTML=lines.join("<br>");return;
+  }
+  var li=0,ci=lines[0].length,del=true,wait=0;
+  // start from the full first line (visible at rest), hold, then erase and cycle
+  function tick(){
+    var s=lines[li],d=70;
+    if(wait>0){wait--;return setTimeout(tick,60);}
+    if(!del){
+      ci++;el.textContent=s.slice(0,ci);
+      if(ci>=s.length){del=true;wait=22;}
+      d=55+Math.random()*45;
+    }else{
+      if(ci<=0){del=false;li=(li+1)%lines.length;wait=4;d=60;}
+      else{ci--;el.textContent=s.slice(0,ci);d=28;}
+    }
+    setTimeout(tick,d);
+  }
+  wait=30;setTimeout(tick,60);
+})();
+(function(){
+  var btns=document.querySelectorAll(".themes button");
+  function set(n){document.documentElement.setAttribute("data-look",n);for(var i=0;i<btns.length;i++)btns[i].setAttribute("aria-pressed",btns[i].dataset.t===n?"true":"false");}
+  for(var i=0;i<btns.length;i++)btns[i].addEventListener("click",function(){set(this.dataset.t);});
+})();
+</script>

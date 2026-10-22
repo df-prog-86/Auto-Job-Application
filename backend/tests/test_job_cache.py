@@ -1744,6 +1744,18 @@ def test_descriptions_are_filled_in_gradually_a_few_per_employer_and_never_retri
     assert pid not in [i for i, _u in cache.postings_without_description(50, 3, {"greenhouse"})]
 
 
+def test_common_titles_are_listed_once_for_the_title_suggestions():
+    from app.services.jobcache import suggest
+
+    cache = JobCache()
+    eid, _ = cache.upsert_employer("icims", "x", "X", "search")
+    titles = ["Project Manager"] * 3 + ["Senior Project Manager", "Nurse"]
+    cache.apply_refresh(eid, [PostingIn(ext_id=str(i), title=t, url=f"https://x.icims.com/{i}", location="Boston, MA") for i, t in enumerate(titles)], 1_000_000)
+    rows = cache.titles_common()
+    assert ("Project Manager", 3) in rows
+    assert [r["label"] for r in suggest.titles("project man", rows)] == ["Project Manager", "Senior Project Manager"]
+
+
 def test_a_fill_batch_spreads_across_many_employers_instead_of_a_few_busy_ones():
     cache = JobCache()
     ids = []

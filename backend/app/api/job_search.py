@@ -120,6 +120,30 @@ def _known_places() -> list[str]:
     return list(_PLACES["rows"])
 
 
+_TITLES: dict[str, Any] = {"rows": [], "at": -1e9, "busy": False}
+
+
+def _known_titles() -> list[tuple[str, int]]:
+    """Common job titles, read in the background and kept for an hour (same idea as the place list above)."""
+
+    def load() -> None:
+        try:
+            from app.services.jobcache.store import JobCache
+
+            _TITLES.update(rows=JobCache().titles_common(), at=time.monotonic())
+        except Exception:
+            _TITLES["at"] = time.monotonic() - 3000  # try again in about ten minutes
+        finally:
+            _TITLES["busy"] = False
+
+    with _PLACES_LOCK:
+        stale = time.monotonic() - float(_TITLES["at"]) > 3600
+        if stale and not _TITLES["busy"]:
+            _TITLES["busy"] = True
+            threading.Thread(target=load, daemon=True).start()
+    return list(_TITLES["rows"])
+
+
 @router.get("/places")
 def suggest_places(q: str = "") -> list[dict[str, str]]:
     """City suggestions while typing in the place box ("Bost" offers "Boston, MA"; "unit" offers "United States")."""
@@ -137,10 +161,12 @@ def suggest_words(kind: str = "title", q: str = "") -> list[dict[str, str]]:
     q = q[:60]
     if kind == "keyword":
         return suggest.keywords(q)
-    try:
-        rows = JobCache().titles_sample(q)
-    except Exception:  # the saved lists are a bonus: typing still works without them
-        rows = []
+    rows = _known_titles()
+    if not rows:  # the first background read has not finished: fall back to a direct (slower) look
+        try:
+            rows = JobCache().titles_sample(q)
+        except Exception:  # the saved lists are a bonus: typing still works without them
+            rows = []
     return suggest.titles(q, rows)
 
 

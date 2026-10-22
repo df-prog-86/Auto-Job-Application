@@ -812,6 +812,17 @@ class JobCache:
             ).fetchall()
         return [(r["title"], r["n"]) for r in rows]
 
+    def titles_common(self, limit: int = 60000) -> list[tuple[str, int]]:
+        """The most common open job titles with how many postings use each. Read once in the background and kept in memory,
+        so typing in the title box never has to search the whole saved copy."""
+        with self.session() as db:
+            rows = db.execute(
+                "SELECT title, COUNT(*) AS n FROM postings WHERE closed_at IS NULL AND title IS NOT NULL "
+                "GROUP BY lower(title) ORDER BY n DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [(r["title"], r["n"]) for r in rows]
+
     def counts(self) -> dict[str, Any]:
         """How much is saved: employers and open postings, overall and for each hiring system. Reads one small table, so it stays instant."""
         with self.session() as db:

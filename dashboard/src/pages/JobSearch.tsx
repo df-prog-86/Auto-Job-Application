@@ -336,6 +336,8 @@ export function JobSearch() {
   for (const k of keywords) filterChips.push({ key: `kw-${k}`, text: `Keyword: ${k}`, clear: () => setKeywords(keywords.filter((x) => x !== k)) });
   for (const x of exclude) filterChips.push({ key: `ex-${x}`, text: `Leaving out ${x}`, clear: () => setExclude(exclude.filter((y) => y !== x)) });
   const clearFilters = () => {
+    setTitles([]);
+    setTitleDraft("");
     setLocation("");
     setWorkType("any");
     setWithin(0);

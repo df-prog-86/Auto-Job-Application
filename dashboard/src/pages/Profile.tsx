@@ -963,15 +963,16 @@ function ResumeDrop({
   }
 
   const busy = parseMutation.isPending;
+  const compact = hasProfile && !busy && !pending;
 
   return (
-    <Card className="p-6">
+    <Card className={hasProfile ? "px-5 py-4" : "p-6"}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-base font-bold text-ink-900">Master resume</h2>
         {saved ? (
           <Badge tone="success">
             <CheckIcon className="h-3 w-3" />
-            Saved{masterQuery.data?.updated_at ? ` on ${new Date(masterQuery.data.updated_at).toLocaleDateString()}` : ""}
+            Resume last saved{masterQuery.data?.updated_at ? ` on ${new Date(masterQuery.data.updated_at).toLocaleDateString()}` : ""}
           </Badge>
         ) : (
           <Badge tone="warning">Not saved yet</Badge>
@@ -989,8 +990,10 @@ function ResumeDrop({
           setDragging(false);
           choose(e.dataTransfer.files?.[0]);
         }}
-        className={`mt-4 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed text-center transition ${
-          hasProfile ? "px-6 py-5" : "px-6 py-12"
+        className={`flex rounded-2xl border-2 border-dashed transition ${
+          compact
+            ? "mt-3 flex-col items-center gap-3 px-4 py-2.5 text-center sm:flex-row sm:justify-between sm:text-left"
+            : `mt-4 flex-col items-center justify-center text-center ${hasProfile ? "px-6 py-5" : "px-6 py-12"}`
         } ${dragging ? "border-brand-400 bg-brand-50" : "border-brand-200 bg-brand-50/40"}`}
       >
         {busy ? (
@@ -1019,24 +1022,29 @@ function ResumeDrop({
             </div>
           </div>
         ) : (
-          <>
-            <p className="text-sm font-semibold text-ink-900">
-              {hasProfile ? "Drop an updated resume here" : "Drop your resume here"}
-            </p>
-            <p className="mt-1 max-w-md text-xs text-ink-500">
-              Use a Word (.docx) file. It is saved once on this computer and every tailored resume is
-              made from it with the same layout. A PDF will build your profile, but tailored resumes
-              need the Word file.
-            </p>
-            <Button
-              variant={hasProfile ? "secondary" : "primary"}
-              size="sm"
-              className="mt-4"
-              onClick={() => inputRef.current?.click()}
-            >
-              Choose a file
-            </Button>
-          </>
+          compact ? (
+            <>
+              <div>
+                <p className="text-sm font-semibold text-ink-900">Drop in a fresh resume. Word (.docx) works best.</p>
+                <p className="text-xs text-ink-500">We&apos;ll build every tailored version from it.</p>
+              </div>
+              <Button variant="secondary" size="sm" className="shrink-0 whitespace-nowrap" onClick={() => inputRef.current?.click()}>
+                Choose a file
+              </Button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-semibold text-ink-900">Drop your resume here</p>
+              <p className="mt-1 max-w-md text-xs text-ink-500">
+                Use a Word (.docx) file. It is saved once on this computer and every tailored resume is
+                made from it with the same layout. A PDF will build your profile, but tailored resumes
+                need the Word file.
+              </p>
+              <Button variant="primary" size="sm" className="mt-4" onClick={() => inputRef.current?.click()}>
+                Choose a file
+              </Button>
+            </>
+          )
         )}
         <input
           ref={inputRef}

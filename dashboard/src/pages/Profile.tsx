@@ -203,7 +203,7 @@ export function Profile() {
     <div className="space-y-6">
       <PageHeader
         title="Profile"
-        description="This is what applications are filled out from. Click any field to change it."
+        description="Fill out your profile once and it autofills every future application. Click any field to edit it."
       />
 
       <SectionNav />

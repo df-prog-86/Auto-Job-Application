@@ -10,15 +10,15 @@ interface NavItem {
   soon?: boolean;
 }
 
-const WORK: NavItem[] = [
+const MAIN: NavItem[] = [
   { to: "/", label: "Home" },
   { to: "/jobs", label: "Jobs" },
   { to: "/job-search", label: "Job Search" },
-  { to: "/needs-attention", label: "Needs Attention" },
+  { to: "/profile", label: "Profile" },
 ];
 
-const SETUP: NavItem[] = [
-  { to: "/profile", label: "Profile" },
+const BOTTOM: NavItem[] = [
+  { to: "/needs-attention", label: "Needs Attention" },
   { to: "/pairing", label: "Pair Extension" },
 ];
 
@@ -36,12 +36,11 @@ function LogoMark() {
   );
 }
 
-function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
+function NavGroup({ items, className = "" }: { items: NavItem[]; className?: string }) {
   const attention = useQuery({ queryKey: ["needs-attention"], queryFn: api.listNeedsAttention, retry: false });
   const openCount = attention.data?.length ?? 0;
   return (
-    <div>
-      <div className="mb-1.5 hidden px-3 text-xs font-semibold text-ink-400 md:block">{title}</div>
+    <div className={className}>
       <div className="flex gap-0.5 md:flex-col">
         {items.map((item) => (
           <NavLink
@@ -71,7 +70,7 @@ function NavGroup({ title, items }: { title: string; items: NavItem[] }) {
 export function NavShell() {
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <aside className="shrink-0 bg-white/80 px-4 py-5 shadow-soft backdrop-blur md:sticky md:top-0 md:h-screen md:w-60 md:py-7">
+      <aside className="flex shrink-0 flex-col bg-white/80 px-4 py-5 shadow-soft backdrop-blur md:sticky md:top-0 md:h-screen md:w-60 md:py-7">
         <div className="mb-3 flex items-center gap-3 px-2 md:mb-9">
           <LogoMark />
           <div>
@@ -79,9 +78,9 @@ export function NavShell() {
             <div className="text-xs text-ink-400">Your job search, organized</div>
           </div>
         </div>
-        <nav className="flex gap-2 overflow-x-auto md:flex-col md:gap-7 md:overflow-visible">
-          <NavGroup title="Your search" items={WORK} />
-          <NavGroup title="Setup" items={SETUP} />
+        <nav className="flex gap-2 overflow-x-auto md:min-h-0 md:flex-1 md:flex-col md:overflow-visible">
+          <NavGroup items={MAIN} />
+          <NavGroup items={BOTTOM} className="md:mt-auto md:border-t md:border-[#ebe8f6] md:pt-3" />
         </nav>
       </aside>
       <main className="min-w-0 flex-1 px-4 py-8 md:px-10 md:py-10">

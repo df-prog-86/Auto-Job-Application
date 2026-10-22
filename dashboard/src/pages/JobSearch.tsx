@@ -507,6 +507,8 @@ export function JobSearch() {
               requireSalary={requireSalary}
               setRequireSalary={setRequireSalary}
               onClear={clearFilters}
+              onSearch={() => search.mutate()}
+              canSearch={canSearch}
             />
           )}
         </div>
@@ -603,8 +605,8 @@ export function JobSearch() {
         </div>
       ) : (
         <div className="grid items-start gap-x-5 gap-y-3 lg:grid-cols-[minmax(0,480px)_minmax(0,1fr)]">
-          <div className="flex items-center justify-between gap-4 lg:col-span-2">
-            <p role="status" className="flex min-w-0 flex-1 items-center gap-2 px-1 text-[13px] font-semibold text-brand-700">
+          <div className="flex items-center gap-3 lg:col-span-2">
+            <p role="status" className="flex min-w-0 items-center gap-2 px-1 text-[13px] font-semibold text-brand-700">
               {search.isPending ? (
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="h-[15px] w-[15px] shrink-0 animate-spin" aria-hidden="true">
                   <path d="M12 3a9 9 0 019 9" />
@@ -616,8 +618,7 @@ export function JobSearch() {
               )}
               <span>{status}</span>
             </p>
-            <div className="flex shrink-0 items-center gap-1">
-              <label className="flex items-center gap-1 text-[13px] font-semibold text-ink-700">
+            <label className="flex shrink-0 items-center gap-1 text-[13px] font-semibold text-ink-700">
                 Sort:
                 <select
                   value={sortBy}
@@ -628,6 +629,8 @@ export function JobSearch() {
                   <option value="newest">Newest</option>
                 </select>
               </label>
+            <span className="flex-1" />
+            <div className="flex shrink-0 items-center gap-1">
               <MoreMenu>
                 {anyAutofill && (
                   <MenuItem onClick={() => setAutofillOnly((v) => !v)}>
@@ -1041,6 +1044,11 @@ function Segmented<T extends string | number>({
   );
 }
 
+function formatPay(v: string): string {
+  const digits = v.replace(/[^0-9]/g, "").slice(0, 9);
+  return digits ? `$${Number(digits).toLocaleString("en-US")}` : "";
+}
+
 const inputCls =
   "h-[42px] w-full rounded-[10px] border border-[#ddd8f3] bg-white px-3.5 text-sm text-ink-900 placeholder:text-ink-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200";
 
@@ -1063,6 +1071,8 @@ function FiltersPopover(p: {
   requireSalary: boolean;
   setRequireSalary: (v: boolean) => void;
   onClear: () => void;
+  onSearch: () => void;
+  canSearch: boolean;
 }) {
   const ref = useClickAway(p.onClose);
   return (
@@ -1119,17 +1129,17 @@ function FiltersPopover(p: {
       </div>
       <div className="flex flex-col gap-2">
         <label htmlFor="js-salary" className="text-sm font-semibold text-ink-900">
-          Pay you are aiming for
+          Desired Salary
         </label>
-        <input id="js-salary" className={inputCls} inputMode="numeric" value={p.targetSalary} onChange={(e) => p.setTargetSalary(e.target.value)} placeholder="$85,000" />
-        <label className="flex items-center gap-2.5 text-sm text-ink-700">
+        <input id="js-salary" className={inputCls} inputMode="numeric" value={formatPay(p.targetSalary)} onChange={(e) => p.setTargetSalary(formatPay(e.target.value))} placeholder="$85,000" />
+        <label className="mt-2.5 flex items-center gap-2.5 text-sm text-ink-700">
           <input
             type="checkbox"
             checked={p.requireSalary}
             onChange={(e) => p.setRequireSalary(e.target.checked)}
             className="h-[18px] w-[18px] accent-[#5b57f5]"
           />
-          Only jobs that post their pay
+          Only show jobs that post their pay
         </label>
       </div>
       <div className="flex items-center justify-between border-t border-[#ebe8f6] pt-[18px]">
@@ -1138,10 +1148,14 @@ function FiltersPopover(p: {
         </button>
         <button
           type="button"
-          onClick={p.onClose}
-          className="h-11 rounded-xl bg-brand-500 px-7 text-[15px] font-semibold text-white hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-200"
+          onClick={() => {
+            p.onClose();
+            p.onSearch();
+          }}
+          disabled={!p.canSearch}
+          className="h-11 rounded-xl bg-brand-500 px-7 text-[15px] font-semibold text-white hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Done
+          Search
         </button>
       </div>
     </div>

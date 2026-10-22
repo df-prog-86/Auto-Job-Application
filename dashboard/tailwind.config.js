@@ -43,7 +43,8 @@ export default {
         "3xl": "1.75rem",
       },
       boxShadow: {
-        soft: "0 1px 2px rgba(31, 27, 46, 0.05), 0 10px 28px rgba(75, 50, 184, 0.07)",
+        soft: "0 2px 4px rgba(31, 27, 46, 0.14), 0 12px 30px rgba(75, 50, 184, 0.24)",
+        pill: "0 1px 3px rgba(31, 27, 46, 0.14), 0 4px 10px rgba(75, 50, 184, 0.16)",
         lift: "0 2px 4px rgba(31, 27, 46, 0.06), 0 16px 36px -8px rgba(75, 50, 184, 0.22)",
         glow: "0 6px 18px -4px rgba(91, 87, 245, 0.45)",
       },

@@ -410,7 +410,7 @@ export function JobSearch() {
           e.preventDefault();
           if (canSearch) search.mutate();
         }}
-        className="flex flex-wrap items-center gap-2 rounded-[20px] border border-[#e9e6f4] bg-white p-2.5 shadow-[0_1px_2px_rgba(31,27,46,0.05),0_10px_28px_rgba(75,50,184,0.07)]"
+        className="flex flex-wrap items-center gap-2 rounded-[20px] border border-[#e9e6f4] bg-white p-2.5 shadow-soft"
       >
         <div className="flex min-w-[260px] flex-[1_1_340px] items-center gap-2 px-2.5 py-1">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-[18px] w-[18px] shrink-0 text-ink-500" aria-hidden="true">
@@ -465,7 +465,7 @@ export function JobSearch() {
             key={c.key}
             type="button"
             onClick={openFilters}
-            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-brand-500 bg-brand-100 pl-3.5 pr-3 text-[13px] font-semibold text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-200"
+            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-brand-500 bg-brand-100 shadow-pill pl-3.5 pr-3 text-[13px] font-semibold text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-200"
           >
             {c.text}
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
@@ -478,7 +478,7 @@ export function JobSearch() {
             type="button"
             onClick={() => setFiltersOpen((v) => !v)}
             aria-expanded={filtersOpen}
-            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[#ddd8f3] bg-white px-3.5 text-[13px] font-semibold text-ink-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200"
+            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[#ddd8f3] bg-white shadow-pill px-3.5 text-[13px] font-semibold text-ink-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-[15px] w-[15px]" aria-hidden="true">
               <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
@@ -523,7 +523,7 @@ export function JobSearch() {
             type="button"
             onClick={() => setSavedOpen((v) => !v)}
             aria-expanded={savedOpen}
-            className="inline-flex h-9 items-center gap-2 rounded-full border border-[#ddd8f3] bg-white px-3 text-[13px] font-semibold text-ink-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200"
+            className="inline-flex h-9 items-center gap-2 rounded-full border border-[#ddd8f3] bg-white shadow-pill px-3 text-[13px] font-semibold text-ink-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]" aria-hidden="true">
               <path d="M7 4h10v16l-5-4-5 4z" />
@@ -591,7 +591,7 @@ export function JobSearch() {
       {results.isLoading ? (
         <p className="text-sm text-ink-500">Loading...</p>
       ) : items.length === 0 || search.isPending ? (
-        <div className="rounded-[20px] border border-[#e9e6f4] bg-white p-10 text-center shadow-[0_1px_2px_rgba(31,27,46,0.05),0_10px_28px_rgba(75,50,184,0.07)]">
+        <div className="rounded-[20px] border border-[#e9e6f4] bg-white p-10 text-center shadow-soft">
           {search.isPending ? (
             <p className="animate-pulse text-sm font-semibold text-brand-700" role="status">
               {status}
@@ -664,7 +664,7 @@ export function JobSearch() {
           )}
           <div
             ref={listRef}
-            className="overflow-y-auto overscroll-contain rounded-[20px] border border-[#e9e6f4] bg-white shadow-[0_1px_2px_rgba(31,27,46,0.05),0_10px_28px_rgba(75,50,184,0.07)]"
+            className="overflow-y-auto overscroll-contain rounded-[20px] border border-[#e9e6f4] bg-white shadow-soft"
             style={{ maxHeight: "max(480px, calc(100vh - 300px))", scrollbarWidth: "thin", scrollbarColor: "#ddd8f3 transparent" }}
           >
             {shown.length === 0 ? (
@@ -706,7 +706,7 @@ export function JobSearch() {
 }
 
 const CARD =
-  "rounded-[20px] border border-[#e9e6f4] bg-white shadow-[0_1px_2px_rgba(31,27,46,0.05),0_10px_28px_rgba(75,50,184,0.07)]";
+  "rounded-[20px] border border-[#e9e6f4] bg-white shadow-soft";
 
 /** "Today", "Yesterday", "5 days ago", or the date for older postings. */
 function agoText(date?: string | null): string {

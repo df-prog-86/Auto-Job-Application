@@ -12,55 +12,54 @@ const HELP: Record<string, PageHelp> = {
   home: {
     title: "Home",
     tips: [
-      "Add your resume on Profile once. Every tailored version starts from it.",
-      "Paste a job link, or save one from the extension.",
-      "Select a stage in the pipeline to see the jobs in it.",
-      "Set a weekly goal and watch applications sent add up. Change it any time.",
+      "Work down the Get started list. It takes you from adding your resume to your first application.",
+      "New matches from your saved search show up here. Refresh the search to look again.",
+      "Select a stage in the pipeline to see its jobs. Set a weekly goal to track applications sent.",
+      "Under Follow up, jobs you applied to with no reply get a draft email. Edit it, then send it yourself.",
     ],
   },
   jobs: {
     title: "Jobs",
     tips: [
-      "Paste a job link at the top to add a job.",
-      "Open a job to see how well it fits your resume.",
-      "Tailor your resume for a job. It keeps your words and shows exactly what changed.",
-      "Already applied? We'll draft a follow-up email in one click. You send it yourself.",
+      "Paste a job link at the top to add a job, or search your list by role or company.",
+      "Open a job to compare it with your resume and see how well it fits.",
+      "Tailor your resume for a job. Choose how much it changes, then check What changed.",
+      "Use the stage tabs to see jobs by where they stand.",
     ],
   },
   "job-search": {
     title: "Job Search",
     tips: [
-      "Type a job title and a city, then press Search. Suggestions appear as you type.",
-      <>
-        <b>All filters</b> has salary, work type and how recent. <b>Clear all</b> starts fresh.
-      </>,
-      <>
-        <b>Sort</b> sits next to the match count.
-      </>,
-      "Add the ones you like to Jobs. Choose Not interested to hide a job (or a whole company).",
+      "Type a job title and a city (or United States), then press Search. Suggestions appear as you type.",
+      "All filters has salary, work type, how recent, keywords like denials or Epic, and companies to leave out.",
+      "Open a result to see why it fits your search and how it compares with your resume.",
+      "Add the ones you like to Jobs. Not interested hides a job, and you can hide a whole company too.",
+      "Save a search and its new matches show up on Home.",
     ],
   },
   profile: {
     title: "Profile",
     tips: [
-      "Fill out your profile once and it autofills every future application.",
-      "Click any field to edit it.",
-      "Drop in a fresh resume any time. Word (.docx) works best.",
-      "Your answers to questions like relocation or visa are used on every application.",
+      "Start by dropping in your resume. Word (.docx) works best, and we fill in your profile from it.",
+      "Check what we found, then click any field to fix it.",
+      "Answers used on every application, like relocation or visa questions, only need setting once.",
+      "Keep your master resume up to date. Every tailored version starts from it.",
     ],
   },
   "needs-attention": {
     title: "Needs Attention",
     tips: [
-      "These are questions we couldn't answer yet.",
-      "Answer once and it's filled in every time after.",
-      "Look under Answers I remember to change one later.",
+      "These are questions the extension couldn't answer while filling an application.",
+      "Answer once and it's remembered for every future application.",
+      "After you answer, fill that field yourself, or run Fill again.",
+      "To change an answer later, look under Answers I remember.",
     ],
   },
   pairing: {
     title: "Pair Extension",
     tips: [
-      "Create a pairing code here, then open the OtterApply extension in Chrome and paste it in.",
+      "Pairing connects the OtterApply extension in Chrome so it can fill applications for you.",
+      "Create a pairing code here, then open the extension and paste it in.",
       "The code works once, so use it right away.",
     ],
   },

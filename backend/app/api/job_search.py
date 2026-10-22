@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import datetime as dt
 import html
+import threading
+import time
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -90,17 +93,39 @@ def _save_item(db: Session, item: dict, payload: JobSearchIn) -> JobSearchResult
     return row
 
 
+_PLACES: dict[str, Any] = {"rows": [], "at": 0.0, "busy": False}
+_PLACES_LOCK = threading.Lock()
+
+
+def _known_places() -> list[str]:
+    """Places the saved job lists mention. Reading them takes a while on a big saved copy, so it is done in the
+    background and kept for an hour; until the first read finishes the built-in cities answer on their own."""
+
+    def load() -> None:
+        try:
+            from app.services.jobcache.store import JobCache
+
+            rows = JobCache().locations_sample()
+            _PLACES.update(rows=rows, at=time.monotonic())
+        except Exception:  # the saved lists are a bonus: the built-in cities still work without them
+            _PLACES["at"] = time.monotonic() - 3000  # try again in about ten minutes
+        finally:
+            _PLACES["busy"] = False
+
+    with _PLACES_LOCK:
+        stale = time.monotonic() - float(_PLACES["at"]) > 3600
+        if stale and not _PLACES["busy"]:
+            _PLACES["busy"] = True
+            threading.Thread(target=load, daemon=True).start()
+    return list(_PLACES["rows"])
+
+
 @router.get("/places")
 def suggest_places(q: str = "") -> list[dict[str, str]]:
-    """City suggestions while typing in the place box ("Bost" offers "Boston, MA")."""
+    """City suggestions while typing in the place box ("Bost" offers "Boston, MA"; "unit" offers "United States")."""
     from app.services.jobcache import places
-    from app.services.jobcache.store import JobCache
 
-    try:
-        known = JobCache().locations_sample()
-    except Exception:  # the saved lists are a bonus: the built-in cities still work without them
-        known = []
-    return places.suggest(q[:60], known)
+    return places.suggest(q[:60], _known_places())
 
 
 @router.get("/suggest")

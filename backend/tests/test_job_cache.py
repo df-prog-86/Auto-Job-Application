@@ -169,6 +169,15 @@ def test_places():
     assert text.location_fit(text.parse_location_query(None), "Anywhere", None) == 1.0
 
 
+def test_place_suggestions_offer_united_states():
+    from app.services.jobcache import places
+
+    assert places.suggest("unit")[0]["label"] == "United States"
+    assert places.suggest("us")[0]["label"] == "United States" and places.suggest("usa")[0]["label"] == "United States"
+    assert places.suggest("bost")[0]["label"] == "Boston, MA" and all(r["label"] != "United States" for r in places.suggest("bost"))
+    assert any(r["label"].startswith("Union") for r in places.suggest("union", ["Union City, CA"]))
+
+
 def test_pay_and_levels_and_dates():
     assert text.pay_midpoint("$80,000 - $100,000") == 90000 and text.pay_midpoint("85k") == 85000
     assert text.pay_midpoint("$45 - $60 per hour") == 52.5 * 2080  # hourly pay is read as a yearly figure (2,080 hours)

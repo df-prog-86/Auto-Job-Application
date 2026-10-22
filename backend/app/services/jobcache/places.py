@@ -55,6 +55,9 @@ Lake Forest IL;Schaumburg IL;Oak Brook IL;Deerfield IL;Northbrook IL;Overland Pa
 """
 
 
+_US_WORDS = ("united states", "usa", "america", "american")
+
+
 @lru_cache(maxsize=1)
 def builtin() -> tuple[tuple[str, str], ...]:
     seen: set[tuple[str, str]] = set()
@@ -95,6 +98,8 @@ def suggest(query: str, extra_locations: list[str] | None = None, limit: int = 8
     if m and m.group(2).upper() in US_STATES and len(m.group(1)) >= 2:
         q, state = m.group(1).strip(), m.group(2).upper()
     out: list[dict[str, str]] = []
+    if any(w.startswith(q) for w in _US_WORDS):  # "un", "unit", "us", "usa", "ame": offer the whole country first
+        out.append({"label": "United States", "city": "", "state": ""})
     seen: set[tuple[str, str]] = set()
     pools = [list(builtin()), _from_postings(extra_locations or [])]
     for pool in pools:

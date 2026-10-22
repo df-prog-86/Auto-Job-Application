@@ -25,8 +25,8 @@ const BOTTOM: NavItem[] = [
 
 function LogoMark() {
   return (
-    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#15122e] shadow-glow">
-      <Otter size={32} />
+    <div className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[15px] bg-[#15122e] shadow-glow">
+      <Otter size={62} />
     </div>
   );
 }

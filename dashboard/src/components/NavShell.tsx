@@ -3,7 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 
 import { api } from "@/api/client";
 import { HelpButton } from "@/components/HelpButton";
-import { Otter } from "@/components/Otter";
+import { OtterTile } from "@/components/OtterTile";
 import { Badge } from "@/components/ui";
 
 interface NavItem {
@@ -25,11 +25,7 @@ const BOTTOM: NavItem[] = [
 ];
 
 function LogoMark() {
-  return (
-    <div className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[15px] bg-[#15122e] shadow-glow">
-      <Otter size={62} />
-    </div>
-  );
+  return <OtterTile size={64} className="shrink-0 drop-shadow-[0_4px_10px_rgba(75,50,184,0.3)]" />;
 }
 
 function NavGroup({ items, className = "" }: { items: NavItem[]; className?: string }) {

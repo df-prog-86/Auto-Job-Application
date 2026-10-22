@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 
-import { HelpOtter } from "@/components/HelpOtter";
+import { OtterTile } from "@/components/OtterTile";
 
 interface PageHelp {
   title: string;
@@ -103,7 +103,7 @@ export function HelpButton() {
           className="flex max-h-[70vh] w-[340px] max-w-[calc(100vw-32px)] flex-col overflow-y-auto rounded-[20px] border border-[#e9e6f4] bg-white shadow-soft"
         >
           <div className="flex items-center gap-2.5 px-4 pb-2.5 pt-3.5">
-            <HelpOtter size={46} />
+            <OtterTile size={46} />
             <div className="min-w-0">
               <h2 className="text-[15px] font-extrabold leading-tight text-ink-900">{help.title}</h2>
               <p className="text-xs text-ink-500">Quick tips for this page</p>
@@ -134,7 +134,7 @@ export function HelpButton() {
         aria-expanded={open}
         className="flex h-11 items-center gap-2 rounded-full border border-[#ddd8f3] bg-white pl-1.5 pr-[18px] text-sm font-extrabold text-ink-900 shadow-soft hover:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200"
       >
-        <HelpOtter size={46} />
+        <OtterTile size={46} />
         Help
       </button>
     </div>

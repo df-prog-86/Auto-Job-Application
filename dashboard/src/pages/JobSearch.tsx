@@ -260,7 +260,7 @@ export function JobSearch() {
         kind: "added",
         jobId: r.job.id,
         text: r.from_summary
-          ? `Added "${r.job.title}" to Jobs, using the search summary because the posting page couldn't be read. Open the posting to check the details.`
+          ? `Added "${r.job.title}" to Jobs, from the search summary. The posting page couldn't be read, so open it to check the details.`
           : `Added "${r.job.title}" to Jobs.`,
       });
       void qc.invalidateQueries({ queryKey: ["job-search-results"] });
@@ -390,7 +390,7 @@ export function JobSearch() {
   /** The one line above the results: what was searched and how many matches there are. */
   let status = "";
   if (search.isPending) {
-    status = "Searching your saved employer lists and the web, then checking each job. Results appear when every check is done, which can take up to a minute.";
+    status = "Searching saved employers and the web, then checking each job. This can take up to a minute.";
   } else if (coverage && coverage.employers > 0) {
     const n = totalMatches;
     const matches = coverage.matches_capped && matchTotal === null ? `${n.toLocaleString("en-US")}+` : n.toLocaleString("en-US");
@@ -599,7 +599,7 @@ export function JobSearch() {
           ) : (
             <>
               <h2 className="text-base font-bold text-ink-900">No matches yet</h2>
-              <p className="mt-1 text-sm text-ink-500">Add a job title above and click Search.</p>
+              <p className="mt-1 text-sm text-ink-500">Add a job title above and hit Search.</p>
             </>
           )}
         </div>
@@ -930,7 +930,7 @@ function JobDetail({
 
       {!r.grounded && (
         <div className="rounded-xl bg-[#fff4dc] px-4 py-3 text-sm text-[#8a5a00]">
-          Found on the web. We could not open this link to confirm the job is still open, so check it before you apply.
+          Found on the web. We couldn&apos;t confirm it&apos;s still open, so check before you apply.
         </div>
       )}
 
@@ -945,7 +945,7 @@ function JobDetail({
           <section className="flex flex-col gap-1.5">
             <h3 className="text-[15px] font-bold text-ink-900">About the role</h3>
             <p className="text-sm leading-relaxed text-ink-700">
-              {r.summary || "No description was saved for this posting. Open it to read the full details."}
+              {r.summary || "No description saved for this one. Open the posting to read it."}
             </p>
           </section>
         </div>
@@ -966,7 +966,7 @@ function JobDetail({
           ) : (
             <div className="flex flex-col items-start gap-2.5">
               <p className="text-sm text-ink-500">
-                {scoring ? "Reading the posting and comparing it with your resume. This can take up to a minute." : "Reads the full posting and compares it with your resume. Takes up to a minute."}
+                {scoring ? "Comparing this job with your resume. Up to a minute." : "Compares the full posting with your resume. Takes up to a minute."}
               </p>
               <button
                 type="button"

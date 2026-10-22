@@ -38,7 +38,7 @@ export function Pairing() {
     <div>
       <PageHeader
         title="Pair the extension"
-        description="A one-time step that connects the Chrome extension to this app."
+        description="One quick step to connect the extension."
       />
 
       <Card className="max-w-xl p-6">

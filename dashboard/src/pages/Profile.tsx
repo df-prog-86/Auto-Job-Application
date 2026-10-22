@@ -182,7 +182,7 @@ export function Profile() {
       <div>
         <PageHeader
           title="Profile"
-          description="Start with your resume. We read it and fill in your profile for you to check."
+          description="Start with your resume. We'll fill in your profile for you to check."
         />
         <ResumeDrop parseMutation={parseMutation} hasProfile={false} />
       </div>
@@ -283,7 +283,7 @@ export function Profile() {
         <div className="space-y-4">
           {profile.employment_history.length === 0 && (
             <EmptyNote>
-              No roles yet. Add one, or upload your resume again to read them from it.
+              No roles yet. Add one, or re-upload your resume.
             </EmptyNote>
           )}
           {profile.employment_history.map((job, i) => (
@@ -330,7 +330,7 @@ export function Profile() {
         />
         <div className="space-y-4">
           {profile.certifications.length === 0 && (
-            <EmptyNote>No certifications yet. Add one above if the applications you fill ask for them.</EmptyNote>
+            <EmptyNote>No certifications yet. Add one if your applications ask for them.</EmptyNote>
           )}
           {profile.certifications.map((cert) => (
             <CertificationCard key={cert.id} cert={cert} onChange={applyProfile} />
@@ -440,7 +440,7 @@ function EligibilityCard({ answers, loading }: { answers: AnswerOut[] | undefine
     <Card className="p-6">
       <h2 className="text-base font-bold text-ink-900">Answers used on every application</h2>
       <p className="mb-4 mt-1 text-xs text-ink-500">
-        Saved only on this computer. The app never guesses an answer you haven't given.
+        Saved only on this computer. We never guess an answer you haven&apos;t given.
       </p>
       {loading ? (
         <p className="text-sm text-ink-400">Loading…</p>
@@ -1094,7 +1094,7 @@ function ReviewAndCommit({
     <div>
       <PageHeader
         title="Check what we found"
-        description="Correct anything that looks wrong, uncheck any fact you don't want used, then save. You can edit everything later on your profile."
+        description="Fix anything that looks off, uncheck anything you don't want used, then save. You can edit it all later."
       />
 
       {data.used_ocr && (

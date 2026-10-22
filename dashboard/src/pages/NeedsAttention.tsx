@@ -71,7 +71,7 @@ export function NeedsAttention() {
     <div>
       <PageHeader
         title="Needs Attention"
-        description="Questions the extension wasn't sure how to answer. Answer once and it remembers. After you save, fill that field on the application yourself, or run Fill again."
+        description="Questions the extension couldn't answer. Answer once and it remembers. Then fill that field yourself, or run Fill again."
         action={groups.length > 0 ? <Badge tone="warning">{groups.length} to review</Badge> : undefined}
       />
 
@@ -85,7 +85,7 @@ export function NeedsAttention() {
           </div>
           <h2 className="text-base font-bold text-ink-900">Nothing needs your attention</h2>
           <p className="mx-auto mt-1 max-w-sm text-sm text-ink-500">
-            When the extension fills an application and isn't sure about a question, it shows up here.
+            All clear! If the extension gets stuck on a question, it shows up here.
           </p>
         </Card>
       )}
@@ -148,7 +148,7 @@ function SavedAnswers() {
     <section className="mt-10">
       <h2 className="text-base font-bold text-ink-900">Answers I remember</h2>
       <p className="mb-3 mt-1 text-xs text-ink-500">
-        Filled in automatically when the same question appears. Forget one if it is wrong or out of date.
+        Filled in automatically next time. Forget one if it&apos;s wrong or out of date.
       </p>
       <Card className="divide-y divide-ink-900/5">
         {saved.map((a) => (

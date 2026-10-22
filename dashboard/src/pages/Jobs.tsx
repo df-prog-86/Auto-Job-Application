@@ -74,7 +74,7 @@ export function Jobs() {
     <div>
       <PageHeader
         title="Jobs"
-        description="Save jobs you find, see how well they fit, and tailor your resume for the ones you want."
+        description="Save jobs, check the fit, and tailor your resume for the ones you want."
       />
 
       <Card className="mb-5 overflow-hidden border border-[#e9e6f4] !shadow-[0_-6px_18px_rgba(60,50,120,0.08),0_1px_2px_rgba(31,27,46,0.08),0_12px_32px_rgba(60,50,120,0.12)]">
@@ -243,7 +243,7 @@ function JobCard({ job, highlight = false }: { job: JobOut; highlight?: boolean 
     if (reply === null) {
       setApplyState({
         kind: "problem",
-        text: "The browser extension didn't answer. Reload it on the extensions page, then refresh this page.",
+        text: "The extension isn't answering. Reload it in Chrome, then refresh.",
       });
     } else if (!reply.ok) {
       setApplyState({ kind: "problem", text: reply.error ?? "Couldn't start the application." });
@@ -308,8 +308,8 @@ function JobCard({ job, highlight = false }: { job: JobOut; highlight?: boolean 
       <div className="grid gap-2 sm:grid-cols-2">
         {(
           [
-            ["light", "Light touch", "Keeps your wording. Reorders bullets so the best fits come first, with a few small, careful word swaps."],
-            ["firm", "Stronger touch", "Rewrites bullets more boldly for this job. Formatting never changes and nothing is invented."],
+            ["light", "Light touch", "Keeps your words. Best-fit bullets first, plus a few careful swaps to the job's own terms."],
+            ["firm", "Stronger touch", "Rewrites bullets for this job. Same formatting, nothing made up."],
           ] as const
         ).map(([value, title, text]) => (
           <button
@@ -496,7 +496,7 @@ function JobCard({ job, highlight = false }: { job: JobOut; highlight?: boolean 
         )}
         {applyState.kind === "opened" && (
           <p className="mt-2 text-xs text-ink-600">
-            Opened in a new tab and filling now. You will get a notification when it is done. Anything it couldn't
+            Opened in a new tab and filling now. We&apos;ll let you know when it&apos;s done. Anything it couldn&apos;t
             answer is highlighted there and listed under Needs Attention. Review it, then submit it yourself.
           </p>
         )}
@@ -610,7 +610,7 @@ function JobCard({ job, highlight = false }: { job: JobOut; highlight?: boolean 
 
             {showResumePanel && tailorMutation.data?.used_original_wording && (
               <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                The AI's rewording didn't pass the accuracy checks, so this resume uses your original wording.
+                The rewording didn&apos;t pass our accuracy check, so we kept your original words.
               </p>
             )}
             {showResumePanel && tailorMutation.data && tailorMutation.data.changelog.length > 0 && (
@@ -810,14 +810,14 @@ function AddJobByUrl() {
         </Button>
       </form>
       <p className="mt-1 text-xs text-ink-400">
-        If a site blocks the link, open the posting and use Save this job in the browser extension instead.
+        If a site blocks the link, open the job and save it from the extension.
       </p>
 
       {addMutation.isError && <p className="mt-3 text-sm text-red-600">{addMutation.error.message}</p>}
       {lastAdded && !addMutation.isError && (
         <p className={`mt-3 text-sm font-medium ${lastAdded.already_existed ? "text-amber-700" : "text-emerald-700"}`}>
           {lastAdded.already_existed
-            ? `Already in your list: ${lastAdded.title} at ${lastAdded.company}. Nothing new was added.`
+            ? `Already in your list: ${lastAdded.title} at ${lastAdded.company}.`
             : `Added: ${lastAdded.title} at ${lastAdded.company}`}
         </p>
       )}

@@ -83,7 +83,7 @@ export function Home() {
     {
       key: "resume",
       title: "Upload your master resume",
-      hint: "A Word file. It is saved once on this computer and every tailored resume starts from it.",
+      hint: "Add your resume once. Every tailored version starts from it.",
       done: !!masterQuery.data?.saved && hasProfile,
       to: "/profile",
       cta: "Upload",
@@ -94,7 +94,7 @@ export function Home() {
       hint:
         hasProfile && missing.length > 0
           ? `${missing.length} ${missing.length === 1 ? "thing needs" : "things need"} your attention.`
-          : "Check your details, work eligibility, experience and education.",
+          : "Give your details a quick once-over.",
       done: hasProfile && missing.length === 0,
       to: "/profile",
       cta: "Review",
@@ -102,7 +102,7 @@ export function Home() {
     {
       key: "job",
       title: "Add a job you found",
-      hint: "Paste a link to any posting, or use Save this job in the browser extension.",
+      hint: "Paste a job link, or save one from the extension.",
       done: jobs.length > 0,
       to: "/jobs",
       cta: "Add a job",
@@ -110,7 +110,7 @@ export function Home() {
     {
       key: "score",
       title: "See how well it fits",
-      hint: "Score a job to compare it with your resume. It only runs when you ask.",
+      hint: "See how well a job fits your resume.",
       done: scoredCount > 0,
       to: "/jobs",
       cta: "Score a job",
@@ -118,7 +118,7 @@ export function Home() {
     {
       key: "tailor",
       title: "Proceed and tailor your resume",
-      hint: "Pick a job to go after and get a Word resume tailored to it.",
+      hint: "Pick a job and get a resume tailored to it.",
       done: resumes > 0,
       to: "/jobs",
       cta: "Tailor a resume",
@@ -201,7 +201,7 @@ export function Home() {
 
       {statusQuery.isError && (
         <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          Can't reach the app's backend. Make sure it is running, then refresh this page.
+          Can&apos;t reach the app. Make sure it&apos;s running, then refresh.
         </div>
       )}
       {toggle.isError && <p className="text-xs text-red-600">{toggle.error.message}</p>}
@@ -301,7 +301,7 @@ function nextAction(a: {
     const jobsText = a.blockedJobs === 1 ? "1 application" : `${a.blockedJobs} applications`;
     return {
       title: `Answer ${a.openQuestions} ${a.openQuestions === 1 ? "question" : "questions"} to unblock ${jobsText}`,
-      body: "Some applications are paused on questions your profile does not cover yet. Answer once and they are filled in every time after.",
+      body: "A few questions are holding things up. Answer once and they are filled in every time after.",
       cta: "Answer now",
       to: "/needs-attention",
     };
@@ -317,7 +317,7 @@ function nextAction(a: {
   if (a.dueCount > 0) {
     return {
       title: `Follow up with ${a.dueCount} ${a.dueCount === 1 ? "employer" : "employers"}`,
-      body: "A short, polite note keeps your application on their radar. A draft is one click away below.",
+      body: "A friendly nudge goes a long way. One click and we'll draft a customized follow-up email.",
       cta: "See follow-ups",
       to: "/",
     };
@@ -325,14 +325,14 @@ function nextAction(a: {
   if (a.matchCount > 0) {
     return {
       title: `Review ${a.matchCount} new ${a.matchCount === 1 ? "match" : "matches"}`,
-      body: "Your saved search found jobs that are not in your list yet.",
+      body: "Your saved search found some new ones.",
       cta: "Open Job Search",
       to: "/job-search",
     };
   }
   return {
     title: "Find your next job",
-    body: "Nothing is waiting on you. Run a search or paste a link to a posting you like.",
+    body: "All caught up! Run a search or paste a job link.",
     cta: "Find new jobs",
     to: "/job-search",
   };
@@ -507,9 +507,9 @@ function StagePanel({
   const openAndFill = async (job: JobOut) => {
     setNote(null);
     const reply = await completeApplication(job.id, job.canonical_application_url);
-    if (reply === null) setNote("The browser extension didn't answer. Reload it on the extensions page, then refresh this page.");
+    if (reply === null) setNote("The extension isn't answering. Reload it in Chrome, then refresh.");
     else if (!reply.ok) setNote(reply.error ?? "Couldn't start the application.");
-    else setNote("Opened in a new tab and filling now. You will get a notification when it is done.");
+    else setNote("Opened in a new tab and filling now. We'll let you know when it's done.");
   };
 
   const shown = jobs.slice(0, 5);
@@ -660,7 +660,7 @@ function MatchesCard({ matches, loading }: { matches: JobSearchResultOut[]; load
       {!loading && top.length === 0 && (
         <p className="mt-4 text-sm text-ink-500">
           No new matches waiting.{" "}
-          {canRefresh ? "Refresh your saved search to look again." : "Run a search on the Job Search page to see matches here."}
+          {canRefresh ? "Refresh your saved search to look again." : "Run a search and your matches show up here."}
         </p>
       )}
       <ul className="mt-2">

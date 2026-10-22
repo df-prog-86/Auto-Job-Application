@@ -6,7 +6,7 @@ export function Applications() {
       title="Applications"
       description="Every application you send, in one place."
       points={[
-        "A searchable table of each job you applied to and where it stands.",
+        "Every job you've applied to, and where each one stands.",
         "Filters by company, status and date.",
         "Export to a spreadsheet.",
       ]}

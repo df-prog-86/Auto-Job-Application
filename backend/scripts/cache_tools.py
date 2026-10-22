@@ -190,6 +190,21 @@ def cmd_descriptions(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _patient(make):
+    """Runs one batch; when the database is busy for too long (the app's own refresh or cleanup is writing), waits and tries
+    the same batch again instead of stopping a run that may have hours of work left."""
+    import sqlite3
+
+    for attempt in range(1, 31):
+        try:
+            return await make()
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower() or attempt == 30:
+                raise
+            print(f"  database busy, waiting 60 seconds and trying this batch again (try {attempt})", flush=True)
+            await asyncio.sleep(60)
+
+
 async def _fill(args: argparse.Namespace) -> int:
     """
     Runs the description fill now: one batch, or (with --rounds) many batches in a row for an overnight catch-up. Each batch reads a
@@ -209,11 +224,11 @@ async def _fill(args: argparse.Namespace) -> int:
     seen: dict[str, dict[str, int]] = {}
     try:
         for n in range(1, max(args.rounds, 1) + 1):
-            todo = cache.postings_without_description(args.limit, args.per_employer, skip, None, only)
+            todo = await _patient(lambda: asyncio.to_thread(cache.postings_without_description, args.limit, args.per_employer, skip, None, only))
             if not todo:
                 print("Nothing left to read for those systems.")
                 break
-            saved = await service.read_missing_descriptions(todo, max_chars=service.DESC_FILL_CHARS, mark_failures=True, why=why)
+            saved = await _patient(lambda: service.read_missing_descriptions(todo, max_chars=service.DESC_FILL_CHARS, mark_failures=True, why=why))
             total_saved += saved
             total_tried += len(todo)
             for name, v in cache.description_outcomes([i for i, _u in todo]).items():
@@ -244,7 +259,7 @@ async def _places(args: argparse.Namespace) -> int:
     tried_all = saved_all = 0
     try:
         for n in range(1, max(args.rounds, 1) + 1):
-            tried, saved = await service.fill_places(cache, args.limit, args.per_employer, [x.strip() for x in args.system.split(',') if x.strip()] if args.system else None)
+            tried, saved = await _patient(lambda: service.fill_places(cache, args.limit, args.per_employer, [x.strip() for x in args.system.split(',') if x.strip()] if args.system else None))
             if not tried:
                 print("No multi-location postings left to open.")
                 break
@@ -266,7 +281,7 @@ async def _dates(args: argparse.Namespace) -> int:
     tried_all = saved_all = 0
     try:
         for n in range(1, max(args.rounds, 1) + 1):
-            tried, saved = await service.fill_dates(cache, args.limit, args.per_employer)
+            tried, saved = await _patient(lambda: service.fill_dates(cache, args.limit, args.per_employer))
             if not tried:
                 print("No undated postings left to open.")
                 break

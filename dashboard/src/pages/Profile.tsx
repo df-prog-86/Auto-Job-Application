@@ -990,10 +990,8 @@ function ResumeDrop({
           setDragging(false);
           choose(e.dataTransfer.files?.[0]);
         }}
-        className={`flex rounded-2xl border-2 border-dashed transition ${
-          compact
-            ? "mt-3 flex-col items-center gap-3 px-4 py-2.5 text-center sm:flex-row sm:justify-between sm:text-left"
-            : `mt-4 flex-col items-center justify-center text-center ${hasProfile ? "px-6 py-5" : "px-6 py-12"}`
+        className={`mt-4 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed text-center transition ${
+          compact ? "px-6 py-3.5" : hasProfile ? "px-6 py-5" : "px-6 py-12"
         } ${dragging ? "border-brand-400 bg-brand-50" : "border-brand-200 bg-brand-50/40"}`}
       >
         {busy ? (
@@ -1024,11 +1022,9 @@ function ResumeDrop({
         ) : (
           compact ? (
             <>
-              <div>
-                <p className="text-sm font-semibold text-ink-900">Drop in a fresh resume. Word (.docx) works best.</p>
-                <p className="text-xs text-ink-500">We&apos;ll build every tailored version from it.</p>
-              </div>
-              <Button variant="secondary" size="sm" className="shrink-0 whitespace-nowrap" onClick={() => inputRef.current?.click()}>
+              <p className="text-sm font-semibold text-ink-900">Drop in a fresh resume. Word (.docx) works best.</p>
+              <p className="mt-0.5 text-xs text-ink-500">We&apos;ll build every tailored version from it.</p>
+              <Button variant="secondary" size="sm" className="mt-2.5" onClick={() => inputRef.current?.click()}>
                 Choose a file
               </Button>
             </>

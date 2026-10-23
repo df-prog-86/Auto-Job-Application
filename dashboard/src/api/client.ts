@@ -88,6 +88,8 @@ export const api = {
 
   createPairingSecret: () =>
     request<PairingSecretResponse>("/system/pairing-secret", { method: "POST" }),
+  pairingStatus: () =>
+    request<{ paired: boolean; paired_at: string | null; last_seen_at: string | null }>("/system/pairing-status"),
   pairExtension: (payload: PairRequest) =>
     request<PairResponse>("/system/pair", {
       method: "POST",
@@ -154,7 +156,7 @@ export const api = {
   addJobByUrl: (payload: ManualJobInput) =>
     request<JobOut>("/jobs/manual", { method: "POST", body: JSON.stringify(payload) }),
   requalifyJob: (id: number) => request<JobOut>(`/jobs/${id}/qualify`, { method: "POST" }),
-  masterStatus: () => request<{ saved: boolean; updated_at: string | null }>("/profile/master"),
+  masterStatus: () => request<{ saved: boolean; updated_at: string | null; filename?: string | null }>("/profile/master"),
   undoProceed: (id: number) => request<JobOut>(`/jobs/${id}/unproceed`, { method: "POST" }),
   markApplied: (id: number, appliedOn?: string) =>
     request<JobOut>(`/jobs/${id}/applied`, {

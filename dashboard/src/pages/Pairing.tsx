@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api } from "@/api/client";
@@ -15,12 +15,19 @@ import { Button, Card } from "@/components/ui";
 export function Pairing() {
   const [secret, setSecret] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const queryClient = useQueryClient();
+  const status = useQuery({ queryKey: ["pairing-status"], queryFn: api.pairingStatus, refetchInterval: 5000 });
+  const paired = status.data?.paired === true;
+  const pairedOn = status.data?.paired_at
+    ? new Date(status.data.paired_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    : null;
 
   const generate = useMutation({
     mutationFn: api.createPairingSecret,
     onSuccess: (data) => {
       setSecret(data.pairing_secret);
       setCopied(false);
+      void queryClient.invalidateQueries({ queryKey: ["pairing-status"] });
     },
   });
 
@@ -41,6 +48,21 @@ export function Pairing() {
         description="One quick step to connect the extension."
       />
 
+      {status.data && (
+        <div
+          role="status"
+          className={`mb-4 flex max-w-xl flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl px-4 py-3.5 text-[14.5px] font-bold ${
+            paired ? "bg-[#e8f6ee] text-[#17603f]" : "bg-[#f0eff7] text-ink-700"
+          }`}
+        >
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-current" aria-hidden="true" />
+          {paired ? `Paired${pairedOn ? ` on ${pairedOn}` : ""}` : "Not paired"}
+          <span className="basis-full pl-[22px] text-[13px] font-semibold opacity-85">
+            {paired ? "Create a new code only to connect another browser." : "Create a code below to connect the extension."}
+          </span>
+        </div>
+      )}
+
       <Card className="max-w-xl p-6">
         <ol className="mb-6 space-y-4">
           {[
@@ -58,7 +80,7 @@ export function Pairing() {
         </ol>
 
         <Button variant="primary" onClick={() => generate.mutate()} disabled={generate.isPending}>
-          {generate.isPending ? "Creating…" : secret ? "Create a new code" : "Create pairing code"}
+          {generate.isPending ? "Creating…" : secret || paired ? "Create a new code" : "Create pairing code"}
         </Button>
 
         {secret && (

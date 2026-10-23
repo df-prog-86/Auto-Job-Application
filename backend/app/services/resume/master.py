@@ -14,6 +14,7 @@ from pathlib import Path
 from app.config import settings
 
 MASTER_NAME = "master.docx"
+NAME_FILE = "master_name.txt"
 
 
 def master_dir() -> Path:
@@ -25,7 +26,7 @@ def master_path() -> Path | None:
     return path if path.exists() else None
 
 
-def save_master(data: bytes) -> Path:
+def save_master(data: bytes, original_name: str | None = None) -> Path:
     """Atomic write: the old master is replaced only once the new file is fully on disk."""
     directory = master_dir()
     directory.mkdir(parents=True, exist_ok=True)
@@ -37,7 +38,24 @@ def save_master(data: bytes) -> Path:
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
+    # Remember the name the file had when it was uploaded, for the Profile page. Display only.
+    name = os.path.basename((original_name or "").replace("\\", "/")).strip()[:200]
+    try:
+        if name:
+            (directory / NAME_FILE).write_text(name, encoding="utf-8")
+        elif (directory / NAME_FILE).exists():
+            (directory / NAME_FILE).unlink()
+    except OSError:
+        pass
     return directory / MASTER_NAME
+
+
+def master_filename() -> str | None:
+    try:
+        text = (master_dir() / NAME_FILE).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return text or None
 
 
 def master_status() -> dict:
@@ -46,5 +64,7 @@ def master_status() -> dict:
 
     path = master_path()
     if path is None:
-        return {"saved": False, "updated_at": None}
-    return {"saved": True, "updated_at": dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc).isoformat()}
+        return {"saved": False, "updated_at": None, "filename": None}
+    return {"saved": True, "updated_at": dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc).isoformat(),
+        "filename": master_filename(),
+    }

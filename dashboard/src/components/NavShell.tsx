@@ -65,10 +65,7 @@ export function NavShell() {
       <aside className="flex shrink-0 flex-col bg-white/80 px-4 py-5 shadow-soft backdrop-blur md:sticky md:top-0 md:h-screen md:w-60 md:py-7">
         <div className="mb-3 flex items-center gap-3 px-2 md:mb-9">
           <LogoMark />
-          <div>
-            <div className="text-base font-bold leading-tight text-ink-900">OtterApply</div>
-            <div className="text-xs leading-snug text-ink-400">Because applying shouldn&apos;t suck</div>
-          </div>
+          <div className="text-xl font-bold leading-tight tracking-tight text-ink-900">OtterApply</div>
         </div>
         <nav className="flex gap-2 overflow-x-auto md:min-h-0 md:flex-1 md:flex-col md:overflow-visible">
           <NavGroup items={MAIN} />

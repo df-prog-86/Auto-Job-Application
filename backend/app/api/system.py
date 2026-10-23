@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.config import settings
-from app.models.system import AutomationState
+from app.models.system import AutomationState, ExtensionPairing
 from app.services.security.pairing import (
     generate_pairing_secret,
     issue_extension_token,
@@ -100,6 +100,30 @@ def pair_extension(payload: PairRequest, db: Session = Depends(get_db)) -> PairR
     token = issue_extension_token(db, payload.extension_origin)
     _current_pairing_secret = None  # single-use
     return PairResponse(extension_token=token)
+
+
+class PairingStatusResponse(BaseModel):
+    paired: bool
+    paired_at: str | None = None
+    last_seen_at: str | None = None
+
+
+@router.get("/system/pairing-status", response_model=PairingStatusResponse)
+def pairing_status(db: Session = Depends(get_db)) -> PairingStatusResponse:
+    """Whether an extension is paired and when (for the Pair Extension page). Never returns the token."""
+    row = (
+        db.query(ExtensionPairing)
+        .filter(ExtensionPairing.revoked.is_(False))
+        .order_by(ExtensionPairing.paired_at.desc())
+        .first()
+    )
+    if row is None:
+        return PairingStatusResponse(paired=False)
+    return PairingStatusResponse(
+        paired=True,
+        paired_at=row.paired_at.isoformat(),
+        last_seen_at=row.last_seen_at.isoformat() if row.last_seen_at else None,
+    )
 
 
 @router.get("/automation/status", response_model=AutomationStatusResponse)

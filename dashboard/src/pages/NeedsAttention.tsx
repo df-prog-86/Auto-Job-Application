@@ -44,6 +44,29 @@ function groupQuestions(items: PendingQuestionOut[]): Group[] {
   return Array.from(byKey.values());
 }
 
+interface JobGroup {
+  id: number;
+  title: string;
+  company: string;
+  questions: Group[];
+}
+
+/** One block per job, each listing the questions that job asked. A question several jobs asked is listed under each of them. */
+function groupByJob(groups: Group[]): JobGroup[] {
+  const byJob = new Map<number, JobGroup>();
+  for (const g of groups) {
+    for (const q of g.items) {
+      let job = byJob.get(q.job_id);
+      if (!job) {
+        job = { id: q.job_id, title: q.job_title, company: q.company, questions: [] };
+        byJob.set(q.job_id, job);
+      }
+      if (!job.questions.includes(g)) job.questions.push(g);
+    }
+  }
+  return Array.from(byJob.values());
+}
+
 /**
  * Questions the browser extension left blank because it wasn't sure how to
  * answer them. Your answer is remembered, so the same question is filled in
@@ -58,6 +81,7 @@ export function NeedsAttention() {
   const groups = useMemo(() => groupQuestions(items), [items]);
   const needle = search.trim().toLowerCase();
   const shown = needle ? groups.filter((g) => g.label.toLowerCase().includes(needle)) : groups;
+  const jobs = useMemo(() => groupByJob(shown), [shown]);
 
   const clearAll = useMutation<{ cleared: number }, ApiError, void>({
     mutationFn: () => api.clearQuestions(),
@@ -123,8 +147,25 @@ export function NeedsAttention() {
       {needle && shown.length === 0 && groups.length > 0 && <p className="text-sm text-ink-400">No questions match "{search}".</p>}
 
       <ul className="space-y-4">
-        {shown.map((g) => (
-          <QuestionCard key={g.key} group={g} />
+        {jobs.map((job) => (
+          <li key={job.id}>
+            <section aria-label={`${job.title} at ${job.company}`} className="overflow-hidden rounded-[20px] bg-white shadow-soft">
+              <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 border-b border-[#ebe8f6] bg-[#faf9ff] px-5 py-3.5">
+                <h2 className="text-[15px] font-bold text-ink-900">{job.title}</h2>
+                <span className="text-[13px] font-semibold text-ink-500">{job.company}</span>
+                <span className="ml-auto">
+                  <Badge tone="warning">
+                    {job.questions.length} {job.questions.length === 1 ? "question" : "questions"}
+                  </Badge>
+                </span>
+              </div>
+              <ul>
+                {job.questions.map((g) => (
+                  <QuestionCard key={g.key} group={g} jobId={job.id} />
+                ))}
+              </ul>
+            </section>
+          </li>
         ))}
       </ul>
 
@@ -174,7 +215,7 @@ function SavedAnswers() {
   );
 }
 
-function QuestionCard({ group }: { group: Group }) {
+function QuestionCard({ group, jobId }: { group: Group; jobId: number }) {
   const queryClient = useQueryClient();
   const [answer, setAnswer] = useState("");
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["needs-attention"] });
@@ -194,23 +235,25 @@ function QuestionCard({ group }: { group: Group }) {
   });
 
   const error = save.error ?? clear.error;
-  const jobs = Array.from(new Set(group.items.map((q) => `${q.job_title} at ${q.company}`)));
+  const others = Array.from(new Set(group.items.filter((q) => q.job_id !== jobId).map((q) => `${q.job_title} at ${q.company}`)));
 
   return (
-    <li>
-      <Card className="p-6">
-        <div className="mb-1 text-xs font-semibold text-ink-400">
-          {jobs.length === 1 ? jobs[0] : `Asked on ${jobs.length} applications`}
-        </div>
-        {jobs.length > 1 && <div className="mb-1 truncate text-xs text-ink-400">{jobs.slice(0, 3).join(", ")}{jobs.length > 3 ? ", …" : ""}</div>}
-        <h2 className="text-base font-bold leading-snug text-ink-900">
+    <li className="border-t border-[#ebe8f6] first:border-t-0">
+      <div className="px-5 py-4">
+        <h3 className="text-[14.5px] font-bold leading-snug text-ink-900">
           {group.label}
           {group.required && (
             <span className="ml-2 align-middle">
               <Badge tone="warning">Required</Badge>
             </span>
           )}
-        </h2>
+        </h3>
+        {others.length > 0 && (
+          <p className="mt-0.5 text-[12.5px] text-ink-500">
+            Also asked on {others.slice(0, 2).join(", ")}
+            {others.length > 2 ? ` and ${others.length - 2} more` : ""}. One answer covers {others.length === 1 ? "both" : "all"}.
+          </p>
+        )}
 
         <form
           className="mt-4"
@@ -247,7 +290,7 @@ function QuestionCard({ group }: { group: Group }) {
           </div>
         </form>
         {error && <p className="mt-2 text-sm text-red-600">{error.message}</p>}
-      </Card>
+      </div>
     </li>
   );
 }

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { api, ApiError } from "@/api/client";
@@ -8,6 +8,7 @@ import { EditableField, SelectField } from "@/components/EditableField";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge, Button, Card, CheckIcon, inputClass } from "@/components/ui";
 import { answerValue, missingItems } from "@/lib/completeness";
+import { formatPhone } from "@/lib/phone";
 import type {
   AnswerOut,
   DraftClaim,
@@ -240,6 +241,7 @@ export function Profile() {
           <EditableField
             label="Phone"
             value={profile.phone ?? ""}
+            format={formatPhone}
             required
             type="tel"
             onSave={(v) => applyProfile(api.updateProfile({ phone: v || null }))}
@@ -352,8 +354,29 @@ const PROFILE_SECTIONS: { id: string; label: string }[] = [
   { id: "profile-certs", label: "Certifications" },
 ];
 
-/** Jump links that stay in view while the page scrolls. */
+/** Jump links that stay in view while the page scrolls. The one for the section on screen is highlighted. */
 function SectionNav() {
+  const [current, setCurrent] = useState(PROFILE_SECTIONS[0].id);
+  useEffect(() => {
+    const update = () => {
+      let cur = PROFILE_SECTIONS[0].id;
+      for (const sec of PROFILE_SECTIONS) {
+        const el = document.getElementById(sec.id);
+        if (el && el.getBoundingClientRect().top <= 120) cur = sec.id;
+      }
+      // At the very bottom the last section wins, even when it is too short to reach the top.
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) cur = PROFILE_SECTIONS[PROFILE_SECTIONS.length - 1].id;
+      setCurrent(cur);
+    };
+    update();
+    // The page scrolls inside the app's main area, so listen on every scroll in the capture phase.
+    window.addEventListener("scroll", update, { passive: true, capture: true });
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
   return (
     <nav
       aria-label="Profile sections"
@@ -363,8 +386,11 @@ function SectionNav() {
         <button
           key={sec.id}
           type="button"
+          aria-current={current === sec.id ? "true" : undefined}
           onClick={() => document.getElementById(sec.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-          className="shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold text-ink-500 transition hover:bg-brand-50 hover:text-brand-700"
+          className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+            current === sec.id ? "bg-brand-500 text-white" : "text-ink-500 hover:bg-brand-50 hover:text-brand-700"
+          }`}
         >
           {sec.label}
         </button>
@@ -972,14 +998,29 @@ function ResumeDrop({
         {saved ? (
           <Badge tone="success">
             <CheckIcon className="h-3 w-3" />
-            Resume last saved{masterQuery.data?.updated_at ? ` on ${new Date(masterQuery.data.updated_at).toLocaleDateString()}` : ""}
+            Saved{masterQuery.data?.updated_at ? ` ${new Date(masterQuery.data.updated_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
           </Badge>
         ) : (
           <Badge tone="warning">Not saved yet</Badge>
         )}
       </div>
 
+      {saved && hasProfile && !busy && !pending && (
+        <div className="mt-4 flex flex-wrap items-center gap-3.5 rounded-2xl border border-[#e9e6f4] bg-[#faf9ff] px-4 py-3.5">
+          <span className="grid h-12 w-10 shrink-0 place-items-center rounded-lg bg-brand-100 text-[11px] font-extrabold text-brand-700" aria-hidden="true">
+            DOCX
+          </span>
+          <div className="min-w-[180px] flex-1">
+            <div className="break-all text-[14.5px] font-bold text-ink-900">{masterQuery.data?.filename || "Your master resume"}</div>
+            <div className="text-[12.5px] text-ink-500">Every tailored resume is made from this file.</div>
+          </div>
+          <Button variant="secondary" size="sm" onClick={() => inputRef.current?.click()}>
+            Replace
+          </Button>
+        </div>
+      )}
       <div
+        style={saved && hasProfile && !busy && !pending ? { display: "none" } : undefined}
         onDragOver={(e) => {
           e.preventDefault();
           setDragging(true);

@@ -65,3 +65,26 @@ def test_pairing_wrong_secret_rejected(app_and_db):
         json={"pairing_secret": "not-the-real-secret", "extension_origin": "x"},
     )
     assert resp.status_code == 403
+
+
+def test_pairing_status_before_and_after_pairing(app_and_db):
+    client, _ = app_and_db
+    before = client.get("/api/v1/system/pairing-status").json()
+    assert before["paired"] is False and before["paired_at"] is None
+
+    secret = client.post("/api/v1/system/pairing-secret").json()["pairing_secret"]
+    client.post("/api/v1/system/pair", json={"pairing_secret": secret, "extension_origin": "chrome-extension://test"})
+    after = client.get("/api/v1/system/pairing-status").json()
+    assert after["paired"] is True and after["paired_at"]
+    assert "token" not in " ".join(after.keys())
+
+
+def test_master_resume_remembers_original_file_name(tmp_path, monkeypatch):
+    from app.services.resume import master
+
+    monkeypatch.setattr(master, "master_dir", lambda: tmp_path)
+    master.save_master(b"x", "C:\\Users\\me\\Dylan_Faires_Resume.docx")
+    assert master.master_status()["filename"] == "Dylan_Faires_Resume.docx"
+    master.save_master(b"y", None)
+    assert master.master_status()["filename"] is None
+    assert master.master_status()["saved"] is True

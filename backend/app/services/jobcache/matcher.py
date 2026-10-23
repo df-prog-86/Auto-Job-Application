@@ -51,7 +51,7 @@ STALE_FACTOR = 0.85
 # Stricter ranking (settings.JOB_SEARCH_STRICT_SCORING). `STRICT_OVERRIDE` lets a test or the before-and-after script switch it either way.
 STRICT_OVERRIDE: bool | None = None
 WIDEST_WINDOW = 60  # the widest "Posted" choice; it is the default, so a posting with no date is still shown under it
-HIDE_AFTER_DAYS = 90  # strict: older postings are not shown
+HIDE_AFTER_DAYS = 60  # strict: older postings are not shown, even when no date window was chosen
 DESC_ONLY_CAP = 0.50  # strict: a job found only through its description ranks as "Possible" at best (below 55)
 DIRECTOR_LEVEL = 5  # strict: a director or above when no level was asked for loses a little
 # strict: words that name a job function. A posting that has one the search did not ask for ("Product Manager" for "revenue cycle

@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.jobs import Job
-from app.services.jobcache.text import clean_company, clean_title, reconcile_place, tidy_place
+from app.services.jobcache.text import clean_company, clean_title, display_place, tidy_place
 
 
 def planned_changes(job: Job) -> dict[str, str | None]:
@@ -35,8 +35,7 @@ def planned_changes(job: Job) -> dict[str, str | None]:
     title = clean_title(job.title, job.company) or job.title
     if title != job.title:
         changes["title"] = title
-    place = tidy_place(job.location) if job.location else job.location
-    place, work_type = reconcile_place(place, job.remote_type)
+    place, work_type = display_place(job.location, job.remote_type)  # the same plain writing new search results get
     if place != job.location:
         changes["location"] = place
     if work_type != job.remote_type:

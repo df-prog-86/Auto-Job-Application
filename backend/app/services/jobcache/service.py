@@ -474,6 +474,9 @@ def collapse_listings(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+DESC_READ_SECONDS = 20.0  # the most a search waits while reading the descriptions of partly matching jobs
+
+
 async def ranked_items(criteria: Any) -> list[dict[str, Any]]:
     """Every match in the saved lists for this search, best first. The same list is reused for ten minutes."""
     key = _ranked_key(criteria)
@@ -491,11 +494,17 @@ async def ranked_items(criteria: Any) -> list[dict[str, Any]]:
     out = await asyncio.to_thread(search_sync, criteria, set(), extra, 1_000_000, places)
     timing_note(f"saved-list search ({len(out.items)} items, {len(out.unread)} unread)", t0)
     if out.unread:
+        saved = 0
         try:
-            if await read_missing_descriptions(out.unread):  # the text now saved may settle those jobs: rank again
-                out = await asyncio.to_thread(search_sync, criteria, set(), extra, 1_000_000, places)
+            saved = await asyncio.wait_for(read_missing_descriptions(out.unread), timeout=DESC_READ_SECONDS)
+        except asyncio.TimeoutError:
+            # Each description is saved as soon as it is read, so the ones finished in time still count now, and the rest are picked up next time.
+            log.warning("job search: reading descriptions took over %.0fs; continuing with what was read", DESC_READ_SECONDS)
+            saved = 1
         except Exception:
             log.exception("job search: could not read the descriptions of partly matching jobs")
+        if saved:  # the text now saved may settle those jobs: rank again
+            out = await asyncio.to_thread(search_sync, criteria, set(), extra, 1_000_000, places)
     items = collapse_listings(out.items)
     timing_note("descriptions read, listings collapsed", t0)
     items = await resolve_vague_places(criteria, items, extra, places)

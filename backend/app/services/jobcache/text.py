@@ -870,8 +870,14 @@ _CITY_SPACE_STATE = re.compile(r"^([A-Z][A-Za-z.' ]+?)\s+([A-Z]{2})$")  # "Bosto
 _USA_STATE_CITY = re.compile(r"\bUSA?\s*-\s*([A-Z]{2})\s*-\s*([A-Z][A-Za-z. ]+?)(?:\s*-|\s*$)")  # "Client Site - USA - NY - New York - 11 Madison Avenue"
 
 
+_USA_SPACED = re.compile(r"^USA?\s+([A-Z]{2})\s+([A-Z][A-Za-z.']*(?:\s+[A-Z][A-Za-z.']*){0,3}?)(?:\s+\d.*)?$")  # "USA NY New York City 3 Times Square ..."
+
+
 def _plain_place(part: str) -> str:
     part = part.strip()
+    m = _USA_SPACED.match(part)
+    if m and m.group(1) in US_STATES:
+        return f"{m.group(2).strip()}, {m.group(1)}"
     m = _USA_STATE_CITY.search(part)
     if m and m.group(1) in US_STATES:
         return f"{m.group(2).strip()}, {m.group(1)}"

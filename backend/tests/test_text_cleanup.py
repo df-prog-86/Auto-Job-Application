@@ -108,6 +108,7 @@ def test_places_are_shown_plainly():
     assert display_place("Location not listed", "remote") == ("Remote", "remote")
     assert display_place("Remote: United States", None) == ("Remote (US)", "remote")
     assert display_place("Working Virtually", None) == ("Remote", "remote")
+    assert display_place("USA NY New York City 3 Times Square 7th Floor", "onsite") == ("New York City, NY", "onsite")
     assert display_place("BRG-Chicago IL", None)[0] == "Chicago, IL"
     assert display_place("NJ-Jersey City", None)[0] == "Jersey City, NJ"
     assert display_place("Boston MA", None)[0] == "Boston, MA"

@@ -363,7 +363,10 @@ def test_tailoring_reorders_a_copy_and_leaves_the_master_untouched(app_and_db, m
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["used_original_wording"] is False
-    assert body["changelog"] == ["Gap: the job wants Kubernetes; not in your resume."]
+    assert body["changelog"] == [
+        "Reordered the bullets in 1 role so the ones closest to this job come first.",
+        "Gap: the job wants Kubernetes; not in your resume.",
+    ]
     assert sorted(d["document_type"] for d in body["documents"]) == ["changelog", "resume"]
 
     resume_doc = next(d for d in body["documents"] if d["document_type"] == "resume")
@@ -379,6 +382,61 @@ def test_tailoring_reorders_a_copy_and_leaves_the_master_untouched(app_and_db, m
 
     listed = client.get("/api/v1/jobs").json()[0]
     assert sorted(d["document_type"] for d in listed["documents"]) == ["changelog", "resume"]
+
+
+class _SequenceRouter:
+    """Returns each plan in turn, and remembers what it was asked."""
+
+    plans: list[TailorPlan] = []
+    calls: list[list] = []
+
+    def __init__(self, db):
+        pass
+
+    async def get_structured(self, **kwargs):
+        type(self).calls.append(kwargs["messages"])
+        plans = type(self).plans
+        return plans[min(len(type(self).calls) - 1, len(plans) - 1)]
+
+
+def test_a_plan_that_changes_nothing_is_sent_back_once_and_false_claims_are_dropped(app_and_db, monkeypatch, docs_dir):
+    client, _ = app_and_db
+    client.post("/api/v1/profile/commit", json=_PROFILE)
+    job = _add_job(client, monkeypatch)
+    client.post(f"/api/v1/jobs/{job['id']}/proceed")
+    _write_master(docs_dir)
+
+    claims = ["Reordered bullets to prioritize SQL.", "Rephrased bullets toward the job.", "Master lacks Kubernetes."]
+    _SequenceRouter.calls = []
+    _SequenceRouter.plans = [_plan([0, 1, 2], changelog=claims), _plan([1, 2, 0], changelog=claims)]
+    monkeypatch.setattr("app.services.resume.generation.ModelRouter", _SequenceRouter)
+
+    body = client.post(f"/api/v1/jobs/{job['id']}/tailor").json()
+    assert len(_SequenceRouter.calls) == 2  # asked again once, with the reason
+    assert "identical to the master" in _SequenceRouter.calls[1][-1]["content"]
+    assert body["changelog"] == [
+        "Reordered the bullets in 1 role so the ones closest to this job come first.",
+        "Master lacks Kubernetes.",
+    ]
+    resume_doc = next(d for d in body["documents"] if d["document_type"] == "resume")
+    download = client.get(f"/api/v1/jobs/documents/{resume_doc['id']}/download")
+    assert _docx_bullets(download.content) == [_BULLETS[1], _BULLETS[2], _BULLETS[0]]
+
+
+def test_a_plan_that_still_changes_nothing_says_so_and_never_claims_a_change(app_and_db, monkeypatch, docs_dir):
+    client, _ = app_and_db
+    client.post("/api/v1/profile/commit", json=_PROFILE)
+    job = _add_job(client, monkeypatch)
+    client.post(f"/api/v1/jobs/{job['id']}/proceed")
+    _write_master(docs_dir)
+
+    _SequenceRouter.calls = []
+    _SequenceRouter.plans = [_plan([0, 1, 2], changelog=["Reordered bullets to prioritize SQL."])]
+    monkeypatch.setattr("app.services.resume.generation.ModelRouter", _SequenceRouter)
+
+    body = client.post(f"/api/v1/jobs/{job['id']}/tailor").json()
+    assert len(_SequenceRouter.calls) == 2
+    assert len(body["changelog"]) == 1 and body["changelog"][0].startswith("Nothing was changed")
 
 
 def test_tailoring_falls_back_to_the_master_when_the_ai_plan_fails_checks(app_and_db, monkeypatch, docs_dir):

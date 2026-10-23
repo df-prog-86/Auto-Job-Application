@@ -8,6 +8,7 @@ are kept (nothing unvalidated is ever applied).
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
@@ -101,24 +102,59 @@ FIRM_PROMPT = (
 )
 
 
-def _change_notes(plan: TailorPlan, blocks: list[Block], parts: list[TextPart], existing: list[str]) -> list[str]:
-    """Plain notes written by the code itself, so what actually changed is always listed, whatever the AI wrote."""
-    said = " ".join(existing).lower()
-    notes: list[str] = []
+def plan_changes(plan: TailorPlan, blocks: list[Block], parts: list[TextPart]) -> dict[str, int | bool]:
+    """What a plan really does to the master, counted from the plan itself (never from what the AI says it did)."""
     by_id = {p.id: p for p in parts}
-    if any(p.text != by_id[p.part_id].text for p in plan.summaries if p.part_id in by_id) and "summary" not in said:
+    originals = {b.id: b for block in blocks for b in block.bullets}
+    block_ids = {block.id: [b.id for b in block.bullets] for block in blocks}
+    reordered_roles = sum(1 for pb in plan.blocks if pb.block_id in block_ids and [b.bullet_id for b in pb.bullets] != block_ids[pb.block_id])
+    reworded = sum(1 for pb in plan.blocks for b in pb.bullets if b.bullet_id in originals and b.text != originals[b.bullet_id].text)
+    summary = any(p.text != by_id[p.part_id].text for p in plan.summaries if p.part_id in by_id)
+    skills_reordered = any(
+        [i.strip() for i in p.items][: len(by_id[p.part_id].items)] != by_id[p.part_id].items for p in plan.skills if p.part_id in by_id
+    )
+    added = len(added_skills(plan, parts))
+    return {
+        "reordered_roles": reordered_roles, "reworded": reworded, "summary": summary,
+        "skills_reordered": skills_reordered, "skills_added": added,
+    }
+
+
+def is_no_change(changes: dict[str, int | bool]) -> bool:
+    return not any(changes.values())
+
+
+# A note the AI wrote about something the master lacks is kept; a note about what it supposedly changed is not, since the code states that itself.
+_CLAIMED_CHANGE = re.compile(r"\b(reorder\w*|rephras\w*|reword\w*|rewrote|rewritten|emphasi[sz]\w*|prioriti[sz]\w*|added|adjust\w*|align\w*|moved|tailor\w*)\b", re.I)
+
+
+def _gap_notes(changelog: list[str]) -> list[str]:
+    return [n.strip() for n in changelog if n.strip() and not _CLAIMED_CHANGE.search(n)]
+
+
+def _change_notes(plan: TailorPlan, blocks: list[Block], parts: list[TextPart], existing: list[str] | None = None) -> list[str]:
+    """Plain notes written by the code itself from what the plan really changes, so "What changed" is always true."""
+    c = plan_changes(plan, blocks, parts)
+    notes: list[str] = []
+    if c["summary"]:
         notes.append("Reworded your summary for this job. Read it over to make sure it still sounds like you.")
-    if any(
-        [i.strip() for i in p.items][: len(by_id[p.part_id].items)] != by_id[p.part_id].items
-        for p in plan.skills
-        if p.part_id in by_id
-    ) and "skill" not in said:
+    if c["skills_reordered"]:
         notes.append("Reordered your skills so the ones this job asks for come first.")
-    bullets = {b.id: b.text for block in blocks for b in block.bullets}
-    reworded = sum(1 for pb in plan.blocks for b in pb.bullets if b.bullet_id in bullets and b.text != bullets[b.bullet_id])
-    if reworded and "reword" not in said and "rephras" not in said:
-        notes.append(f"Reworded {reworded} {'bullet' if reworded == 1 else 'bullets'} to fit the job.")
+    if c["reordered_roles"]:
+        n = c["reordered_roles"]
+        notes.append(f"Reordered the bullets in {n} {'role' if n == 1 else 'roles'} so the ones closest to this job come first.")
+    if c["reworded"]:
+        n = c["reworded"]
+        notes.append(f"Reworded {n} {'bullet' if n == 1 else 'bullets'} to fit the job.")
     return notes
+
+
+def _final_notes(plan: TailorPlan, blocks: list[Block], parts: list[TextPart]) -> list[str]:
+    """The changelog shown to the person: what really changed (counted by the code), then the AI's notes on what the master lacks."""
+    notes = _change_notes(plan, blocks, parts) + _added_note(plan, parts)
+    if not notes:
+        notes.append("Nothing was changed: the resume already leads with what this job asks for, or the edits were not safe to make.")
+    return notes + _gap_notes(list(plan.changelog))
 
 
 def _added_note(plan: TailorPlan, parts: list[TextPart]) -> list[str]:
@@ -169,7 +205,7 @@ async def generate_plan(
     ]
     all_problems: list[str] = []
     last_plan: TailorPlan | None = None
-    for _ in range(2):
+    for attempt in range(3):
         try:
             plan = await router.get_structured(
                 purpose="resume_tailoring",
@@ -183,8 +219,28 @@ async def generate_plan(
         last_plan = plan
         problems = validate_plan(plan, blocks, master_text, firm, parts, job.description or "")
         if not problems:
-            notes = list(plan.changelog)
-            return PlanResult(plan, [], notes + _change_notes(plan, blocks, parts, notes) + _added_note(plan, parts))
+            if is_no_change(plan_changes(plan, blocks, parts)) and attempt == 0:
+                # A plan that changes nothing, while the notes may claim otherwise: ask once for a real tailoring.
+                logger.warning("resume tailor (%s) returned a plan with no changes; asking again", strength)
+                messages = messages + [
+                    {
+                        "role": "user",
+                        "content": (
+                            "That plan is identical to the master resume: no bullet was moved or reworded and the summary and skills are unchanged. "
+                            + (
+                                "A firm tailor must visibly change it: reorder every role's bullets by fit to the job, rephrase the bullets that "
+                                "matter most for this job (and the summary) in the job's own vocabulary using only facts already in the master, "
+                                "and reorder the skills. "
+                                if firm
+                                else "Reorder every role's bullets by fit to the job, best first, put the skills the job asks for first, and make the "
+                                "few small word swaps toward the job's own terms that the master truthfully supports. "
+                            )
+                            + "Only keep something unchanged if it is already the best fit. Return corrected JSON."
+                        ),
+                    }
+                ]
+                continue
+            return PlanResult(plan, [], _final_notes(plan, blocks, parts))
         logger.warning("resume tailor (%s) failed checks: %s", strength, "; ".join(problems)[:1500])
         all_problems.extend(problems)
         messages = messages + [
@@ -202,9 +258,7 @@ async def generate_plan(
             return PlanResult(
                 cleaned,
                 [],
-                list(cleaned.changelog)
-                + _change_notes(cleaned, blocks, parts, list(cleaned.changelog))
-                + _added_note(cleaned, parts)
+                _final_notes(cleaned, blocks, parts)
                 + (["Some edits didn't pass the accuracy checks and were left as you wrote them:"] + skipped if skipped else []),
             )
 

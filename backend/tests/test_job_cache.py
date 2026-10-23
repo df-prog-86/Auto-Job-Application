@@ -2260,3 +2260,29 @@ def test_strict_scoring_demotes_description_only_matches_old_postings_and_wrong_
     # old postings: hidden over 90 days, and behind a fresh one
     assert fit(row("Revenue Cycle Manager", posted=old), True) is None
     assert fit(row("Revenue Cycle Manager", posted=old), False) is not None
+
+
+def test_strict_scoring_generic_searches_never_rank_top_and_other_functions_rank_lower():
+    import datetime as dt
+    from types import SimpleNamespace
+
+    from app.services.jobcache import matcher
+
+    today = dt.date(2026, 10, 1)
+
+    def plan_for(titles, location="New York, NY"):
+        return matcher.build_plan(SimpleNamespace(titles=titles, location=location, work_type="any", include_remote=False, posted_within_days=0, keywords=None, exclude_companies=None, target_salary=None))
+
+    def fit(plan, title, location="New York, NY", work_type="onsite"):
+        matcher.STRICT_OVERRIDE = True
+        try:
+            r = {"title": title, "company": "Acme", "location": location, "work_type": work_type, "posted_at": today.isoformat(), "description": None}
+            return matcher.score_row(plan, r, today).fit
+        finally:
+            matcher.STRICT_OVERRIDE = None
+
+    assert fit(plan_for("manager"), "Assurance Manager") <= 0.89
+    plan = plan_for("revenue cycle manager")
+    assert fit(plan, "Product Manager, Revenue Cycle Manager") < fit(plan, "Revenue Cycle Manager") - 0.05
+    # a remote job from anywhere sits further behind a job in the city
+    assert fit(plan, "Revenue Cycle Manager", "Remote", "remote") < fit(plan, "Revenue Cycle Manager") - 0.04

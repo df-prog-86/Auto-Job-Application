@@ -41,7 +41,7 @@ def where(item: dict, city: str | None) -> str:
 def run(criteria: JobSearchIn, strict: bool, top: int):
     matcher.STRICT_OVERRIDE = strict
     try:
-        return service.search_sync(criteria, set(), None, 60)
+        return service.search_sync(criteria, set(), None, 5000)
     finally:
         matcher.STRICT_OVERRIDE = None
 
@@ -59,6 +59,8 @@ def show(label: str, outcome, criteria: JobSearchIn, top: int) -> None:
     spots = Counter(where(i, city) for i in items)
     old = sum(1 for i in items if i.get("posted_at") and (today - i["posted_at"]).days > 60)
     tiers = Counter(tier(i["fit"]) for i in items)
+    every = Counter(where(i, city) for i in outcome.items)
+    print(f"    all {len(outcome.items)} results: {dict(every)}")
     print(f"    top {len(items)}: {dict(spots)}; over 60 days old: {old}; tiers: {dict(tiers)}")
 
 

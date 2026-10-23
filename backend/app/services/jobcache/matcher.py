@@ -17,6 +17,8 @@ from typing import Any
 
 from app.services.jobcache.text import (
     SENIORITY_ONLY,
+    REMOTE_ELSEWHERE,
+    stem,
     STATE_BY_NAME,
     STOPWORDS,
     LocationQuery,
@@ -51,6 +53,14 @@ STRICT_OVERRIDE: bool | None = None
 HIDE_AFTER_DAYS = 90  # strict: older postings are not shown
 DESC_ONLY_CAP = 0.50  # strict: a job found only through its description ranks as "Possible" at best (below 55)
 DIRECTOR_LEVEL = 5  # strict: a director or above when no level was asked for loses a little
+# strict: words that name a job function. A posting that has one the search did not ask for ("Product Manager" for "revenue cycle
+# manager") is a different job that happens to share words, so it is marked down.
+OFF_FUNCTION = {stem(w) for w in ("sales", "software", "marketing", "product", "engineering", "developer", "recruiter", "recruiting", "legal", "attorney", "designer", "devops")}
+OFF_FUNCTION_FACTOR = 0.85
+# strict: a search made only of these ("manager") cannot tell good from poor, so nothing can rank as a Top match
+GENERIC_ROLE = {stem(w) for w in ("manager", "analyst", "specialist", "coordinator", "director", "engineer", "associate", "assistant", "consultant", "administrator", "supervisor", "lead", "representative", "technician", "officer", "senior", "junior")}
+GENERIC_QUERY_CAP = 0.89
+REMOTE_ELSEWHERE_STRICT = 0.55  # strict: a remote job from anywhere sits further behind jobs in the city searched
 DESC_OTHER_WORK = 0.9  # strict: a good title whose description is about something else is marked down a little
 
 
@@ -346,6 +356,10 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
             tf *= DESC_DEMOTE
     elif strict() and tf >= BORDERLINE_TITLE and plan.desc_phrases and description_signal(plan, row.get("description")) < 0:
         tf *= DESC_OTHER_WORK  # the title matches but a real description is about something else
+    if strict() and tf >= MIN_TITLE_FIT:
+        asked = {st for q in plan.queries for st in q.stems}
+        if (OFF_FUNCTION & set(all_stems(row["title"]))) - asked:
+            tf *= OFF_FUNCTION_FACTOR
     if tf < MIN_TITLE_FIT:
         if desc_hit(plan, row.get("description"), set(all_stems(row["title"]))):
             tf, via_desc = DESC_TITLE_FLOOR, True  # "Business Analyst" whose description is about revenue cycle work
@@ -366,6 +380,8 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
     lf = location_fit(loc, row.get("location"), wt)
     if lf <= 0.0:
         return None
+    if strict() and lf == REMOTE_ELSEWHERE and plan.loc.cities:
+        lf = REMOTE_ELSEWHERE_STRICT
     if is_vague_place(row.get("location")) and title_names_foreign(row["title"]):
         return None  # no place listed, but the title puts the job in another country: the launch market is the US
     if is_vague_place(row.get("location")) and title_names_other_state(plan, row["title"]):
@@ -395,6 +411,8 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
         fit += W_DESC
     if strict() and via_desc:
         fit = min(fit, DESC_ONLY_CAP)
+    if strict() and plan.queries and all(q.weight < 1.0 or set(q.stems) <= GENERIC_ROLE for q in plan.queries):
+        fit = min(fit, GENERIC_QUERY_CAP)
     return Scored(row=row, fit=round(min(fit, 1.0), 4), title_fit=tf, place_fit=lf, via_description=via_desc, needs_description=needs_text)
 
 

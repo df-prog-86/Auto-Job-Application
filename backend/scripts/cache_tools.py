@@ -195,14 +195,14 @@ async def _patient(make):
     the same batch again instead of stopping a run that may have hours of work left."""
     import sqlite3
 
-    for attempt in range(1, 31):
+    for attempt in range(1, 121):
         try:
             return await make()
         except sqlite3.OperationalError as e:
-            if "locked" not in str(e).lower() or attempt == 30:
+            if "locked" not in str(e).lower() or attempt == 120:
                 raise
-            print(f"  database busy, waiting 60 seconds and trying this batch again (try {attempt})", flush=True)
-            await asyncio.sleep(60)
+            print(f"  database busy, waiting 10 seconds and trying this batch again (try {attempt})", flush=True)
+            await asyncio.sleep(10)
 
 
 async def _fill(args: argparse.Namespace) -> int:

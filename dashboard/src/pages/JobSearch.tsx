@@ -9,6 +9,7 @@ import { MenuItem, MoreMenu } from "@/components/MoreMenu";
 import { SuggestInput } from "@/components/Suggest";
 import { EmployersPanel } from "@/components/JobSources";
 import { scoreColor, scoreLabel } from "@/components/match";
+import { OtterTile } from "@/components/OtterTile";
 import { Ring } from "@/components/ui";
 import { autofillSite } from "@/lib/autofill";
 import { formatPayText, formatPosted, formatPostedBoth, inSentence, mayBeClosed } from "@/lib/jobText";
@@ -109,6 +110,10 @@ export function JobSearch() {
   const [savedList, setSavedList] = useState<SavedSearch[]>(loadSavedSearches);
   const [coverage, setCoverage] = useState<CoverageOut | null>(null);
   const lastCriteria = useRef<JobSearchCriteria | null>(null);
+  // What the last search used (the saved boxes at page load), which step of a running search we are on, and whether one finished here.
+  const [searched, setSearched] = useState<SavedCriteria | null>(() => (saved.titles ? (saved as SavedCriteria) : null));
+  const [step, setStep] = useState(0);
+  const [justSearched, setJustSearched] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const results = useQuery({ queryKey: ["job-search-results"], queryFn: api.listSearchResults });
@@ -193,16 +198,21 @@ export function JobSearch() {
       }
       const apiCriteria = toApiCriteria(c);
       lastCriteria.current = apiCriteria;
+      setStep(0);
+      setSearched(c);
       // Nothing is shown until every check is done: the saved lists, then the web search, then the first page checked against the
       // employers' own systems. What appears is the final list, so the number and the jobs never change under the person.
       const run = await api.runJobSearch({ ...apiCriteria, web: "saved" });
+      setStep(1);
       await api.webJobSearch(apiCriteria).catch(() => undefined);
+      setStep(2);
       const first = await api.pageJobSearch({ ...apiCriteria, count: PAGE_SIZE, page: 1, sort: "search" });
       return { run, first, crit: apiCriteria };
     },
     onSuccess: ({ run, first, crit }) => {
       if (lastCriteria.current !== crit) return;
       setCoverage(run.coverage ?? null);
+      setJustSearched(true);
       setPage(1);
       qc.setQueryData<JobSearchResultOut[]>(["job-search-results"], (old) => {
         const have = new Set((old ?? []).map((x) => x.id));
@@ -392,17 +402,14 @@ export function JobSearch() {
   // Filters in use, shown as pills under the search bar. The place lives in the search bar itself.
   const pills = filterChips.filter((c) => c.key !== "loc");
 
-  /** The one line above the results: what was searched and how many matches there are. */
-  let status = "";
-  if (search.isPending) {
-    status = "Searching saved employers and the web, then checking each job. This can take up to a minute.";
-  } else if (coverage && coverage.employers > 0) {
-    const n = totalMatches;
-    const matches = coverage.matches_capped && matchTotal === null ? `${n.toLocaleString("en-US")}+` : n.toLocaleString("en-US");
-    status = `${matches} ${n === 1 ? "match" : "matches"} from ${coverage.postings.toLocaleString("en-US")} jobs at ${coverage.employers.toLocaleString("en-US")} employers.`;
-  } else if (items.length > 0) {
-    status = `${totalMatches.toLocaleString("en-US")} ${totalMatches === 1 ? "match" : "matches"} to review.`;
-  }
+  /** What was searched, for the lines above the results. */
+  const searchedFor = (() => {
+    const c = searched ?? current;
+    const t = splitList(c.titles).join(", ");
+    return c.location?.trim() ? `${t} in ${c.location.trim()}` : t;
+  })();
+  const stale = !!searched && !search.isPending && items.length > 0 && !sameCriteria(searched, current);
+  const matchWord = totalMatches === 1 ? "match" : "matches";
 
   const openFilters = () => setFiltersOpen(true);
 
@@ -478,6 +485,18 @@ export function JobSearch() {
             </svg>
           </button>
         ))}
+        {workType === "any" && (
+          <button
+            type="button"
+            onClick={openFilters}
+            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[#ddd8f3] bg-white shadow-pill px-3.5 text-[13px] font-semibold text-ink-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200"
+          >
+            Work type
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+        )}
         <div className="relative">
           <button
             type="button"
@@ -574,7 +593,7 @@ export function JobSearch() {
         </p>
       )}
 
-      {notice && (
+      {notice && (items.length > 0 || notice.kind === "added") && (
         <div
           role="status"
           className={`flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl px-4 py-2.5 text-sm font-semibold ${
@@ -593,14 +612,70 @@ export function JobSearch() {
         </div>
       )}
 
+      {stale && (
+        <div role="status" className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-[#fde68a] bg-[#fffbeb] px-4 py-3 text-[13.5px] font-semibold text-[#92400e]">
+          <span>These results are from your last search ({searchedFor}).</span>
+          <button
+            type="button"
+            onClick={() => canSearch && search.mutate()}
+            disabled={!canSearch}
+            className="ml-auto h-9 rounded-full bg-brand-500 px-4 text-[13px] font-bold text-white hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50"
+          >
+            Search again
+          </button>
+        </div>
+      )}
+
       {results.isLoading ? (
         <p className="text-sm text-ink-500">Loading...</p>
-      ) : items.length === 0 || search.isPending ? (
+      ) : search.isPending ? (
+        <div aria-busy="true" className="space-y-3">
+          <div className="flex flex-wrap items-center gap-5 rounded-[20px] bg-white px-6 py-5 shadow-soft">
+            <OtterTile size={72} />
+            <div className="min-w-[240px] flex-1">
+              <h2 role="status" className="mb-2.5 text-base font-bold text-ink-900">
+                Searching for {searchedFor}
+              </h2>
+              <ul className="mb-3.5 grid gap-1.5 text-[13.5px] font-semibold">
+                {["Searching saved employers", "Searching the web", "Checking each job is still open"].map((label, i) => (
+                  <li key={label} className={`flex items-center gap-2.5 ${i <= step ? "text-ink-900" : "text-ink-500"}`}>
+                    {i < step ? (
+                      <span className="grid h-[18px] w-[18px] place-items-center rounded-full bg-[#12b76a] text-[11px] font-extrabold text-white" aria-hidden="true">
+                        &#10003;
+                      </span>
+                    ) : i === step ? (
+                      <span className="h-[18px] w-[18px] animate-spin rounded-full border-2 border-brand-500 border-t-transparent" aria-hidden="true" />
+                    ) : (
+                      <span className="h-[18px] w-[18px] rounded-full border-2 border-[#d3d0ff]" aria-hidden="true" />
+                    )}
+                    {label}
+                  </li>
+                ))}
+              </ul>
+              <div className="h-2 overflow-hidden rounded-full bg-[#e5e0fa]" aria-hidden="true">
+                <div className="h-full rounded-full bg-gradient-to-r from-[#8b87ff] to-[#5b57f5] transition-all duration-700" style={{ width: `${8 + step * 38}%` }} />
+              </div>
+              <p className="mt-2 text-xs text-ink-500">This can take up to a minute.</p>
+            </div>
+          </div>
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-[62px] animate-pulse rounded-2xl bg-white/70" aria-hidden="true" />
+          ))}
+        </div>
+      ) : items.length === 0 ? (
         <div className="rounded-[20px] border border-[#e9e6f4] bg-white p-10 text-center shadow-soft">
-          {search.isPending ? (
-            <p className="animate-pulse text-sm font-semibold text-brand-700" role="status">
-              {status}
-            </p>
+          {searched && justSearched ? (
+            <>
+              <h2 className="text-base font-bold text-ink-900">No jobs matched this search</h2>
+              <p className="mt-1 text-sm text-ink-500">Try fewer filters, a wider area, or another title.</p>
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="mt-4 h-10 rounded-full border border-[#ddd8f3] bg-white px-5 text-sm font-bold text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200"
+              >
+                Clear filters
+              </button>
+            </>
           ) : (
             <>
               <h2 className="text-base font-bold text-ink-900">No matches yet</h2>
@@ -611,30 +686,26 @@ export function JobSearch() {
       ) : (
         <div className="grid items-start gap-x-5 gap-y-3 lg:grid-cols-[minmax(0,480px)_minmax(0,1fr)]">
           <div className="flex items-center gap-3 lg:col-span-2">
-            <p role="status" className="flex min-w-0 items-center gap-2 px-1 text-[13px] font-semibold text-brand-700">
-              {search.isPending ? (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="h-[15px] w-[15px] shrink-0 animate-spin" aria-hidden="true">
-                  <path d="M12 3a9 9 0 019 9" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px] shrink-0" aria-hidden="true">
-                  <path d="M5 12.5l4.5 4.5L19 7.5" />
-                </svg>
-              )}
-              <span>{status}</span>
+            <p role="status" className="min-w-0 px-1 text-sm text-ink-700">
+              <b className="font-extrabold text-ink-900">
+                {totalMatches.toLocaleString("en-US")}
+                {coverage?.matches_capped && matchTotal === null ? "+" : ""} {matchWord}
+              </b>
+              {searchedFor ? ` for ${searchedFor}` : ""}
+              {justSearched && !stale ? <span className="text-ink-500"> &middot; searched just now</span> : null}
             </p>
-            <label className="flex shrink-0 items-center gap-1 text-[13px] font-semibold text-ink-700">
-                Sort:
-                <select
-                  value={sortBy}
-                  onChange={(e) => changeSort(e.target.value === "newest" ? "newest" : "search")}
-                  className="cursor-pointer rounded-lg bg-transparent py-1 pl-1 pr-1 text-[13px] font-semibold text-ink-900 focus:outline-none focus:ring-2 focus:ring-brand-200"
-                >
-                  <option value="search">Best match</option>
-                  <option value="newest">Newest</option>
-                </select>
-              </label>
             <span className="flex-1" />
+            <label className="flex shrink-0 items-center gap-1 text-[13px] font-semibold text-ink-700">
+              Sort
+              <select
+                value={sortBy}
+                onChange={(e) => changeSort(e.target.value === "newest" ? "newest" : "search")}
+                className="cursor-pointer rounded-lg bg-transparent py-1 pl-1 pr-1 text-[13px] font-bold text-ink-900 focus:outline-none focus:ring-2 focus:ring-brand-200"
+              >
+                <option value="search">Best match</option>
+                <option value="newest">Newest</option>
+              </select>
+            </label>
             <div className="flex shrink-0 items-center gap-1">
               <MoreMenu>
                 {anyAutofill && (
@@ -733,23 +804,27 @@ function workTypeText(r: { work_type?: string | null; location?: string | null }
   return r.location && r.location.toLowerCase().includes(name.toLowerCase()) ? null : name;
 }
 
-/** How well the posting fits the search, in words and a color. Never shown as a number. */
-function fitWord(score: number | null | undefined): { word: string; color: string } {
-  if (score == null) return { word: "Possible match", color: "#6b6a88" };
-  if (score >= 0.75) return { word: "Strong match", color: "#17603f" };
-  if (score >= 0.55) return { word: "Good match", color: "#8a5a12" };
-  return { word: "Possible match", color: "#6b6a88" };
+/** How well the posting fits the search: a level and the number behind it. */
+function fitLevel(score: number | null | undefined): { word: string; num: number | null; cls: string } {
+  if (score == null) return { word: "Possible match", num: null, cls: "bg-[#f0eff7] text-ink-700" };
+  const num = Math.round(score * 100);
+  if (num >= 90) return { word: "Top match", num, cls: "bg-[#e8f6ee] text-[#17603f]" };
+  if (num >= 75) return { word: "Strong match", num, cls: "bg-[#e8e6ff] text-[#3b36b8]" };
+  if (num >= 55) return { word: "Good match", num, cls: "bg-[#fff4d6] text-[#8a5a00]" };
+  return { word: "Possible match", num, cls: "bg-[#f0eff7] text-ink-700" };
 }
 
-function BoltIcon({ className = "h-3 w-3" }: { className?: string }) {
+function FitPill({ score }: { score: number | null | undefined }) {
+  const f = fitLevel(score);
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M13 2L4 14h6l-1 8 9-12h-6z" />
-    </svg>
+    <span className={`inline-flex h-6 items-center whitespace-nowrap rounded-full px-2.5 text-xs font-bold ${f.cls}`}>
+      {f.word}
+      {f.num !== null && <> &middot; {f.num}</>}
+    </span>
   );
 }
 
-/** Page numbers under the list: 1 2 3 ... last, with arrows. */
+/** Page numbers under the list: 1 2 3 ... last, then Next. */
 function pageNumbers(page: number, total: number): (number | "gap")[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
   if (page <= 3) return [1, 2, 3, "gap", total];
@@ -759,92 +834,101 @@ function pageNumbers(page: number, total: number): (number | "gap")[] {
 
 function Pager({ page, total, busy, onPick }: { page: number; total: number; busy: boolean; onPick: (n: number) => void }) {
   const btn =
-    "grid h-10 min-w-[40px] place-items-center rounded-xl border border-[#ddd8f3] bg-white px-2 text-sm font-semibold text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50";
+    "grid h-[38px] min-w-[38px] place-items-center rounded-xl border border-[#e9e6f4] bg-white px-2 text-[13px] font-bold text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50";
+  const link = "h-[38px] px-2 text-[13px] font-bold text-brand-600 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50";
   return (
-    <nav aria-label="Pages of results" className="sticky bottom-0 flex flex-col items-center gap-2 border-t border-[#ebe8f6] bg-white p-3">
-      <div className="flex flex-wrap items-center justify-center gap-1.5">
-        {page > 1 && (
-          <button type="button" className={btn} disabled={busy} onClick={() => onPick(page - 1)} aria-label="Previous page">
-            &lsaquo;
+    <nav aria-label="Pages of results" className="sticky bottom-0 flex flex-wrap items-center justify-center gap-1.5 border-t border-[#ebe8f6] bg-white p-3.5">
+      {page > 1 && (
+        <button type="button" className={link} disabled={busy} onClick={() => onPick(page - 1)}>
+          Back
+        </button>
+      )}
+      {pageNumbers(page, total).map((n, i) =>
+        n === "gap" ? (
+          <span key={`g${i}`} className="px-1 text-ink-500" aria-hidden="true">
+            ...
+          </span>
+        ) : (
+          <button
+            key={n}
+            type="button"
+            disabled={busy}
+            onClick={() => onPick(n)}
+            aria-current={n === page ? "page" : undefined}
+            aria-label={`Page ${n} of ${total}`}
+            className={n === page ? "grid h-[38px] min-w-[38px] place-items-center rounded-xl bg-brand-500 px-2 text-[13px] font-bold text-white" : btn}
+          >
+            {n}
           </button>
-        )}
-        {pageNumbers(page, total).map((n, i) =>
-          n === "gap" ? (
-            <span key={`g${i}`} className="px-1 text-ink-500" aria-hidden="true">
-              ...
-            </span>
-          ) : (
-            <button
-              key={n}
-              type="button"
-              disabled={busy}
-              onClick={() => onPick(n)}
-              aria-current={n === page ? "page" : undefined}
-              className={n === page ? "grid h-10 min-w-[40px] place-items-center rounded-xl bg-brand-500 px-2 text-sm font-semibold text-white" : btn}
-            >
-              {n}
-            </button>
-          ),
-        )}
-        {page < total && (
-          <button type="button" className={btn} disabled={busy} onClick={() => onPick(page + 1)} aria-label="Next page">
-            &rsaquo;
-          </button>
-        )}
-      </div>
-      <p className="text-xs text-ink-500" role="status">
-        {busy ? "Looking..." : `Page ${page} of ${total}`}
-      </p>
+        ),
+      )}
+      {page < total && (
+        <button type="button" className={link} disabled={busy} onClick={() => onPick(page + 1)}>
+          {busy ? "Looking..." : "Next"}
+        </button>
+      )}
     </nav>
   );
 }
 
 function ResultRow({ r, selected, onPick }: { r: JobSearchResultOut; selected: boolean; onPick: () => void }) {
-  const fit = fitWord(r.fit_score);
-  const meta = [r.location, workTypeText(r), payText(r.salary_text)].filter(Boolean).join(" | ");
+  const meta = [r.location, workTypeText(r), payText(r.salary_text)].filter(Boolean).join(" \u00b7 ");
   return (
     <li>
       <button
         type="button"
         onClick={onPick}
         aria-pressed={selected}
-        className={`block w-full border-b border-[#ebe8f6] px-5 py-4 text-left transition last:border-b-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400 ${
+        aria-label={`${r.title} at ${r.company}`}
+        className={`flex w-full items-start gap-3.5 border-b border-[#ebe8f6] px-5 py-4 text-left transition last:border-b-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400 ${
           selected ? "bg-brand-50 shadow-[inset_3px_0_0_#5b57f5]" : "hover:bg-[#faf9ff]"
         }`}
       >
-        <span className="block text-[15px] font-semibold text-ink-900">{r.title}</span>
-        <span className="mt-0.5 block text-[14px] text-ink-700">{r.company}</span>
-        {meta && <span className="mt-1 block text-[13px] text-ink-500">{meta}</span>}
-        <span className="mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[13px] font-semibold">
-          <span className="inline-flex items-center gap-1.5" style={{ color: fit.color }}>
-            <span className="h-[7px] w-[7px] rounded-full" style={{ backgroundColor: fit.color }} aria-hidden="true" />
-            {fit.word}
-          </span>
-          {autofillSite(r.url) && (
-            <span className="inline-flex items-center gap-1 text-[#17603f]">
-              <BoltIcon className="h-3 w-3" />
-              Autofill ready
-            </span>
-          )}
-          <span className="ml-auto whitespace-nowrap font-medium text-ink-500">
-            {mayBeClosed(r.posted_at) && <span className="mr-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">May be closed</span>}
-            {agoText(r.posted_at)}
+        <span className="block min-w-0 flex-1">
+          <span className="block text-[15px] font-bold text-ink-900">{r.title}</span>
+          <span className="mt-0.5 block text-[14px] text-ink-700">{r.company}</span>
+          {meta && <span className="mt-1 block text-[13px] text-ink-500">{meta}</span>}
+          <span className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            <FitPill score={r.fit_score} />
+            {autofillSite(r.url) && (
+              <span className="inline-flex h-6 items-center whitespace-nowrap rounded-full bg-[#e8f6ee] px-2.5 text-xs font-bold text-[#17603f]">Autofill ready</span>
+            )}
+            {mayBeClosed(r.posted_at) && (
+              <span className="inline-flex h-6 items-center whitespace-nowrap rounded-full bg-amber-50 px-2.5 text-xs font-bold text-amber-700">May be closed</span>
+            )}
           </span>
         </span>
+        <span className="shrink-0 whitespace-nowrap text-[13px] font-medium text-ink-500">{agoText(r.posted_at)}</span>
       </button>
     </li>
   );
 }
 
-function Fact({ icon, children }: { icon: string; children: ReactNode }) {
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "Not listed";
+  }
+}
+
+function FactCell({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-[7px]">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#6b6a88" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]" aria-hidden="true">
-        <path d={icon} />
-      </svg>
-      {children}
-    </span>
+    <div className="min-w-0">
+      <div className="text-xs font-bold text-ink-500">{label}</div>
+      <div className="mt-0.5 text-sm font-bold text-ink-900">{children}</div>
+    </div>
   );
+}
+
+/** The reasons a job fits, one per line. The note arrives as one sentence with parts split by a middle dot. */
+function fitReasons(note?: string | null): string[] {
+  if (!note) return [];
+  return note
+    .replace(/\s*\u00b7\s*Posted [^\u00b7]*$/, "")
+    .split(/\s*\u00b7\s*/)
+    .map((x) => x.trim())
+    .filter(Boolean);
 }
 
 function JobDetail({
@@ -869,69 +953,64 @@ function JobDetail({
   onHideCompany: () => void;
   onHideTitle: () => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const posted = formatPostedBoth(r.posted_at);
-  const autofill = autofillSite(r.url) !== null;
+  const site = autofillSite(r.url);
   // A score that came only from the one-line summary is not shown; it would look surer than it is.
   const score = r.match_from_page === false ? null : (r.match_score ?? null);
   const gaps = (r.match_gaps ?? []).slice(0, 3);
+  const reasons = fitReasons(r.fit_note);
+  const about = r.summary || "";
+  const LONG = 220;
+  const clipped = !expanded && about.length > LONG;
+  const where = [r.location || "Not listed", workTypeText(r)].filter(Boolean).join(" \u00b7 ");
   return (
-    <div className={`${CARD} flex min-w-0 flex-col gap-6 px-6 pb-8 pt-7 sm:px-8 lg:sticky lg:top-4`}>
-      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
-        <div className="flex min-w-[240px] flex-1 flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2">
-            <h2 className="text-2xl font-bold leading-tight tracking-tight text-ink-900">{r.title}</h2>
-            {autofill && (
-              <span className="inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-full bg-[#e8f6ee] px-3 text-[13px] font-semibold text-[#17603f]">
-                <BoltIcon className="h-[13px] w-[13px]" />
-                Autofill ready
-              </span>
-            )}
-          </div>
-          {r.company && <div className="text-base font-semibold text-ink-700">{r.company}</div>}
-        </div>
-        <div className="flex flex-wrap items-center gap-2.5">
-          <a
-            href={r.url}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="inline-flex h-11 items-center rounded-xl border border-[#ddd8f3] px-5 text-[15px] font-semibold text-ink-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200"
-          >
-            View posting
-          </a>
-          <MoreMenu wide>
-            {score !== null && (
-              <MenuItem onClick={onScore} disabled={busy}>
-                Check against my resume again
-              </MenuItem>
-            )}
-            <MenuItem onClick={onRemove} disabled={busy}>
-              Not interested: hide this job
-            </MenuItem>
-            {r.company && (
-              <MenuItem onClick={onHideCompany} disabled={busy}>
-                Hide all from {r.company}
-              </MenuItem>
-            )}
-            <MenuItem onClick={onHideTitle} disabled={busy}>
-              Hide jobs titled "{r.title}"
-            </MenuItem>
-          </MoreMenu>
-          <button
-            type="button"
-            onClick={onAdd}
-            disabled={busy}
-            className="h-11 rounded-xl bg-brand-500 px-[26px] text-[15px] font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50"
-          >
-            {busy && !scoring ? "Working..." : "Add to jobs"}
-          </button>
-        </div>
+    <div className={`${CARD} flex min-w-0 flex-col gap-5 p-6 sm:p-7 lg:sticky lg:top-4`}>
+      <div>
+        <h2 className="text-[21px] font-bold leading-tight tracking-tight text-ink-900">{r.title}</h2>
+        {r.company && <div className="mt-0.5 text-sm font-bold text-ink-500">{r.company}</div>}
       </div>
-
-      <div className="flex flex-wrap items-center gap-x-[26px] gap-y-1.5 border-y border-[#ebe8f6] py-2.5 text-sm font-semibold text-ink-900">
-        <Fact icon="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z M12 7a2.5 2.5 0 100 5 2.5 2.5 0 000-5">{r.location || "Location not listed"}</Fact>
-        {workTypeText(r) && <Fact icon="M4 9h16v10H4z M9 9V6h6v3">{workTypeText(r)}</Fact>}
-        <Fact icon="M12 4a8 8 0 100 16 8 8 0 000-16z M12 8v8 M14.5 9.5h-3.2a1.5 1.5 0 000 3h1.4a1.5 1.5 0 010 3H9.5">{payText(r.salary_text) ?? "Pay not listed"}</Fact>
-        <Fact icon="M12 4a8 8 0 100 16 8 8 0 000-16z M12 8v4l3 2">{posted ? `Posted ${inSentence(posted)}` : "Posted date not listed"}</Fact>
+      <div className="flex flex-wrap gap-2">
+        <FitPill score={r.fit_score} />
+        {site && (
+          <span className="inline-flex h-6 items-center whitespace-nowrap rounded-full bg-[#e8f6ee] px-2.5 text-xs font-bold text-[#17603f]">Autofill ready on {site}</span>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={busy}
+          className="h-11 rounded-full bg-brand-500 px-6 text-[15px] font-bold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50"
+        >
+          {busy && !scoring ? "Working..." : "Add to jobs"}
+        </button>
+        <a
+          href={r.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex h-11 items-center rounded-full border border-[#ddd8f3] px-5 text-[15px] font-bold text-ink-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200"
+        >
+          View posting
+        </a>
+        <MoreMenu wide>
+          {score !== null && (
+            <MenuItem onClick={onScore} disabled={busy}>
+              Check against my resume again
+            </MenuItem>
+          )}
+          <MenuItem onClick={onRemove} disabled={busy}>
+            Remove from results
+          </MenuItem>
+          {r.company && (
+            <MenuItem onClick={onHideCompany} disabled={busy}>
+              Hide this company
+            </MenuItem>
+          )}
+          <MenuItem onClick={onHideTitle} disabled={busy}>
+            Hide this title
+          </MenuItem>
+        </MoreMenu>
       </div>
 
       {!r.grounded && (
@@ -939,57 +1018,81 @@ function JobDetail({
           Found on the web. We couldn&apos;t confirm it&apos;s still open, so check before you apply.
         </div>
       )}
+      {mayBeClosed(r.posted_at) && (
+        <div className="rounded-xl bg-[#fff4dc] px-4 py-3 text-sm text-[#8a5a00]">Posted over 60 days ago. It may have been filled, so check before you apply.</div>
+      )}
 
-      <div className="flex flex-wrap items-start gap-7">
-        <div className="flex min-w-0 flex-[1_1_340px] flex-col gap-5">
-          {r.fit_note && (
-            <section className="flex flex-col gap-1.5">
-              <h3 className="text-[15px] font-bold text-ink-900">Why it fits your search</h3>
-              <p className="text-sm leading-relaxed text-ink-700">{r.fit_note.replace(/\s*\u00b7\s*Posted [^\u00b7]*$/, "")}</p>
-            </section>
-          )}
-          <section className="flex flex-col gap-1.5">
-            <h3 className="text-[15px] font-bold text-ink-900">About the role</h3>
-            <p className="text-sm leading-relaxed text-ink-700">
-              {r.summary || "No description saved for this one. Open the posting to read it."}
-            </p>
-          </section>
-        </div>
+      <div className="grid grid-cols-1 gap-x-5 gap-y-3.5 border-y border-[#ebe8f6] py-3.5 sm:grid-cols-2">
+        <FactCell label="Location">{where}</FactCell>
+        <FactCell label="Pay">{payText(r.salary_text) ?? "Not listed"}</FactCell>
+        <FactCell label="Posted">{posted ? inSentence(posted) : "Not listed"}</FactCell>
+        <FactCell label="Applies through">{site ?? hostOf(r.url)}</FactCell>
+      </div>
 
-        <div className="flex min-w-[260px] flex-[0_1_320px] flex-col gap-3.5 rounded-2xl border border-[#e9e6f4] bg-[#f9f8fd] p-[18px]">
-          <h3 className="text-[15px] font-bold text-ink-900">Resume match</h3>
-          {score !== null ? (
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center gap-3.5">
-                <Ring value={score} size={64} stroke={7} color={scoreColor(score)}>
-                  <span className="text-lg font-bold text-ink-900">{Math.round(score * 100)}</span>
-                </Ring>
-                <div className="text-base font-semibold text-ink-900">{scoreLabel(score)}</div>
+      {reasons.length > 0 && (
+        <section>
+          <h3 className="mb-2 text-sm font-bold text-ink-900">Why it fits your search</h3>
+          <ul className="grid gap-1.5">
+            {reasons.map((x) => (
+              <li key={x} className="flex gap-2 text-[13.5px] leading-snug text-ink-900">
+                <span className="font-extrabold text-[#047857]" aria-hidden="true">
+                  &#10003;
+                </span>
+                {x}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section>
+        <h3 className="mb-2 text-sm font-bold text-ink-900">About the role</h3>
+        <p className="text-[13.5px] leading-relaxed text-ink-700">
+          {about ? (clipped ? `${about.slice(0, LONG).trimEnd()}...` : about) : "No description saved for this one. Open the posting to read it."}
+        </p>
+        {about.length > LONG && (
+          <button type="button" onClick={() => setExpanded((v) => !v)} className="mt-1 text-[13px] font-bold text-brand-600 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-200">
+            {expanded ? "Show less" : "Read more"}
+          </button>
+        )}
+      </section>
+
+      <div className="flex flex-col gap-3 rounded-2xl border border-[#e9e6f4] bg-[#faf9ff] p-4">
+        {score !== null ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-3.5">
+              <Ring value={score} size={56} stroke={6} color={scoreColor(score)}>
+                <span className="text-base font-bold text-ink-900">{Math.round(score * 100)}</span>
+              </Ring>
+              <div>
+                <div className="text-sm font-bold text-ink-900">{scoreLabel(score)}</div>
+                <div className="text-xs text-ink-500">How well your resume fits this job</div>
               </div>
-              {r.match_summary && <p className="text-sm leading-relaxed text-ink-700">{r.match_summary}</p>}
-              {gaps.length > 0 && <p className="text-sm leading-relaxed text-ink-500">Not on your resume: {gaps.join(", ")}</p>}
             </div>
-          ) : (
-            <div className="flex flex-col items-start gap-2.5">
-              <p className="text-sm text-ink-500">
-                {scoring ? "Comparing this job with your resume. Up to a minute." : "Compares the full posting with your resume. Takes up to a minute."}
-              </p>
-              <button
-                type="button"
-                onClick={onScore}
-                disabled={busy}
-                className={`h-10 rounded-[10px] border border-brand-500 bg-white px-[18px] text-sm font-semibold text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50 ${scoring ? "ai-working" : ""}`}
-              >
-                {scoring ? "Checking..." : "Check against my resume"}
-              </button>
+            {r.match_summary && <p className="text-[13.5px] leading-relaxed text-ink-700">{r.match_summary}</p>}
+            {gaps.length > 0 && <p className="text-[13.5px] leading-relaxed text-ink-500">Not on your resume: {gaps.join(", ")}</p>}
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="min-w-[160px] flex-1">
+              <div className="text-sm font-bold text-ink-900">How well does your resume fit?</div>
+              <div className="mt-0.5 text-xs text-ink-500">{scoring ? "Comparing this job with your resume. Up to a minute." : "Takes up to a minute."}</div>
             </div>
-          )}
-          {problem && !scoring && (
-            <p className="rounded-xl bg-[#fff4dc] px-3 py-2 text-[13px] text-[#8a5a00]" role="alert">
-              {problem}
-            </p>
-          )}
-        </div>
+            <button
+              type="button"
+              onClick={onScore}
+              disabled={busy}
+              className={`h-10 rounded-full border border-[#ddd8f3] bg-white px-[18px] text-sm font-bold text-brand-700 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50 ${scoring ? "ai-working" : ""}`}
+            >
+              {scoring ? "Checking..." : "Check my resume"}
+            </button>
+          </div>
+        )}
+        {problem && !scoring && (
+          <p className="rounded-xl bg-[#fff4dc] px-3 py-2 text-[13px] text-[#8a5a00]" role="alert">
+            {problem}
+          </p>
+        )}
       </div>
     </div>
   );

@@ -278,16 +278,20 @@ export function EmployersPanel() {
         aria-expanded={open}
         className="flex w-full flex-wrap items-center justify-between gap-3 px-5 py-3.5 text-left"
       >
-        <span>
-          <span className="block text-sm font-extrabold text-ink-900">Employers we search</span>
-          <span className="block text-xs text-ink-500">
-            {totals
-              ? `${num(totals.total_employers)} ${plural(totals.total_employers, "employer", "employers")}, ${num(totals.total_postings)} open ${plural(totals.total_postings, "posting", "postings")}`
-              : "Loading..."}
-            {totals?.refreshing ? ` (updating ${totals.refresh_done} of ${totals.refresh_total})` : ""}
-          </span>
+        <span className="text-[13px] text-ink-500">
+          {totals ? (
+            <>
+              <b className="font-extrabold text-ink-900">
+                {num(totals.total_employers)} {plural(totals.total_employers, "employer", "employers")}
+              </b>{" "}
+              &middot; {num(totals.total_postings)} open {plural(totals.total_postings, "job", "jobs")}
+            </>
+          ) : (
+            "Loading..."
+          )}
+          {totals?.refreshing ? ` (updating ${totals.refresh_done} of ${totals.refresh_total})` : ""}
         </span>
-        <span className="text-[13px] font-bold text-brand-600">{open ? "Hide" : "Show"}</span>
+        <span className="text-[13px] font-bold text-brand-600">{open ? "Hide employers" : "See employers"}</span>
       </button>
 
       {open && (

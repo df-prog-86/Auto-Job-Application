@@ -15,13 +15,14 @@ import {
   followUps,
   hasResume,
   isOverdue,
+  oldestWaiting,
   perDayNeeded,
-  stalledStage,
   weeklyCounts,
+  FOLLOW_UP_AFTER_DAYS,
   FOLLOW_UP_METER_DAYS,
 } from "@/lib/homeData";
 import type { FollowUp, StageKey } from "@/lib/homeData";
-import { formatPosted, formatSalary } from "@/lib/jobText";
+import { formatPosted, formatSalary, inSentence, postedDaysAgo } from "@/lib/jobText";
 import { loadSavedCriteria, toApiCriteria } from "@/lib/searchCriteria";
 import type { JobOut, JobSearchResultOut } from "@/types/api";
 
@@ -39,13 +40,27 @@ interface Step {
   cta: string;
 }
 
-const STAGES: { key: StageKey; label: string }[] = [
-  { key: "scored", label: "Scored" },
-  { key: "going", label: "Going after" },
-  { key: "ready", label: "Ready to apply" },
-  { key: "progress", label: "In progress" },
-  { key: "applied", label: "Completed" },
+const STAGES: { key: StageKey; label: string; hint: string }[] = [
+  { key: "saved", label: "Saved", hint: "Not started yet" },
+  { key: "ready", label: "Ready to apply", hint: "Resume made, ready to go" },
+  { key: "applying", label: "Applying", hint: "Started, not submitted yet" },
+  { key: "applied", label: "Applied", hint: "Sent. Watch for replies" },
 ];
+
+/** The otter's tip for each day, Monday first. */
+const DAY_TIPS = [
+  "New week. Let's get the first one in today.",
+  "Tuesday is a good day to apply. Recruiters are at their desks.",
+  "Midweek. One solid application keeps you on pace.",
+  "Almost Friday. Send one more and you're ahead.",
+  "Friday push. Send one before the weekend.",
+  "Weekend. A quick one still counts.",
+  "Sunday. Line up next week's first three.",
+];
+
+/** Matches count as "this week" when posted in the last 7 days. */
+const MATCH_WINDOW_DAYS = 7;
+const MATCHES_SHOWN = 4;
 
 const ageText = (days: number) => (days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`);
 
@@ -76,7 +91,7 @@ export function Home() {
   const missing = missingItems(profileQuery.data, answersQuery.data);
   const essentialsMissing = missingItems(profileQuery.data, answersQuery.data, false);
   const stages = useMemo(() => byStage(jobs), [jobs]);
-  const stalled = stalledStage(stages, now);
+  const waiting = oldestWaiting(stages.ready, now);
   const due = useMemo(() => followUps(jobs, now), [jobs, now]);
   const { thisWeek, lastWeek } = weeklyCounts(jobs, now);
   const days = useMemo(() => dayCounts(jobs, now), [jobs, now]);
@@ -123,7 +138,7 @@ export function Home() {
     },
     {
       key: "tailor",
-      title: "Proceed and tailor your resume",
+      title: "Get a resume ready for a job",
       hint: "Pick a job and get a resume tailored to it.",
       done: resumes > 0,
       to: "/jobs",
@@ -139,6 +154,10 @@ export function Home() {
     () =>
       (resultsQuery.data ?? [])
         .filter((r) => r.status === "new")
+        .filter((r) => {
+          const d = postedDaysAgo(r.posted_at);
+          return d !== null && d <= MATCH_WINDOW_DAYS;
+        })
         .sort((a, b) => (b.match_score ?? -1) - (a.match_score ?? -1) || b.id - a.id),
     [resultsQuery.data],
   );
@@ -172,11 +191,14 @@ export function Home() {
             ) : extensionQuery.data?.ok ? (
               "Extension connected"
             ) : (
-              <Link to="/pairing" className="hover:underline">
-                Extension not detected
-              </Link>
+              <>
+                Extension not connected
+                <Link to="/pairing" className="rounded-full px-3 py-1 text-xs font-bold text-brand-700 transition hover:bg-brand-50">
+                  Connect
+                </Link>
+              </>
             )}
-            {statusQuery.data && (
+            {statusQuery.data && extensionQuery.data?.ok && (
               <button
                 type="button"
                 onClick={() => toggle.mutate()}
@@ -218,36 +240,39 @@ export function Home() {
       )}
 
       {allDone && (
-        <section aria-label="Pipeline">
-          <h2 className="mb-3 text-base font-bold text-ink-900">Pipeline</h2>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5 lg:gap-8">
+        <section aria-label="Pipeline" className="space-y-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-base font-bold text-ink-900">Pipeline</h2>
+            <Link to="/jobs" className="text-xs font-bold text-brand-600 hover:underline">
+              All {jobs.length} jobs
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-7">
             {STAGES.map((s, i) => {
               const on = openStage === s.key;
+              const warn = s.key === "ready" && waiting !== null;
               return (
                 <button
                   key={s.key}
                   type="button"
                   aria-pressed={on}
                   onClick={() => setOpenStage(on ? null : s.key)}
-                  className={`relative rounded-2xl border-2 bg-white px-5 py-4 text-left shadow-soft transition hover:border-brand-200 ${
+                  className={`relative flex flex-col items-start rounded-[18px] border-2 bg-white px-[18px] py-4 text-left shadow-soft transition hover:border-brand-200 ${
                     on ? "border-brand-500" : "border-transparent"
                   }`}
                 >
                   <div className="flex items-center gap-2">
                     <span className="h-2 w-2 shrink-0 rounded-full bg-brand-200" aria-hidden="true" />
-                    <span className={`text-xs font-semibold ${on ? "text-brand-600" : "text-ink-500"}`}>{s.label}</span>
+                    <span className={`text-[12.5px] font-semibold ${on ? "text-brand-600" : "text-ink-500"}`}>{s.label}</span>
                   </div>
-                  <div className="mt-1.5 text-4xl font-extrabold tracking-tight text-ink-900">{stages[s.key].length}</div>
-                  {stalled === s.key && (
-                    <div className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-bold text-amber-700">
-                      <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
-                      Waiting longest
-                    </div>
-                  )}
+                  <div className="mt-1.5 text-[30px] font-extrabold leading-none tracking-tight text-ink-900">{stages[s.key].length}</div>
+                  <div className={`mt-1.5 text-xs leading-snug ${warn ? "font-bold text-amber-700" : "text-ink-500"}`}>
+                    {warn ? `Oldest waiting ${waiting} days` : s.hint}
+                  </div>
                   {i < STAGES.length - 1 && (
                     <span
                       aria-hidden="true"
-                      className="pointer-events-none absolute -right-[30px] top-1/2 hidden h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-[#ddd8f3] bg-white text-brand-500 shadow-pill lg:flex"
+                      className="pointer-events-none absolute -right-[26px] top-1/2 hidden h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-[#ddd8f3] bg-white text-brand-500 shadow-pill lg:flex"
                     >
                       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M5 12h13M13 6l6 6-6 6" />
@@ -265,7 +290,7 @@ export function Home() {
       )}
 
       {allDone && (
-        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <div className="grid items-start gap-6 lg:grid-cols-2">
           <MatchesCard matches={matches} loading={resultsQuery.isLoading} />
           <FollowUpCard items={due} />
         </div>
@@ -357,20 +382,13 @@ function WeeklyGoal({
   const left = Math.max(0, goal - thisWeek);
   const hit = left === 0;
   const per = perDayNeeded(thisWeek, goal, days.today);
+  const daysLeft = 7 - days.today;
   const pace = hit
     ? thisWeek > goal
       ? `Goal reached, ${thisWeek - goal} to spare`
       : "Goal reached"
-    : thisWeek === 0
-      ? `About ${per} a day gets you there`
-      : `${left} to go. ${per <= 1 ? "One a day" : `About ${per} a day`} does it`;
-  const bubble = hit
-    ? "Goal reached! Time to celebrate, then keep it going."
-    : thisWeek === 0
-      ? "Fresh week. Let's get the first one in today."
-      : thisWeek >= goal / 2
-        ? "More than halfway. Keep it going!"
-        : "Nice start. You're building momentum.";
+    : `${daysLeft === 1 ? "Last day" : `${daysLeft} days left`}. ${per <= 1 ? "One a day gets you there" : `About ${per} a day gets you there`}`;
+  const bubble = hit ? "Goal reached! Time to celebrate, then keep it going." : DAY_TIPS[days.today];
 
   const save = async () => {
     const n = Math.round(Number(draft));
@@ -388,115 +406,115 @@ function WeeklyGoal({
   };
 
   return (
-    <Card className={`p-6 md:p-7 ${hit ? "bg-gradient-to-br from-white to-emerald-50" : ""}`}>
-      <div className="grid items-center gap-x-10 gap-y-5 md:grid-cols-[minmax(230px,300px)_minmax(0,1fr)]">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-base font-bold text-ink-900">Weekly goal</h2>
-          <div className="flex items-baseline gap-2.5">
-            <strong className="text-5xl font-extrabold leading-none tracking-tight text-ink-900">{thisWeek}</strong>
-            <span className="text-sm font-semibold text-ink-700">of {goal} sent this week</span>
-          </div>
-          <div>
-            <span
-              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                hit ? "bg-emerald-50 text-emerald-700" : "bg-brand-50 text-brand-700"
-              }`}
-            >
-              {pace}
+    <Card className={`p-6 ${hit ? "bg-gradient-to-br from-white to-emerald-50" : ""}`}>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <h2 className="text-base font-bold text-ink-900">Weekly goal</h2>
+        <div className="flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
+          {lastWeek > 0 && (
+            <>
+              <span>Last week: {lastWeek} sent</span>
+              <span aria-hidden="true">&middot;</span>
+            </>
+          )}
+          {editing ? (
+            <span className="flex flex-wrap items-center gap-2">
+              <label className="sr-only" htmlFor="goal-input">
+                Applications per week
+              </label>
+              <input
+                id="goal-input"
+                type="number"
+                min={1}
+                max={30}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                className="w-20 rounded-xl border border-[#ddd8f3] bg-white px-3 py-1.5 text-sm"
+              />
+              <Button size="sm" variant="primary" onClick={save} disabled={saving}>
+                {saving ? "Saving…" : "Save"}
+              </Button>
+              <Button size="sm" onClick={() => setEditing(false)}>
+                Cancel
+              </Button>
             </span>
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
-            {lastWeek > 0 && (
-              <>
-                <span>Last week: {lastWeek} sent</span>
-                <span aria-hidden="true">&middot;</span>
-              </>
-            )}
-            {editing ? (
-              <span className="flex flex-wrap items-center gap-2">
-                <label className="sr-only" htmlFor="goal-input">
-                  Applications per week
-                </label>
-                <input
-                  id="goal-input"
-                  type="number"
-                  min={1}
-                  max={30}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  className="w-20 rounded-xl border border-[#ddd8f3] bg-white px-3 py-1.5 text-sm"
-                />
-                <Button size="sm" variant="primary" onClick={save} disabled={saving}>
-                  {saving ? "Saving…" : "Save"}
-                </Button>
-                <Button size="sm" onClick={() => setEditing(false)}>
-                  Cancel
-                </Button>
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setEditing(true)}
-                className="rounded-lg px-1 py-1 text-xs font-bold text-brand-600 hover:underline"
-              >
-                Change goal
-              </button>
-            )}
-          </div>
-          {failed && <p className="text-xs text-red-600">Couldn't save the goal. Try again.</p>}
+          ) : (
+            <button type="button" onClick={() => setEditing(true)} className="rounded-lg py-1 pl-1 text-xs font-bold text-brand-600 hover:underline">
+              Change goal
+            </button>
+          )}
+        </div>
+      </div>
+      {failed && <p className="mb-3 text-xs text-red-600">Couldn&apos;t save the goal. Try again.</p>}
+
+      <div className="grid items-center gap-x-12 gap-y-4 md:grid-cols-[minmax(250px,310px)_minmax(0,1fr)]">
+        <div className="flex items-baseline gap-2.5">
+          <strong className="text-5xl font-extrabold leading-none tracking-tight text-ink-900">{thisWeek}</strong>
+          <span className="text-sm font-semibold text-ink-700">of {goal} sent this week</span>
+        </div>
+        <div className="flex gap-2" role="img" aria-label={`${thisWeek} of ${goal} applications sent this week`}>
+          {Array.from({ length: goal }, (_, i) => (
+            <div
+              key={i}
+              className={`h-3.5 flex-1 rounded-full ${
+                i < thisWeek
+                  ? hit
+                    ? "bg-emerald-500"
+                    : "bg-gradient-to-r from-brand-400 to-brand-500 shadow-glow"
+                  : "bg-brand-100"
+              }`}
+            />
+          ))}
         </div>
 
-        <div className="min-w-0">
-          <div className="mb-3.5 flex items-center justify-start gap-4 md:justify-end">
-            <p
-              role="status"
-              className="relative m-0 max-w-[260px] rounded-2xl border border-[#ddd8f3] bg-white px-4 py-3 text-[13.5px] font-semibold leading-snug text-ink-900 shadow-pill"
-            >
-              {bubble}
-              <span
-                aria-hidden="true"
-                className="absolute -right-[8px] top-1/2 h-3.5 w-3.5 -translate-y-1/2 rotate-45 rounded-tr border-r border-t border-[#ddd8f3] bg-white"
-              />
-            </p>
-            <OtterTile size={64} className="shrink-0 drop-shadow-lg" />
-          </div>
-          <div className="mb-3 flex gap-2" role="img" aria-label={`${thisWeek} of ${goal} applications sent this week`}>
-            {Array.from({ length: goal }, (_, i) => (
-              <div
-                key={i}
-                className={`h-3.5 flex-1 rounded-full ${
-                  i < thisWeek
-                    ? hit
-                      ? "bg-emerald-500"
-                      : "bg-gradient-to-r from-brand-400 to-brand-500 shadow-glow"
-                    : "bg-brand-100"
-                }`}
-              />
-            ))}
-          </div>
-          <ul className="grid grid-cols-7 gap-1.5" aria-label="Applications sent each day this week">
-            {DAY_NAMES.map((d, i) => {
-              const c = days.counts[i];
-              const isToday = i === days.today;
-              return (
-                <li
-                  key={d}
-                  aria-label={`${d}: ${c} sent`}
-                  className={`flex flex-col items-center gap-1 text-[11px] font-bold ${isToday ? "text-brand-700" : "text-ink-500"}`}
-                >
-                  <b
-                    className={`grid h-[30px] w-[30px] place-items-center rounded-full text-xs ${
-                      c > 0 ? (hit ? "bg-emerald-500 text-white" : "bg-brand-500 text-white") : "bg-brand-50 text-ink-400"
-                    } ${isToday ? "ring-2 ring-brand-500 ring-offset-2" : ""}`}
-                  >
-                    {c > 0 ? c : ""}
-                  </b>
-                  <span>{d}</span>
-                </li>
-              );
-            })}
-          </ul>
+        <div>
+          <span
+            className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${
+              hit ? "bg-emerald-50 text-emerald-700" : "bg-brand-50 text-brand-700"
+            }`}
+          >
+            {pace}
+          </span>
         </div>
+        <ul className="grid grid-cols-7 gap-1.5" aria-label="Applications sent each day this week">
+          {DAY_NAMES.map((d, i) => {
+            const c = days.counts[i];
+            const isToday = i === days.today;
+            return (
+              <li
+                key={d}
+                aria-label={`${d}: ${c} sent`}
+                className={`flex flex-col items-center gap-1.5 text-[13px] font-bold ${isToday ? "text-brand-700" : "text-ink-500"}`}
+              >
+                <b
+                  className={`grid h-8 w-8 place-items-center rounded-full text-[13px] ${
+                    c > 0 ? (hit ? "bg-emerald-500 text-white" : "bg-brand-500 text-white") : "bg-brand-50 text-ink-400"
+                  } ${isToday ? "ring-2 ring-brand-500 ring-offset-2" : ""}`}
+                >
+                  {c > 0 ? c : "\u2013"}
+                </b>
+                <span>{d}</span>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+
+      <div className="mt-5 flex items-center gap-4">
+        <OtterTile size={52} className="shrink-0 drop-shadow-lg" />
+        <p
+          role="status"
+          className={`relative m-0 max-w-[520px] rounded-[18px] border px-[18px] py-3 text-sm font-semibold leading-snug text-[#2a2750] ${
+            hit ? "border-[#c5ead8] bg-[#e9f8f1]" : "border-[#e1def8] bg-[#f3f2ff]"
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className={`absolute -left-[7px] top-1/2 h-3 w-3 -translate-y-1/2 rotate-45 rounded-bl border-b border-l ${
+              hit ? "border-[#c5ead8] bg-[#e9f8f1]" : "border-[#e1def8] bg-[#f3f2ff]"
+            }`}
+          />
+          {bubble}
+        </p>
       </div>
     </Card>
   );
@@ -519,7 +537,6 @@ function StagePanel({
   const [note, setNote] = useState<string | null>(null);
 
   const proceed = useMutation<JobOut, ApiError, number>({ mutationFn: (id) => api.proceedWithApplication(id), onSuccess: refresh });
-  const markApplied = useMutation<JobOut, ApiError, number>({ mutationFn: (id) => api.markApplied(id), onSuccess: refresh });
 
   const openAndFill = async (job: JobOut) => {
     setNote(null);
@@ -530,14 +547,14 @@ function StagePanel({
   };
 
   const shown = jobs.slice(0, 5);
-  const sees = stage === "scored" ? "/jobs" : `/jobs?stage=${stage}`;
+  const sees = `/jobs?stage=${stage}`;
 
   const detail = (j: JobOut): string => {
     const parts = [j.company];
     if (j.evaluation) parts.push(`Score ${Math.round(j.evaluation.overall_score * 100)}`);
     if (stage === "applied") parts.push(`Applied ${ageText(daysSince(j.applied_at, now))}`);
-    else if (stage === "progress") parts.push(`Started ${ageText(daysSince(j.application_started_at, now))}`);
-    else parts.push(`Added ${ageText(daysSince(j.first_seen, now))}`);
+    else if (stage === "applying") parts.push(`Started ${ageText(daysSince(j.application_started_at, now))}`);
+    else parts.push(`Saved ${ageText(daysSince(j.first_seen, now))}`);
     return parts.join(". ");
   };
 
@@ -562,26 +579,26 @@ function StagePanel({
               <div className="truncate text-sm font-bold text-ink-900">{j.title}</div>
               <div className="mt-0.5 text-xs text-ink-500">{detail(j)}</div>
             </div>
-            {stage === "scored" && (
-              <Button size="sm" onClick={() => proceed.mutate(j.id)} disabled={proceed.isPending}>
-                Go after it
-              </Button>
-            )}
-            {stage === "going" && (
-              <Link to="/jobs?stage=going">
-                <Button size="sm" tabIndex={-1}>
-                  Choose resume
+            {stage === "saved" &&
+              (j.application_status === "proceeding" ? (
+                <Link to="/jobs?stage=saved">
+                  <Button size="sm" tabIndex={-1}>
+                    Choose resume
+                  </Button>
+                </Link>
+              ) : (
+                <Button size="sm" onClick={() => proceed.mutate(j.id)} disabled={proceed.isPending}>
+                  Apply
                 </Button>
-              </Link>
-            )}
+              ))}
             {stage === "ready" && (
               <Button size="sm" variant="primary" onClick={() => void openAndFill(j)}>
-                Open and fill
+                Start application
               </Button>
             )}
-            {stage === "progress" && (
-              <Button size="sm" onClick={() => markApplied.mutate(j.id)} disabled={markApplied.isPending}>
-                Mark as applied
+            {stage === "applying" && (
+              <Button size="sm" variant="primary" onClick={() => void openAndFill(j)}>
+                Finish application
               </Button>
             )}
             {stage === "applied" && (
@@ -594,21 +611,37 @@ function StagePanel({
           </li>
         ))}
       </ul>
-      {(note || proceed.isError || markApplied.isError) && (
-        <p className="pb-3 text-xs text-ink-700">{note ?? proceed.error?.message ?? markApplied.error?.message}</p>
+      {(note || proceed.isError) && (
+        <p className="pb-3 text-xs text-ink-700">{note ?? proceed.error?.message}</p>
       )}
     </div>
   );
 }
 
-function ScoreDot({ score }: { score: number | null | undefined }) {
+/** A job's match score as a ring. When it hasn't been scored yet, the circle itself is the Score button. */
+function ScoreCircle({
+  score,
+  title,
+  onScore,
+  scoring,
+}: {
+  score: number | null | undefined;
+  title: string;
+  onScore: () => void;
+  scoring: boolean;
+}) {
   if (score == null) {
     return (
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-ink-900/5 text-center text-[10px] font-semibold leading-tight text-ink-400">
-        Not
-        <br />
-        scored
-      </div>
+      <button
+        type="button"
+        onClick={onScore}
+        disabled={scoring}
+        aria-label={`Score ${title} against your resume`}
+        title="Score this job"
+        className="grid h-12 w-12 shrink-0 place-items-center rounded-full border-2 border-dashed border-[#b9b3ec] bg-[#f7f6ff] text-[10.5px] font-extrabold text-brand-700 transition hover:border-brand-500 hover:bg-brand-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 disabled:cursor-default"
+      >
+        {scoring ? "\u2026" : "Score"}
+      </button>
     );
   }
   return (
@@ -636,33 +669,37 @@ function MatchesCard({ matches, loading }: { matches: JobSearchResultOut[]; load
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["job-search-results"] }),
   });
-  const add = useMutation<unknown, ApiError, number>({
+  const save = useMutation<unknown, ApiError, number>({
     mutationFn: (id) => api.addSearchResult(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["job-search-results"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
   });
+  const score = useMutation<unknown, ApiError, number>({
+    mutationFn: (id) => api.scoreSearchResult(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["job-search-results"] }),
+  });
 
   const pool = onlyTop ? matches.filter((r) => (r.match_score ?? 0) >= TOP_SCORE) : matches;
-  const top = pool.slice(0, 3);
+  const top = pool.slice(0, MATCHES_SHOWN);
   const chip = (on: boolean) =>
     `rounded-full border px-3.5 py-1.5 text-[13px] font-semibold shadow-pill transition ${
       on ? "border-brand-500 bg-brand-100 text-brand-700" : "border-[#ddd8f3] bg-white text-ink-700 hover:bg-brand-50"
     }`;
   return (
     <Card className="p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <h2 className="text-base font-bold text-ink-900">Best new matches</h2>
-          {matches.length > 0 && <Badge tone="brand">{matches.length} new</Badge>}
+          <h2 className="text-base font-bold text-ink-900">New matches this week</h2>
+          {matches.length > 0 && <Badge tone="brand">{matches.length} this week</Badge>}
         </div>
         {canRefresh ? (
           <button
             type="button"
             onClick={() => refresh.mutate()}
             disabled={refresh.isPending}
-            className="rounded-lg px-1 py-1 text-xs font-bold text-brand-600 hover:underline disabled:opacity-50"
+            className="rounded-lg py-1 pl-1 text-xs font-bold text-brand-600 hover:underline disabled:opacity-50"
           >
             {refresh.isPending ? "Searching…" : "Refresh"}
           </button>
@@ -673,7 +710,7 @@ function MatchesCard({ matches, loading }: { matches: JobSearchResultOut[]; load
         )}
       </div>
       {matches.length > 0 && (
-        <div className="mt-3 flex gap-2" role="group" aria-label="Filter matches">
+        <div className="mb-2 flex gap-2" role="group" aria-label="Filter matches">
           <button type="button" aria-pressed={!onlyTop} onClick={() => setOnlyTop(false)} className={chip(!onlyTop)}>
             All
           </button>
@@ -688,42 +725,50 @@ function MatchesCard({ matches, loading }: { matches: JobSearchResultOut[]; load
       {loading && <p className="mt-4 text-sm text-ink-400">Loading…</p>}
       {!loading && matches.length === 0 && (
         <div className="flex flex-col items-center gap-1.5 px-3 py-7 text-center text-sm text-ink-500">
-          <b className="text-[15px] text-ink-900">No new matches waiting</b>
+          <b className="text-[15px] text-ink-900">No new matches this week</b>
           <span>{canRefresh ? "Refresh your saved search to look again." : "Run a search and your matches show up here."}</span>
         </div>
       )}
       {!loading && matches.length > 0 && top.length === 0 && (
         <p className="mt-4 text-sm text-ink-500">None at {Math.round(TOP_SCORE * 100)}% or higher right now.</p>
       )}
-      <ul className="mt-2">
+      <ul>
         {top.map((r) => {
-          const meta = [r.company, r.location, formatSalary(r.salary_text ? { text: r.salary_text } : null) ?? "Pay not listed"];
+          const place = [r.company, r.location].filter(Boolean).join(" \u00b7 ");
           const posted = formatPosted(r.posted_at);
+          const pay = formatSalary(r.salary_text ? { text: r.salary_text } : null) ?? "Pay not listed";
           return (
             <li key={r.id} className="flex items-center gap-4 border-t border-ink-900/5 py-3.5 first:border-t-0">
-              <ScoreDot score={r.match_score} />
+              <ScoreCircle
+                score={r.match_score}
+                title={r.title}
+                scoring={score.isPending && score.variables === r.id}
+                onScore={() => score.mutate(r.id)}
+              />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-bold text-ink-900">{r.title}</div>
-                <div className="mt-0.5 text-xs text-ink-500">
-                  {meta.filter(Boolean).join(" \u00b7 ")}
-                  {posted ? ` \u00b7 Posted ${posted}` : ""}
+                <div className="mt-0.5 text-xs leading-snug text-ink-500">{place}</div>
+                <div className="text-xs leading-snug text-ink-500">
+                  {pay}
+                  {posted ? ` \u00b7 Posted ${inSentence(posted)}` : ""}
                 </div>
               </div>
-              <Button size="sm" onClick={() => add.mutate(r.id)} disabled={add.isPending} aria-label={`Add ${r.title} to jobs`}>
-                Add
+              <Button size="sm" onClick={() => save.mutate(r.id)} disabled={save.isPending} aria-label={`Save ${r.title} to Jobs`}>
+                Save
               </Button>
             </li>
           );
         })}
       </ul>
       {pool.length > top.length && (
-        <div className="mt-1.5 border-t border-ink-900/5 pt-3">
+        <div className="mt-1.5 border-t border-ink-900/5 pt-3.5">
           <Link to="/job-search" className="text-xs font-bold text-brand-600 hover:underline">
-            See all {pool.length} matches
+            See all {pool.length} in Job Search
           </Link>
         </div>
       )}
-      {add.isError && <p className="mt-2 text-xs text-red-600">{add.error.message}</p>}
+      {save.isError && <p className="mt-2 text-xs text-red-600">{save.error.message}</p>}
+      {score.isError && <p className="mt-2 text-xs text-red-600">{score.error.message}</p>}
     </Card>
   );
 }
@@ -763,7 +808,7 @@ function FollowUpCard({ items }: { items: FollowUp[] }) {
   const shown = items.slice(0, 5);
   return (
     <Card className="p-6">
-      <div className="flex items-center gap-2.5">
+      <div className="mb-4 flex items-center gap-2.5">
         <h2 className="text-base font-bold text-ink-900">Follow up</h2>
         {items.length > 0 && <Badge>{items.length} waiting</Badge>}
       </div>
@@ -776,7 +821,7 @@ function FollowUpCard({ items }: { items: FollowUp[] }) {
           <span>Nobody to follow up with right now.</span>
         </div>
       )}
-      <ul className="mt-3 space-y-2.5">
+      <ul className="space-y-2.5">
         {shown.map((f) => {
           const overdue = isOverdue(f.days);
           const fill = Math.min(100, Math.round((f.days / FOLLOW_UP_METER_DAYS) * 100));
@@ -862,6 +907,9 @@ function FollowUpCard({ items }: { items: FollowUp[] }) {
         })}
       </ul>
       {items.length > shown.length && <p className="mt-2 text-xs text-ink-500">And {items.length - shown.length} more.</p>}
+      {shown.length > 0 && (
+        <p className="mt-4 text-xs text-ink-500">Reminders start {FOLLOW_UP_AFTER_DAYS} days after you apply. Mark one done when you&apos;ve followed up.</p>
+      )}
       {done.isError && <p className="mt-2 text-xs text-red-600">{done.error.message}</p>}
     </Card>
   );

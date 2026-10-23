@@ -11,7 +11,7 @@ import { EmployersPanel } from "@/components/JobSources";
 import { scoreColor, scoreLabel } from "@/components/match";
 import { Ring } from "@/components/ui";
 import { autofillSite } from "@/lib/autofill";
-import { formatPayText, formatPosted, formatPostedBoth, mayBeClosed } from "@/lib/jobText";
+import { formatPayText, formatPosted, formatPostedBoth, inSentence, mayBeClosed } from "@/lib/jobText";
 import type { CoverageOut, JobSearchCriteria, JobSearchResultOut } from "@/types/api";
 import {
   SAVED_KEY,
@@ -931,7 +931,7 @@ function JobDetail({
         <Fact icon="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z M12 7a2.5 2.5 0 100 5 2.5 2.5 0 000-5">{r.location || "Location not listed"}</Fact>
         {workTypeText(r) && <Fact icon="M4 9h16v10H4z M9 9V6h6v3">{workTypeText(r)}</Fact>}
         <Fact icon="M12 4a8 8 0 100 16 8 8 0 000-16z M12 8v8 M14.5 9.5h-3.2a1.5 1.5 0 000 3h1.4a1.5 1.5 0 010 3H9.5">{payText(r.salary_text) ?? "Pay not listed"}</Fact>
-        <Fact icon="M12 4a8 8 0 100 16 8 8 0 000-16z M12 8v4l3 2">{posted ? `Posted ${posted}` : "Posted date not listed"}</Fact>
+        <Fact icon="M12 4a8 8 0 100 16 8 8 0 000-16z M12 8v4l3 2">{posted ? `Posted ${inSentence(posted)}` : "Posted date not listed"}</Fact>
       </div>
 
       {!r.grounded && (

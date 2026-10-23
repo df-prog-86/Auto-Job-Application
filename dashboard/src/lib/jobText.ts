@@ -40,6 +40,9 @@ export function formatPostedBoth(date?: string | null, now: Date = new Date()): 
   return /ago$|^Yesterday$|^Today$/.test(rel) ? `${rel} (${shortDate(d, now)})` : rel;
 }
 
+/** "Today" and "Yesterday" read as lowercase inside a sentence: "Posted today". Other dates are left alone. */
+export const inSentence = (text: string): string => text.replace(/^(Today|Yesterday)/, (m) => m.toLowerCase());
+
 /** Whole days since a posting date, or null when unknown. */
 export function postedDaysAgo(date?: string | null, now: Date = new Date()): number | null {
   const d = dayOf(date);

@@ -10,7 +10,7 @@ import { Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
 import { FitPill, WhatsMissing, WhyItFits, scoreColor } from "@/components/match";
 import { completeApplication } from "@/lib/extensionBridge";
 import { statusOf } from "@/lib/jobStatus";
-import { duplicateKey, formatLocation, formatPosted, formatPostedBoth, formatSalary, mayBeClosed } from "@/lib/jobText";
+import { duplicateKey, formatLocation, formatPosted, formatPostedBoth, formatSalary, inSentence, mayBeClosed } from "@/lib/jobText";
 import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api";
 
 /**
@@ -385,9 +385,9 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-400">
               <span>{formatLocation(job.location) || "Location not listed"}</span>
               {job.remote_type && !/remote/i.test(job.location ?? "") && <span className="capitalize">{job.remote_type}</span>}
-              {formatPostedBoth(job.posted_at) && <span>Posted {formatPostedBoth(job.posted_at)}</span>}
+              {formatPostedBoth(job.posted_at) && <span>Posted {inSentence(formatPostedBoth(job.posted_at) ?? "")}</span>}
               {formatSalary(job.salary) && <span>{formatSalary(job.salary)}</span>}
-              <span>Saved {formatPosted(job.first_seen)}</span>
+              <span>Saved {inSentence(formatPosted(job.first_seen) ?? "")}</span>
               {duplicate && <span className="font-semibold text-amber-700">Saved twice</span>}
               {mayBeClosed(job.posted_at) && <span className="font-semibold text-amber-700">May be closed</span>}
             </div>
@@ -417,7 +417,7 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
 
         {job.applied_at && (
           <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-            Applied {formatPosted(job.applied_at)}
+            Applied {inSentence(formatPosted(job.applied_at) ?? "")}
             {job.applied_via === "extension"
               ? ". The extension saw the confirmation page. Use the menu if that's wrong."
               : "."}

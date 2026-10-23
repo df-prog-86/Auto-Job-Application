@@ -1,8 +1,10 @@
+import { statusOf } from "@/lib/jobStatus";
+import type { JobStatus } from "@/lib/jobStatus";
 import type { JobOut } from "@/types/api";
 
 /** What the Home page works out from the saved jobs. Plain functions so they are easy to check. */
 
-export type StageKey = "scored" | "going" | "ready" | "progress" | "applied";
+export type StageKey = JobStatus;
 
 export const FOLLOW_UP_AFTER_DAYS = 7;
 /** A follow-up this old is labelled "Overdue"; between the two it is "Due now". */
@@ -18,45 +20,32 @@ export function daysSince(iso: string | null | undefined, now: Date): number {
   return Math.max(0, Math.floor((now.getTime() - new Date(iso).getTime()) / DAY));
 }
 
-/** The furthest step a job has reached. A job sits in exactly one stage. */
-export function stageOf(j: JobOut): StageKey | null {
-  if (j.applied_at) return "applied";
-  if (j.application_started_at) return "progress";
-  if (j.application_status === "proceeding") return hasResume(j) ? "ready" : "going";
-  if (j.evaluation) return "scored";
-  return null;
-}
+/** The status a job is in: Saved, Ready to apply, Applying or Applied. */
+export const stageOf = statusOf;
 
 const score = (j: JobOut) => j.evaluation?.overall_score ?? -1;
 
 export function byStage(jobs: JobOut[]): Record<StageKey, JobOut[]> {
-  const out: Record<StageKey, JobOut[]> = { scored: [], going: [], ready: [], progress: [], applied: [] };
-  for (const j of jobs) {
-    const s = stageOf(j);
-    if (s) out[s].push(j);
-  }
-  out.scored.sort((a, b) => score(b) - score(a));
-  out.going.sort((a, b) => score(b) - score(a));
-  out.ready.sort((a, b) => score(b) - score(a));
-  out.applied.sort((a, b) => +new Date(a.applied_at ?? 0) - +new Date(b.applied_at ?? 0));
-  out.progress.sort((a, b) => +new Date(a.application_started_at ?? 0) - +new Date(b.application_started_at ?? 0));
+  const out: Record<StageKey, JobOut[]> = { saved: [], ready: [], applying: [], applied: [] };
+  for (const j of jobs) out[stageOf(j)].push(j);
+  out.saved.sort((a, b) => score(b) - score(a));
+  out.ready.sort((a, b) => +new Date(readySince(a) ?? 0) - +new Date(readySince(b) ?? 0));
+  out.applying.sort((a, b) => +new Date(a.application_started_at ?? 0) - +new Date(b.application_started_at ?? 0));
+  out.applied.sort((a, b) => +new Date(b.applied_at ?? 0) - +new Date(a.applied_at ?? 0));
   return out;
 }
 
-/** Of the steps you still have to act on, the one whose oldest job has waited longest (3 days or more). */
-export function stalledStage(stages: Record<StageKey, JobOut[]>, now: Date): StageKey | null {
-  let best: StageKey | null = null;
-  let bestAge = 2;
-  for (const key of ["scored", "going", "ready", "progress"] as const) {
-    for (const j of stages[key]) {
-      const age = daysSince(j.first_seen, now);
-      if (age > bestAge) {
-        bestAge = age;
-        best = key;
-      }
-    }
-  }
-  return best;
+/** When a job's resume was made, which is when it became ready to apply. */
+export function readySince(j: JobOut): string | null {
+  const times = j.documents.filter((d) => d.document_type === "resume").map((d) => d.generated_at);
+  return times.length ? times.sort()[0] : null;
+}
+
+/** The ready-to-apply job that has waited longest, once it has waited 2 days or more. */
+export function oldestWaiting(ready: JobOut[], now: Date): number | null {
+  let oldest = 0;
+  for (const j of ready) oldest = Math.max(oldest, daysSince(readySince(j) ?? j.first_seen, now));
+  return oldest >= 2 ? oldest : null;
 }
 
 /** Monday 00:00 of the week that contains `now`. */

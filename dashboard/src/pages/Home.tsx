@@ -74,6 +74,7 @@ export function Home() {
   const jobs = useMemo(() => jobsQuery.data ?? [], [jobsQuery.data]);
   const hasProfile = !!profileQuery.data;
   const missing = missingItems(profileQuery.data, answersQuery.data);
+  const essentialsMissing = missingItems(profileQuery.data, answersQuery.data, false);
   const stages = useMemo(() => byStage(jobs), [jobs]);
   const stalled = stalledStage(stages, now);
   const due = useMemo(() => followUps(jobs, now), [jobs, now]);
@@ -97,10 +98,10 @@ export function Home() {
       key: "profile",
       title: "Complete your profile",
       hint:
-        hasProfile && missing.length > 0
-          ? `${missing.length} ${missing.length === 1 ? "thing needs" : "things need"} your attention.`
+        hasProfile && essentialsMissing.length > 0
+          ? `${essentialsMissing.length} ${essentialsMissing.length === 1 ? "thing needs" : "things need"} your attention.`
           : "Give your details a quick once-over.",
-      done: hasProfile && missing.length === 0,
+      done: hasProfile && essentialsMissing.length === 0,
       to: "/profile",
       cta: "Review",
     },

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { autofillSite } from "@/lib/autofill";
 
@@ -9,7 +9,7 @@ import { MenuItem, MoreMenu } from "@/components/MoreMenu";
 import { Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
 import { FitPill, MatchPanel, scoreColor } from "@/components/match";
 import { completeApplication } from "@/lib/extensionBridge";
-import { formatLocation, formatPosted, formatSalary } from "@/lib/jobText";
+import { duplicateKey, formatLocation, formatPosted, formatSalary, mayBeClosed } from "@/lib/jobText";
 import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api";
 
 /**
@@ -56,7 +56,7 @@ export function Jobs() {
   const [stage, setStage] = useState<Stage>(() => (STAGES.some((s) => s.value === wanted) ? (wanted as Stage) : "all"));
   const [sortBy, setSortBy] = useState<SortBy>("newest");
   const [query, setQuery] = useState("");
-  const all = jobsQuery.data ?? [];
+  const all = useMemo(() => jobsQuery.data ?? [], [jobsQuery.data]);
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const searched = terms.length
     ? all.filter((j) => {
@@ -64,6 +64,12 @@ export function Jobs() {
         return terms.every((t) => hay.includes(t));
       })
     : all;
+  // Jobs saved more than once (same employer, title and place): flagged, never deleted for you.
+  const dupIds = useMemo(() => {
+    const seen = new Map<string, number[]>();
+    for (const j of all) seen.set(duplicateKey(j), [...(seen.get(duplicateKey(j)) ?? []), j.id]);
+    return new Set([...seen.values()].filter((ids) => ids.length > 1).flat());
+  }, [all]);
   const visible = searched
     .filter((j) => inStage(j, stage))
     .sort((a, b) =>
@@ -174,10 +180,16 @@ export function Jobs() {
         </p>
       )}
 
+      {dupIds.size > 0 && (
+        <p role="status" className="rounded-xl bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800">
+          {dupIds.size} jobs look like duplicates and are marked "Saved twice". Delete the extra copy from its menu.
+        </p>
+      )}
+
       {visible.length > 0 && (
         <ul className="space-y-3.5">
           {visible.map((job) => (
-            <JobCard key={job.id} job={job} highlight={job.id === highlightId} />
+            <JobCard key={job.id} job={job} highlight={job.id === highlightId} duplicate={dupIds.has(job.id)} />
           ))}
         </ul>
       )}
@@ -217,7 +229,7 @@ function Progress({ job }: { job: JobOut }) {
   );
 }
 
-function JobCard({ job, highlight = false }: { job: JobOut; highlight?: boolean }) {
+function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; highlight?: boolean; duplicate?: boolean }) {
   const queryClient = useQueryClient();
   const cardRef = useRef<HTMLLIElement>(null);
   const site = autofillSite(job.canonical_application_url);
@@ -386,7 +398,9 @@ function JobCard({ job, highlight = false }: { job: JobOut; highlight?: boolean 
               {job.remote_type && <span className="capitalize">{job.remote_type}</span>}
               {formatPosted(job.posted_at) && <span>Posted {formatPosted(job.posted_at)}</span>}
               {formatSalary(job.salary) && <span>{formatSalary(job.salary)}</span>}
-              <span>Added {new Date(job.first_seen).toLocaleDateString()}</span>
+              <span>Saved {formatPosted(job.first_seen)}</span>
+              {duplicate && <span className="font-semibold text-amber-700">Saved twice</span>}
+              {mayBeClosed(job.posted_at) && <span className="font-semibold text-amber-700">May be closed</span>}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -414,7 +428,7 @@ function JobCard({ job, highlight = false }: { job: JobOut; highlight?: boolean 
 
         {job.applied_at && (
           <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-            Applied {new Date(job.applied_at).toLocaleDateString()}
+            Applied {formatPosted(job.applied_at)}
             {job.applied_via === "extension"
               ? ". The extension saw the confirmation page. Use the menu if that's wrong."
               : "."}

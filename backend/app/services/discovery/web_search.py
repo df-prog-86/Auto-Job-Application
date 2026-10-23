@@ -695,11 +695,12 @@ def merge_same_jobs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def tidy_items(items: list[dict[str, Any]]) -> None:
     """Employer names and titles in plain words, in place: no system codes, no "at <Employer>" tails."""
-    from app.services.jobcache.text import clean_company, clean_title, tidy_place
+    from app.services.jobcache.text import clean_company, clean_title, reconcile_place, tidy_place
 
     for item in items:
         if item.get("location"):
             item["location"] = tidy_place(item["location"])
+        item["location"], item["work_type"] = reconcile_place(item.get("location"), item.get("work_type"))
         raw_company = item.get("company") or ""
         item["title"] = clean_title(item.get("title"), raw_company) or item.get("title") or ""
         item["company"] = clean_company(raw_company) or raw_company
@@ -729,7 +730,7 @@ def merge_twin_postings(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def fit_note(plan: Any, item: dict[str, Any]) -> str:
-    """A short plain reason for an item's fit, from the same free measures used to rank it ("Title matches · In Boston, MA · Posted 2 days ago")."""
+    """A short plain reason for an item's fit, from the same free measures used to rank it ("Title matches \u00b7 In Boston, MA")."""
     from app.services.jobcache import matcher
     from app.services.jobcache.text import location_fit
 
@@ -742,10 +743,7 @@ def fit_note(plan: Any, item: dict[str, Any]) -> str:
     lf = location_fit(plan.loc, item.get("location"), item.get("work_type"))
     if not plan.loc.empty:
         parts.append("In your area" if lf >= 0.95 else "Remote" if item.get("work_type") == "remote" else "Same state" if lf >= 0.7 else "Place not stated" if lf >= 0.5 else "Elsewhere")
-    posted = item.get("posted_at")
-    if isinstance(posted, dt.date):
-        days = (dt.date.today() - posted).days
-        parts.append("Posted today" if days <= 0 else "Posted yesterday" if days == 1 else f"Posted {days} days ago" if days < 60 else "Posted a while ago")
+    # The posting date is not part of the note: the note is saved with the result and read days later, when "Posted yesterday" would be stale.
     return " \u00b7 ".join(parts)
 
 

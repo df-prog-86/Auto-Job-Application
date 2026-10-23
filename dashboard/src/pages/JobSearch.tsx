@@ -11,7 +11,7 @@ import { EmployersPanel } from "@/components/JobSources";
 import { scoreColor, scoreLabel } from "@/components/match";
 import { Ring } from "@/components/ui";
 import { autofillSite } from "@/lib/autofill";
-import { formatPosted } from "@/lib/jobText";
+import { formatPayText, formatPosted, formatPostedBoth, mayBeClosed } from "@/lib/jobText";
 import type { CoverageOut, JobSearchCriteria, JobSearchResultOut } from "@/types/api";
 import {
   SAVED_KEY,
@@ -118,8 +118,8 @@ export function JobSearch() {
   // server on its own (so the last page is as quick as page 2). In any other order the pages are cut from what is already loaded.
   const serverMode = !autofillOnly;
   // One number for the status line and the page count: the saved-list matches the server counted for this search.
-  const totalMatches = matchTotal ?? coverage?.matches ?? items.length;
-  const poolSize = serverMode ? totalMatches : shown.length;
+  const countedMatches = matchTotal ?? coverage?.matches ?? items.length;
+  const poolSize = serverMode ? countedMatches : shown.length;
   const totalPages = Math.max(1, Math.ceil(poolSize / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   // The jobs the search itself returned (the web results included), best first. Jobs opened from later pages are kept apart.
@@ -134,6 +134,9 @@ export function JobSearch() {
     : serverMode
       ? searchRows.slice(0, PAGE_SIZE)
       : shown.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  // The number in the status line must equal the cards on screen. With a single page the cards are the truth (the server's count is
+  // taken before duplicates are merged and results trimmed, so it can say 9 when 8 are listed).
+  const totalMatches = !autofillOnly && totalPages <= 1 && pageItems.length > 0 ? pageItems.length : countedMatches;
   useEffect(() => {
     pageRef.current = currentPage;
     sortRef.current = sortBy;
@@ -710,17 +713,15 @@ export function JobSearch() {
 const CARD =
   "rounded-[20px] border border-[#e9e6f4] bg-white shadow-soft";
 
-/** "Today", "Yesterday", "5 days ago", or the date for older postings. */
+/** "Today", "Yesterday", "8 days ago", then a short date: the same wording as every other page. */
 function agoText(date?: string | null): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(date ?? "");
-  if (!m) return "Date not listed";
-  const then = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  const now = new Date();
-  const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - then.getTime()) / 86_400_000);
-  if (days <= 0) return "Today";
-  if (days === 1) return "Yesterday";
-  if (days < 31) return `${days} days ago`;
   return formatPosted(date) ?? "Date not listed";
+}
+
+/** The pay in the one pay style; text that has no dollar amount is shown as written, without dashes. */
+function payText(text?: string | null): string | null {
+  if (!text || !text.trim()) return null;
+  return formatPayText(text) ?? text.trim().replace(/[\u2013\u2014]/g, " to ");
 }
 
 const WORK_NAMES: Record<string, string> = { remote: "Remote", hybrid: "Hybrid", onsite: "On site" };
@@ -800,7 +801,7 @@ function Pager({ page, total, busy, onPick }: { page: number; total: number; bus
 
 function ResultRow({ r, selected, onPick }: { r: JobSearchResultOut; selected: boolean; onPick: () => void }) {
   const fit = fitWord(r.fit_score);
-  const meta = [r.location, workTypeText(r), r.salary_text].filter(Boolean).join(" | ");
+  const meta = [r.location, workTypeText(r), payText(r.salary_text)].filter(Boolean).join(" | ");
   return (
     <li>
       <button
@@ -825,7 +826,10 @@ function ResultRow({ r, selected, onPick }: { r: JobSearchResultOut; selected: b
               Autofill ready
             </span>
           )}
-          <span className="ml-auto whitespace-nowrap font-medium text-ink-500">{agoText(r.posted_at)}</span>
+          <span className="ml-auto whitespace-nowrap font-medium text-ink-500">
+            {mayBeClosed(r.posted_at) && <span className="mr-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">May be closed</span>}
+            {agoText(r.posted_at)}
+          </span>
         </span>
       </button>
     </li>
@@ -865,7 +869,7 @@ function JobDetail({
   onHideCompany: () => void;
   onHideTitle: () => void;
 }) {
-  const posted = formatPosted(r.posted_at);
+  const posted = formatPostedBoth(r.posted_at);
   const autofill = autofillSite(r.url) !== null;
   // A score that came only from the one-line summary is not shown; it would look surer than it is.
   const score = r.match_from_page === false ? null : (r.match_score ?? null);
@@ -925,8 +929,8 @@ function JobDetail({
 
       <div className="flex flex-wrap items-center gap-x-[26px] gap-y-1.5 border-y border-[#ebe8f6] py-2.5 text-sm font-semibold text-ink-900">
         <Fact icon="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z M12 7a2.5 2.5 0 100 5 2.5 2.5 0 000-5">{r.location || "Location not listed"}</Fact>
-        {(workTypeText(r) || !r.work_type) && <Fact icon="M4 9h16v10H4z M9 9V6h6v3">{workTypeText(r) ?? "Work type not stated"}</Fact>}
-        <Fact icon="M12 4a8 8 0 100 16 8 8 0 000-16z M12 8v8 M14.5 9.5h-3.2a1.5 1.5 0 000 3h1.4a1.5 1.5 0 010 3H9.5">{r.salary_text || "Pay not listed"}</Fact>
+        {workTypeText(r) && <Fact icon="M4 9h16v10H4z M9 9V6h6v3">{workTypeText(r)}</Fact>}
+        <Fact icon="M12 4a8 8 0 100 16 8 8 0 000-16z M12 8v8 M14.5 9.5h-3.2a1.5 1.5 0 000 3h1.4a1.5 1.5 0 010 3H9.5">{payText(r.salary_text) ?? "Pay not listed"}</Fact>
         <Fact icon="M12 4a8 8 0 100 16 8 8 0 000-16z M12 8v4l3 2">{posted ? `Posted ${posted}` : "Posted date not listed"}</Fact>
       </div>
 
@@ -941,7 +945,7 @@ function JobDetail({
           {r.fit_note && (
             <section className="flex flex-col gap-1.5">
               <h3 className="text-[15px] font-bold text-ink-900">Why it fits your search</h3>
-              <p className="text-sm leading-relaxed text-ink-700">{r.fit_note}</p>
+              <p className="text-sm leading-relaxed text-ink-700">{r.fit_note.replace(/\s*\u00b7\s*Posted [^\u00b7]*$/, "")}</p>
             </section>
           )}
           <section className="flex flex-col gap-1.5">

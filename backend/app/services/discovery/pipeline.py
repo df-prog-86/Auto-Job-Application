@@ -22,6 +22,7 @@ from app.services.discovery.dedup import compute_canonical_job_key
 from app.services.discovery.greenhouse import GreenhouseProvider
 from app.services.discovery.lever import LeverProvider
 from app.services.discovery.matching import matches_any_search_profile
+from app.services.jobcache.text import clean_company, clean_title
 from app.services.discovery.normalization import (
     compute_description_hash,
     detect_remote_type,
@@ -139,9 +140,9 @@ def _ingest_posting(
             canonical_job_key=canonical_key,
             ats=employer.ats,
             external_job_id=posting.external_job_id,
-            company=posting.company,
+            company=clean_company(posting.company) or posting.company,
             normalized_company=normalized_company,
-            title=posting.title,
+            title=clean_title(posting.title, posting.company) or posting.title,
             normalized_title=normalized_title,
             location=posting.location,
             remote_type=remote_type,
@@ -225,9 +226,9 @@ def ingest_manual_posting(db: Session, posting: RawJobPosting, *, source_label: 
             canonical_job_key=canonical_key,
             ats=None,
             external_job_id=None,
-            company=posting.company,
+            company=clean_company(posting.company) or posting.company,
             normalized_company=normalized_company,
-            title=posting.title,
+            title=clean_title(posting.title, posting.company) or posting.title,
             normalized_title=normalized_title,
             location=posting.location,
             remote_type=remote_type,

@@ -756,7 +756,7 @@ def test_names_and_titles_are_tidied_twins_merged_and_off_topic_results_left_out
     assert matcher.title_fit(plan, "Sr. Enterprise Account Executive") < matcher.MIN_TITLE_FIT
     assert matcher.title_fit(plan, "Senior Project Manager") >= matcher.MIN_TITLE_FIT
     note = web_search.fit_note(plan, {"title": "Senior Project Manager", "location": "Boston, MA", "work_type": None, "posted_at": dt.date.today()})
-    assert note == "Title matches closely · In your area · Posted today"
+    assert note == "Title matches closely · In your area"  # no posting date: the note is read days later
 
 
 def test_results_carry_a_fit_score_and_a_short_reason(search):

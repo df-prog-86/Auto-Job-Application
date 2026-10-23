@@ -410,3 +410,32 @@ def test_lever_posting_and_application_form_match():
     post = "https://jobs.lever.co/acme/1a2b3c4d-0000-1111-2222-333344445555"
     assert urls_match(post + "/apply?lever-source=x", post)
     assert not urls_match(post.replace("1a2b", "9z9z"), post)
+
+
+def test_needs_attention_settles_known_answers_and_lists_choices_once(app_and_db):
+    client, SessionLocal = app_and_db
+    commit = dict(_COMMIT)
+    client.post("/api/v1/profile/commit", json=commit)
+    profile = client.get("/api/v1/profile").json()
+    assert profile["phone"], "the test profile needs a phone number"
+    job_id = _job(SessionLocal)
+    headers = _token(client)
+    body = {
+        "job_id": job_id,
+        "page_url": "https://job-boards.greenhouse.io/acme/jobs/123",
+        "filled_count": 1,
+        "flagged": [
+            {"label": "Phone Number", "field_type": "text", "required": True},
+            {"label": "Country / Territory", "field_type": "select", "required": True,
+             "options": ["United States of America (+1)", "Canada (+1)", "United States of America (+1)"]},
+        ],
+    }
+    assert client.post("/api/v1/apply/report", json=body, headers=headers).status_code == 204
+    open_items = client.get("/api/v1/needs-attention").json()
+    # The phone number is already on the profile, so it is not asked for again.
+    assert [i["label"] for i in open_items] == ["Country / Territory"]
+    # The same choice listed twice by the site shows once.
+    assert open_items[0]["options"] == ["United States of America (+1)", "Canada (+1)"]
+    # An answer given under a sister label ("Country") settles this one too.
+    assert client.put("/api/v1/profile/answers/q:country", json={"value_type": "str", "value": "United States of America (+1)"}).status_code == 200
+    assert client.get("/api/v1/needs-attention").json() == []

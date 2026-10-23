@@ -544,6 +544,9 @@ COMPANY_NAMES = {
     "brightwheel": "Brightwheel",
     "dialysisclinic": "Dialysis Clinic",
     "careerschwab": "Charles Schwab",
+    "mmc": "Marsh McLennan",
+    "msk": "Memorial Sloan Kettering Cancer Center",
+    "fticonsulting": "FTI Consulting",
 }
 # A run-together name ("Examplehealth") gets a space before a common last word ("Example Health").
 _NAME_TAILS = ("health", "healthcare", "biosciences", "pharma", "therapeutics", "systems", "software", "labs",
@@ -554,13 +557,24 @@ _ORG_CODE = re.compile(r"^(?:[A-Za-z]{1,4}\d{2,6}|\d{3,6})\s+(?=\S)")  # "1000 A
 _TRAIL_CODE = re.compile(r"\s*\((?:[A-Za-z]{2,6})\)\s*$")  # "Inc(ALI)"
 
 
+def decode_text(text_: str | None) -> str:
+    """Text with HTML entities turned into characters ("Johnson &amp; Johnson" -> "Johnson & Johnson", even when escaped twice) and spaces tidied."""
+    out = text_ or ""
+    for _ in range(3):
+        decoded = html_lib.unescape(out)
+        if decoded == out:
+            break
+        out = decoded
+    return re.sub(r"\s+", " ", out).strip()
+
+
 def _squash(text_: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "", (text_ or "").lower())
 
 
 def clean_company(name: str | None) -> str:
     """An employer's name without the system's internal codes ("1000 Abbott Laboratories Inc(ALI)" -> "Abbott Laboratories Inc")."""
-    out = re.sub(r"\s+", " ", name or "").strip()
+    out = decode_text(name)
     cleaned = _TRAIL_CODE.sub("", _ORG_CODE.sub("", out)).strip(" ,-")
     out = cleaned or out
     known = COMPANY_NAMES.get(_squash(out))
@@ -785,6 +799,7 @@ def tidy_place(location: str | None) -> str | None:
     """A place written the usual way: "Newton-MA" -> "Newton, MA", "Austin,TX" -> "Austin, TX", a list of ten cities -> three and "+7 more"."""
     if not location:
         return location
+    location = decode_text(location)
     piped = re.match(r"^(?:US|USA|United States)\s*\|\s*([A-Za-z .]+?)\s*\|\s*([A-Za-z .'-]+)$", location.strip())
     if piped and STATE_BY_NAME.get(piped.group(1).lower()):  # "US | Illinois | Chicago" -> "Chicago, IL"
         return f"{piped.group(2).strip()}, {STATE_BY_NAME[piped.group(1).lower()]}"
@@ -809,13 +824,13 @@ _REQ_CODE = re.compile(r"\s*(?:[(\[]\s*[A-Za-z]{0,6}[- ]?\d{2,8}\s*[)\]]|[-\u201
 
 def title_without_code(title: str | None) -> str:
     """A title without a trailing requisition code ("Product Marketing Manager (SMM194)" -> "Product Marketing Manager")."""
-    out = re.sub(r"\s+", " ", title or "").strip()
+    out = decode_text(title)
     return _REQ_CODE.sub("", out).strip() or out
 
 
 def clean_title(title: str | None, company: str | None = None) -> str:
     """A job title without a trailing "at <Employer>" ("Program Manager at Massgeneralbrigham" -> "Program Manager")."""
-    out = re.sub(r"\s+", " ", title or "").strip()
+    out = decode_text(title)
     if not company:
         return out
     squashed = {_squash(company), _squash(clean_company(company))} - {""}
@@ -824,3 +839,25 @@ def clean_title(title: str | None, company: str | None = None) -> str:
         shorter = out[: m.start()].strip()
         return shorter or out
     return out
+
+
+_VIRTUAL = re.compile(r"\b(virtual|remote|work from home|telecommute|home[- ]based)\b", re.I)
+_NO_PLACE = re.compile(r"^\s*(location not (?:listed|stated|specified)|not (?:listed|stated|specified)|n/?a|none|unknown)\s*$", re.I)
+
+
+def reconcile_place(location: str | None, work_type: str | None) -> tuple[str | None, str | None]:
+    """
+    A place and work type that do not contradict each other. A place that says it is virtual or remote means remote, whatever else is
+    claimed ("USA-NC-Virtual" + "hybrid" -> "Remote (NC)", remote). No usable place plus remote reads just "Remote".
+    """
+    loc = (location or "").strip()
+    if _NO_PLACE.match(loc):
+        loc = ""
+    if loc and _VIRTUAL.search(loc) and "hybrid" not in loc.lower() and not re.match(r"^\s*remote\b", loc, re.I):
+        tidy = tidy_place(_VIRTUAL.sub("", loc).strip(" -,;|/") or "") or ""
+        m = re.search(r"\b([A-Z]{2})\b\s*$", tidy) or re.search(r"\b([A-Z]{2})\b", tidy)
+        state = m.group(1) if m and m.group(1) in US_STATES else None
+        return (f"Remote ({state})" if state else "Remote"), "remote"
+    if not loc:
+        return (("Remote" if work_type == "remote" else None), work_type)
+    return loc, work_type

@@ -16,6 +16,18 @@ from app.services.apply.questions import answer_key_for
 router = APIRouter(prefix="/api/v1/needs-attention", tags=["needs-attention"])
 
 
+def _unique_options(options: list[str]) -> list[str]:
+    """The choices once each, in their order ("United States of America (+1)" listed twice by a site is one choice)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for option in options:
+        key = " ".join(str(option).lower().split())
+        if key and key not in seen:
+            seen.add(key)
+            out.append(str(option))
+    return out
+
+
 def _out(q: PendingQuestion, job: Job) -> PendingQuestionOut:
     return PendingQuestionOut(
         id=q.id,
@@ -24,7 +36,7 @@ def _out(q: PendingQuestion, job: Job) -> PendingQuestionOut:
         company=job.company,
         label=q.label,
         field_type=q.field_type,
-        options=list(q.options or []),
+        options=_unique_options(list(q.options or [])),
         required=q.required,
         status=q.status,
         answer_text=q.answer_text,
@@ -41,6 +53,20 @@ _COVERED_BY_PROFILE = {
     "phone device type": "phone_device_type",
     "phone country code": "phone_country",
 }
+# Questions the profile's own contact details answer.
+_COVERED_BY_CONTACT = {
+    "phone number": "phone",
+    "phone": "phone",
+    "mobile phone": "phone",
+    "mobile phone number": "phone",
+    "cell phone": "phone",
+    "email": "email",
+    "email address": "email",
+}
+# One question asked under several labels ("Country / Territory", "Country"): an answer saved under any of them settles them all.
+_SAME_QUESTION = (
+    {"country", "country territory", "country region", "country of residence"},
+)
 
 
 def _settle_covered(db: Session) -> None:
@@ -57,6 +83,13 @@ def _settle_covered(db: Session) -> None:
     for q in db.query(PendingQuestion).filter(PendingQuestion.status == "open").all():
         key = _COVERED_BY_PROFILE.get(q.question_key)
         value = saved.get(key) if key else None
+        contact = _COVERED_BY_CONTACT.get(q.question_key)
+        if contact and not (isinstance(value, str) and value.strip()):
+            value = getattr(profile, contact, None)
+        if not (isinstance(value, str) and value.strip()):
+            for group in _SAME_QUESTION:
+                if q.question_key in group:
+                    value = next((saved.get(answer_key_for(k)) for k in group if isinstance(saved.get(answer_key_for(k)), str) and saved.get(answer_key_for(k)).strip()), None)
         if isinstance(value, str) and value.strip():
             q.status = "answered"
             q.answer_text = value.strip()

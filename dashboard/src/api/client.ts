@@ -73,7 +73,33 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 204) {
     return undefined as T;
   }
-  return (await res.json()) as T;
+  return cleanNames(await res.json()) as T;
+}
+
+const NAME_KEYS = new Set(["title", "company", "job_title"]);
+const ENTITY = /&(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);/i;
+
+/** Some saved jobs carry web codes in their names ("Risk &amp; Regulatory"). Turn them into plain characters wherever a name shows. */
+function decodeEntities(text: string): string {
+  let out = text;
+  for (let i = 0; i < 2 && ENTITY.test(out); i++) {
+    const box = document.createElement("textarea");
+    box.innerHTML = out;
+    out = box.value;
+  }
+  return out;
+}
+
+function cleanNames(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cleanNames);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = typeof v === "string" && NAME_KEYS.has(k) && ENTITY.test(v) ? decodeEntities(v) : cleanNames(v);
+    }
+    return out;
+  }
+  return value;
 }
 
 export const api = {

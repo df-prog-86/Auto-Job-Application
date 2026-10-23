@@ -113,9 +113,11 @@ export function HelpButton() {
               type="button"
               onClick={() => setOpen(false)}
               aria-label="Close help"
-              className="ml-auto rounded-lg px-2 text-xl leading-none text-ink-500 hover:bg-brand-50 hover:text-ink-900 focus:outline-none focus:ring-2 focus:ring-brand-200"
+              className="ml-auto grid h-8 w-8 shrink-0 place-items-center rounded-full text-ink-500 hover:bg-brand-50 hover:text-ink-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-200"
             >
-              ×
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="h-4 w-4" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
             </button>
           </div>
           <ul className="flex flex-col gap-2.5 px-4 pb-4 pt-1">
@@ -142,9 +144,9 @@ export function HelpButton() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex h-11 items-center gap-2 rounded-full border border-[#ddd8f3] bg-white pl-1.5 pr-[18px] text-sm font-extrabold text-ink-900 shadow-soft hover:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200"
+        className="flex h-12 items-center gap-2 rounded-full border border-[#ddd8f3] bg-white pl-1.5 pr-5 text-sm font-extrabold text-ink-900 shadow-soft hover:border-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-200"
       >
-        <OtterTile size={46} />
+        <OtterTile size={38} className="-translate-y-[2.5px]" />
         Help
       </button>
     </div>

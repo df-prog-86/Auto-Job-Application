@@ -209,11 +209,11 @@ export function Profile() {
 
       <SectionNav />
 
+      <CompletionBanner missing={missing} />
+
       <div id="profile-resume" className="scroll-mt-20">
         <ResumeDrop parseMutation={parseMutation} hasProfile />
       </div>
-
-      <CompletionBanner missing={missing} />
 
       <Card className="p-6">
         <h2 id="profile-details" className="mb-4 scroll-mt-20 text-base font-bold text-ink-900">Personal details</h2>
@@ -416,7 +416,34 @@ function EmptyNote({ children }: { children: ReactNode }) {
   );
 }
 
+/** The profile section where each missing item is fixed. */
+function sectionFor(item: string): string {
+  if (/^(Name|Email|Phone|Location)\b/.test(item) && !/country/i.test(item)) return "profile-details";
+  if (/^Role \d|^At least one role/.test(item)) return "profile-experience";
+  if (/^School \d|^At least one school/.test(item)) return "profile-education";
+  return "profile-answers";
+}
+
+const SECTION_LABELS: Record<string, string> = {
+  "profile-details": "Details",
+  "profile-answers": "Answers",
+  "profile-experience": "Experience",
+  "profile-education": "Education",
+};
+
+function jumpTo(id: string) {
+  const anchor = document.getElementById(id);
+  if (!anchor) return;
+  // Some anchors are a heading inside their card: flash the card.
+  const el = anchor.tagName === "H2" ? (anchor.parentElement ?? anchor) : anchor;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.remove("added-pulse");
+  void el.offsetWidth;
+  el.classList.add("added-pulse");
+}
+
 function CompletionBanner({ missing }: { missing: string[] }) {
+  const [open, setOpen] = useState(false);
   if (missing.length === 0) {
     return (
       <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3.5 text-sm font-semibold text-emerald-800">
@@ -427,19 +454,51 @@ function CompletionBanner({ missing }: { missing: string[] }) {
       </div>
     );
   }
+  const groups = new Map<string, string[]>();
+  for (const m of missing) {
+    const id = sectionFor(m);
+    groups.set(id, [...(groups.get(id) ?? []), m]);
+  }
   return (
-    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
-      <div className="text-sm font-bold text-amber-900">
-        {missing.length} {missing.length === 1 ? "thing needs" : "things need"} completion
+    <section aria-label="Profile items to finish" className="flex flex-col gap-2.5 rounded-2xl border border-[#fde7b0] bg-[#fffaf0] py-2 pl-3.5 pr-2">
+      <div className="flex items-center gap-2.5">
+        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#fdecc0] text-[13px] font-extrabold text-[#8a5a00]" aria-hidden="true">
+          !
+        </span>
+        <h2 className="flex-1 text-sm font-bold text-[#6b4300]">
+          {missing.length} profile {missing.length === 1 ? "item" : "items"} to finish
+        </h2>
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="rounded-full px-3 py-1.5 text-[13px] font-bold text-[#6b4300] hover:bg-[#fdecc0] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+        >
+          {open ? "Hide details" : "See details"} <span aria-hidden="true">{open ? "\u25B4" : "\u25BE"}</span>
+        </button>
       </div>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {missing.map((m) => (
-          <span key={m} className="rounded-full bg-white px-2.5 py-0.5 text-xs font-medium text-amber-800">
-            {m}
-          </span>
-        ))}
-      </div>
-    </div>
+      {open && (
+        <div className="flex flex-col gap-2.5 pb-2 pr-2">
+          {Array.from(groups.entries()).map(([id, items]) => (
+            <div key={id} className="flex flex-wrap items-start gap-x-3.5 gap-y-1.5 border-t border-[#f6e4b8] pt-2.5">
+              <span className="w-[130px] shrink-0 pt-1.5 text-xs font-extrabold text-[#8a6a2c]">{SECTION_LABELS[id]}</span>
+              <div className="flex min-w-[200px] flex-1 flex-wrap gap-1.5">
+                {items.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => jumpTo(id)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[#f1d58a] bg-white px-3 py-1.5 text-[12.5px] font-bold text-[#6b4300] hover:border-[#e8bb4c] hover:bg-[#fff4d6] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+                  >
+                    {m} <span className="opacity-60" aria-hidden="true">&rsaquo;</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

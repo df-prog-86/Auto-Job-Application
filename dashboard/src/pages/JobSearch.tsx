@@ -90,7 +90,7 @@ export function JobSearch() {
   const [excludeDraft, setExcludeDraft] = useState("");
   const [targetSalary, setTargetSalary] = useState(saved.targetSalary ?? "");
   const [requireSalary, setRequireSalary] = useState(saved.requireSalary ?? false);
-  const [within, setWithin] = useState<JobSearchCriteria["posted_within_days"]>(saved.within ?? 0);
+  const [within, setWithin] = useState<JobSearchCriteria["posted_within_days"]>(saved.within || 60);
   const count = PAGE_SIZE;
   const [page, setPage] = useState(1);
   // Pages after the first come from the server one at a time: the ids of the jobs on each, and how many matches there are in all.
@@ -321,7 +321,7 @@ export function JobSearch() {
     setExcludeDraft("");
     setTargetSalary(c.targetSalary ?? "");
     setRequireSalary(c.requireSalary ?? false);
-    setWithin(c.within ?? 0);
+    setWithin(c.within || 60);
   };
 
   const deleteSavedSearch = (name: string) => {
@@ -337,7 +337,7 @@ export function JobSearch() {
     const names = { remote: "Remote", hybrid: "Hybrid", onsite: "On site" } as const;
     filterChips.push({ key: "wt", text: names[workType as keyof typeof names] ?? String(workType), clear: () => setWorkType("any") });
   }
-  if (within) filterChips.push({ key: "within", text: `Last ${within} days`, clear: () => setWithin(0) });
+  if (within && within !== 60) filterChips.push({ key: "within", text: `Last ${within} days`, clear: () => setWithin(60) });
   const salaryNumber = parseInt(targetSalary.replace(/[^0-9]/g, ""), 10);
   if (Number.isFinite(salaryNumber) && salaryNumber > 0) {
     filterChips.push({
@@ -1212,10 +1212,10 @@ function FiltersPopover(p: {
         value={p.within as number}
         onPick={(v) => p.setWithin(v as JobSearchCriteria["posted_within_days"])}
         options={[
-          { value: 0, label: "Any time" },
           { value: 7, label: "7 days" },
           { value: 14, label: "14 days" },
           { value: 30, label: "30 days" },
+          { value: 60, label: "60 days" },
         ]}
       />
       <div className="flex flex-col gap-2">

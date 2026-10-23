@@ -50,12 +50,13 @@ STALE_FACTOR = 0.85
 
 # Stricter ranking (settings.JOB_SEARCH_STRICT_SCORING). `STRICT_OVERRIDE` lets a test or the before-and-after script switch it either way.
 STRICT_OVERRIDE: bool | None = None
+WIDEST_WINDOW = 60  # the widest "Posted" choice; it is the default, so a posting with no date is still shown under it
 HIDE_AFTER_DAYS = 90  # strict: older postings are not shown
 DESC_ONLY_CAP = 0.50  # strict: a job found only through its description ranks as "Possible" at best (below 55)
 DIRECTOR_LEVEL = 5  # strict: a director or above when no level was asked for loses a little
 # strict: words that name a job function. A posting that has one the search did not ask for ("Product Manager" for "revenue cycle
 # manager") is a different job that happens to share words, so it is marked down.
-OFF_FUNCTION = {stem(w) for w in ("sales", "software", "marketing", "product", "engineering", "developer", "recruiter", "recruiting", "legal", "attorney", "designer", "devops")}
+OFF_FUNCTION = {w for w in ("sales", "software", "marketing", "product", "engineering", "developer", "recruiter", "recruiting", "legal", "attorney", "designer", "devops")}  # whole words, so "Market Access" is not "marketing"
 OFF_FUNCTION_FACTOR = 0.85
 # strict: a search made only of these ("manager") cannot tell good from poor, so nothing can rank as a Top match
 GENERIC_ROLE = {stem(w) for w in ("manager", "analyst", "specialist", "coordinator", "director", "engineer", "associate", "assistant", "consultant", "administrator", "supervisor", "lead", "representative", "technician", "officer", "senior", "junior")}
@@ -357,8 +358,8 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
     elif strict() and tf >= BORDERLINE_TITLE and plan.desc_phrases and description_signal(plan, row.get("description")) < 0:
         tf *= DESC_OTHER_WORK  # the title matches but a real description is about something else
     if strict() and tf >= MIN_TITLE_FIT:
-        asked = {st for q in plan.queries for st in q.stems}
-        if (OFF_FUNCTION & set(all_stems(row["title"]))) - asked:
+        asked = {w for q in plan.queries for w in q.terms}
+        if (OFF_FUNCTION & set(words(row["title"]))) - asked:
             tf *= OFF_FUNCTION_FACTOR
     if tf < MIN_TITLE_FIT:
         if desc_hit(plan, row.get("description"), set(all_stems(row["title"]))):
@@ -392,8 +393,8 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
     if plan.pay_floor and mid is not None and mid < plan.pay_floor:
         return None
     posted = _date(row.get("posted_at") or row.get("seen_date"))
-    if plan.window_days and (posted is None or (today - posted).days > plan.window_days):
-        return None  # a date window was asked for: a posting that cannot show when it was posted does not qualify
+    if plan.window_days and ((posted is None and plan.window_days < WIDEST_WINDOW) or (posted is not None and (today - posted).days > plan.window_days)):
+        return None  # a date window was asked for: a posting that cannot show when it was posted does not qualify (except under the widest window)
     kw = 0.0
     if plan.keyword_phrases:
         # Keywords are required: every word of at least one keyword must be in the title, employer, place or (when the

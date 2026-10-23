@@ -253,7 +253,8 @@ def test_search_skips_what_you_already_have_and_reports_how_many_more_fit():
     assert out.coverage["by_system"]["workday"]["postings"] == 8
 
 
-def test_search_stays_bounded_on_a_large_saved_copy():
+def test_search_stays_bounded_on_a_large_saved_copy(monkeypatch):
+    monkeypatch.setattr(matcher, "STRICT_OVERRIDE", False)  # the test's saved copy is dated 1970, which the stricter ranking would hide
     cache = JobCache()
     eid, _ = cache.upsert_employer("greenhouse", "big", "Big Co", "search")
     cache.apply_refresh(eid, [post(i, f"Manager of Thing {i}", "Boston, MA") for i in range(3000)], 1000)
@@ -1798,7 +1799,8 @@ def test_an_alternative_title_that_borrows_one_word_of_the_field_is_a_lookalike_
     assert matcher.title_fit(plan, "Patient Accounts Manager") > matcher.MIN_TITLE_FIT  # one that names none of it is another way to say the work
 
 
-def test_a_posting_open_for_over_half_a_year_ranks_below_a_fresh_one():
+def test_a_posting_open_for_over_half_a_year_ranks_below_a_fresh_one(monkeypatch):
+    monkeypatch.setattr(matcher, "STRICT_OVERRIDE", False)  # the stricter ranking hides such a posting altogether (tested separately)
     plan = matcher.build_plan(SimpleNamespace(titles="revenue cycle manager", location="", work_type="any", keywords="", exclude_companies="", target_salary=None, require_salary=False, posted_within_days=None, count=10), [])
     base = {"company": "X", "location": "Boston, MA", "work_type": None, "pay_mid": None, "pay_text": None, "url": "u", "title": "Revenue Cycle Manager", "description": None}
     today = dt.date(2026, 10, 20)

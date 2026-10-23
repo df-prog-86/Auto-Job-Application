@@ -61,8 +61,8 @@ class Settings(BaseSettings):
     # Hiring systems to switch off, comma separated: workday, greenhouse, lever, ashby, smartrecruiters. A kill switch if one ever objects.
     JOB_CACHE_DISABLED_SYSTEMS: str = ""
     # Stricter ranking: seniority and job function count for more, a match found only through the description stays below "Good",
-    # and postings over 90 days old are left out. Off until its before-and-after check has been approved.
-    JOB_SEARCH_STRICT_SCORING: bool = False
+    # and postings over 90 days old are left out. Approved after a before-and-after check on real searches; False restores the old ranking.
+    JOB_SEARCH_STRICT_SCORING: bool = True
     JOB_SEARCH_USE_DESCRIPTION: bool = True  # search also reads the opening lines of job descriptions (False turns it off)
     # Postings whose description is read (and a portion saved) after each background refresh. 0 turns it off. Small on purpose:
     # the saved lists fill in gradually and no employer's site is read hard.

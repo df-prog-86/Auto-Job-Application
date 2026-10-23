@@ -38,7 +38,7 @@ export function toApiCriteria(c: Partial<SavedCriteria>): JobSearchCriteria {
     target_salary: Number.isFinite(salary) && salary > 0 ? salary : null,
     require_salary: c.requireSalary ?? false,
     include_remote: c.includeRemote ?? false,
-    posted_within_days: c.within ?? 0,
+    posted_within_days: c.within || 60,
     count: c.count ?? 10,
   };
 }

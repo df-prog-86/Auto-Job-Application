@@ -9,7 +9,7 @@ import { MenuItem, MoreMenu } from "@/components/MoreMenu";
 import { Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
 import { FitPill, WhatsMissing, WhyItFits, scoreColor } from "@/components/match";
 import { completeApplication } from "@/lib/extensionBridge";
-import { stageOf } from "@/lib/homeData";
+import { statusOf } from "@/lib/jobStatus";
 import { duplicateKey, formatLocation, formatPosted, formatPostedBoth, formatSalary, mayBeClosed } from "@/lib/jobText";
 import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api";
 
@@ -34,7 +34,7 @@ const STAGES: { value: Stage; label: string }[] = [
 /** Each job sits in exactly one status (the furthest it has reached), so the tab counts add up. */
 function inStage(job: JobOut, stage: Stage): boolean {
   if (stage === "all") return true;
-  return stageOf(job) === stage;
+  return statusOf(job) === stage;
 }
 
 export function Jobs() {

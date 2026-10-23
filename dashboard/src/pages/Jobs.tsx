@@ -61,11 +61,16 @@ export function Jobs() {
     for (const j of all) seen.set(duplicateKey(j), [...(seen.get(duplicateKey(j)) ?? []), j.id]);
     return new Set([...seen.values()].filter((ids) => ids.length > 1).flat());
   }, [all]);
-  const visible = searched
-    .filter((j) => inStage(j, stage))
-    .sort((a, b) =>
-      sortBy === "fit" ? (b.evaluation?.overall_score ?? -1) - (a.evaluation?.overall_score ?? -1) : 0,
-    );
+  // "Show duplicates" lists only the repeated jobs, each copy next to its twin, whatever tab is open.
+  const [dupOnly, setDupOnly] = useState(false);
+  const showingDups = dupOnly && dupIds.size > 0;
+  const visible = showingDups
+    ? searched.filter((j) => dupIds.has(j.id)).sort((a, b) => duplicateKey(a).localeCompare(duplicateKey(b)))
+    : searched
+        .filter((j) => inStage(j, stage))
+        .sort((a, b) =>
+          sortBy === "fit" ? (b.evaluation?.overall_score ?? -1) - (a.evaluation?.overall_score ?? -1) : 0,
+        );
 
   return (
     <div>
@@ -171,14 +176,27 @@ export function Jobs() {
         </p>
       )}
 
-      {dupIds.size > 0 && !dupHidden && (
-        <div role="status" className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800">
+      {dupIds.size > 0 && (!dupHidden || showingDups) && (
+        <div role="status" className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800">
           <span>
-            {dupIds.size} jobs look like duplicates and are marked "Saved twice". Delete the extra copy from its menu.
+            {showingDups
+              ? `Showing the ${dupIds.size} copies side by side. Delete the extra copy from its menu.`
+              : `${dupIds.size} jobs are saved more than once and marked "Saved twice".`}
           </span>
-          <button type="button" onClick={() => setDupHidden(true)} className="ml-auto rounded-full px-3 py-1 text-[13px] font-bold text-amber-900 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-300">
-            Clear
-          </button>
+          <span className="ml-auto flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setDupOnly((v) => !v)}
+              className="rounded-full bg-amber-100 px-3.5 py-1 text-[13px] font-bold text-amber-900 hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-300"
+            >
+              {showingDups ? "Show all jobs" : "Show duplicates"}
+            </button>
+            {!showingDups && (
+              <button type="button" onClick={() => setDupHidden(true)} className="rounded-full px-3 py-1 text-[13px] font-bold text-amber-900 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-300">
+                Clear
+              </button>
+            )}
+          </span>
         </div>
       )}
 

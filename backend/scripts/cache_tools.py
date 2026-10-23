@@ -1006,8 +1006,51 @@ def cmd_names_apply(args: argparse.Namespace) -> int:
     return 0
 
 
+def _employer_matches(db, key: str) -> list[dict]:
+    """Employers whose address name is `key` (a Workday tenant, a Greenhouse board and so on), whatever the hiring system, ignoring capitals."""
+    rows = [dict(r) for r in db.execute("SELECT id, ats, identifier, name, open_count FROM employers")]
+    want = key.strip().lower()
+    out = []
+    for r in rows:
+        parts = r["identifier"].lower().replace("eu:", "").split("|")
+        names = {r["identifier"].lower(), parts[0], parts[1] if len(parts) > 1 else ""}
+        if want in names - {""} or r["name"].lower() == want:
+            out.append(r)
+    return out
+
+
+def cmd_names_set(args: argparse.Namespace) -> int:
+    """`--set key="Real Name"`: shows which employers would be renamed; saves only with --yes. `--show key` lists an employer's address and sample jobs."""
+    cache = JobCache()
+    with cache.session() as db:
+        for key in args.show or []:
+            for r in _employer_matches(db, key):
+                print(f"{r['name']!r}: {r['ats']} / {r['identifier']} ({r['open_count']} open)")
+                for t, u in db.execute("SELECT title, url FROM postings WHERE employer_id = ? AND closed_at IS NULL LIMIT 3", (r["id"],)):
+                    print(f"    {t}  {u}")
+        changed = 0
+        for item in args.set or []:
+            key, _, new = item.partition("=")
+            new = new.strip()
+            if not key.strip() or not new:
+                print(f"Skipped {item!r}: write it as key=\"Real Name\"")
+                continue
+            matches = _employer_matches(db, key)
+            if not matches:
+                print(f"No employer found for {key!r}.")
+            for r in matches:
+                print(f"{'Renaming' if args.yes else 'Would rename'} {r['name']!r} ({r['ats']} / {r['identifier']}, {r['open_count']} open) -> {new!r}")
+                if args.yes:
+                    changed += db.execute("UPDATE employers SET name = ? WHERE id = ?", (new, r["id"])).rowcount
+    if args.set:
+        print(f"Renamed {changed} employers." if args.yes else "Nothing saved. Add --yes to save these names.")
+    return 0
+
+
 def cmd_names(args: argparse.Namespace) -> int:
     """Employers whose name is still only a guess from the web address. `--find` looks the real names up and writes a file to review; `--apply FILE` saves the reviewed file."""
+    if args.set or args.show:
+        return cmd_names_set(args)
     if args.apply:
         return cmd_names_apply(args)
     if args.find:
@@ -1126,6 +1169,9 @@ def main() -> None:
     nm.add_argument("--find", action="store_true", help="look the real names up and write a file to review (changes nothing)")
     nm.add_argument("--out", default="~/Desktop/employer-names.csv")
     nm.add_argument("--apply", help="save the names in this reviewed file")
+    nm.add_argument("--set", action="append", help='rename by address name: --set msk="Memorial Sloan Kettering Cancer Center" (shows the change; saves with --yes)')
+    nm.add_argument("--show", action="append", help="list the employer with this address name and a few of its jobs")
+    nm.add_argument("--yes", action="store_true", help="with --set: save the names")
     nm.add_argument("--exclude", action="append", help="with --find: leave out employers listed in this earlier file (repeatable)")
     r = sub.add_parser("reread")
     r.add_argument("--db", required=True)

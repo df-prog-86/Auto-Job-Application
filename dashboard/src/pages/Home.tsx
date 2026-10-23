@@ -40,11 +40,10 @@ interface Step {
 }
 
 const STAGES: { key: StageKey; label: string }[] = [
-  { key: "scored", label: "Scored" },
-  { key: "going", label: "Going after" },
+  { key: "saved", label: "Saved" },
   { key: "ready", label: "Ready to apply" },
-  { key: "progress", label: "In progress" },
-  { key: "applied", label: "Completed" },
+  { key: "applying", label: "Applying" },
+  { key: "applied", label: "Applied" },
 ];
 
 const ageText = (days: number) => (days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`);
@@ -123,7 +122,7 @@ export function Home() {
     },
     {
       key: "tailor",
-      title: "Proceed and tailor your resume",
+      title: "Get a resume ready for a job",
       hint: "Pick a job and get a resume tailored to it.",
       done: resumes > 0,
       to: "/jobs",
@@ -220,7 +219,7 @@ export function Home() {
       {allDone && (
         <section aria-label="Pipeline">
           <h2 className="mb-3 text-base font-bold text-ink-900">Pipeline</h2>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5 lg:gap-8">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-8">
             {STAGES.map((s, i) => {
               const on = openStage === s.key;
               return (
@@ -519,7 +518,6 @@ function StagePanel({
   const [note, setNote] = useState<string | null>(null);
 
   const proceed = useMutation<JobOut, ApiError, number>({ mutationFn: (id) => api.proceedWithApplication(id), onSuccess: refresh });
-  const markApplied = useMutation<JobOut, ApiError, number>({ mutationFn: (id) => api.markApplied(id), onSuccess: refresh });
 
   const openAndFill = async (job: JobOut) => {
     setNote(null);
@@ -530,14 +528,14 @@ function StagePanel({
   };
 
   const shown = jobs.slice(0, 5);
-  const sees = stage === "scored" ? "/jobs" : `/jobs?stage=${stage}`;
+  const sees = `/jobs?stage=${stage}`;
 
   const detail = (j: JobOut): string => {
     const parts = [j.company];
     if (j.evaluation) parts.push(`Score ${Math.round(j.evaluation.overall_score * 100)}`);
     if (stage === "applied") parts.push(`Applied ${ageText(daysSince(j.applied_at, now))}`);
-    else if (stage === "progress") parts.push(`Started ${ageText(daysSince(j.application_started_at, now))}`);
-    else parts.push(`Added ${ageText(daysSince(j.first_seen, now))}`);
+    else if (stage === "applying") parts.push(`Started ${ageText(daysSince(j.application_started_at, now))}`);
+    else parts.push(`Saved ${ageText(daysSince(j.first_seen, now))}`);
     return parts.join(". ");
   };
 
@@ -562,26 +560,26 @@ function StagePanel({
               <div className="truncate text-sm font-bold text-ink-900">{j.title}</div>
               <div className="mt-0.5 text-xs text-ink-500">{detail(j)}</div>
             </div>
-            {stage === "scored" && (
-              <Button size="sm" onClick={() => proceed.mutate(j.id)} disabled={proceed.isPending}>
-                Go after it
-              </Button>
-            )}
-            {stage === "going" && (
-              <Link to="/jobs?stage=going">
-                <Button size="sm" tabIndex={-1}>
-                  Choose resume
+            {stage === "saved" &&
+              (j.application_status === "proceeding" ? (
+                <Link to="/jobs?stage=saved">
+                  <Button size="sm" tabIndex={-1}>
+                    Choose resume
+                  </Button>
+                </Link>
+              ) : (
+                <Button size="sm" onClick={() => proceed.mutate(j.id)} disabled={proceed.isPending}>
+                  Apply
                 </Button>
-              </Link>
-            )}
+              ))}
             {stage === "ready" && (
               <Button size="sm" variant="primary" onClick={() => void openAndFill(j)}>
-                Open and fill
+                Start application
               </Button>
             )}
-            {stage === "progress" && (
-              <Button size="sm" onClick={() => markApplied.mutate(j.id)} disabled={markApplied.isPending}>
-                Mark as applied
+            {stage === "applying" && (
+              <Button size="sm" variant="primary" onClick={() => void openAndFill(j)}>
+                Finish application
               </Button>
             )}
             {stage === "applied" && (
@@ -594,8 +592,8 @@ function StagePanel({
           </li>
         ))}
       </ul>
-      {(note || proceed.isError || markApplied.isError) && (
-        <p className="pb-3 text-xs text-ink-700">{note ?? proceed.error?.message ?? markApplied.error?.message}</p>
+      {(note || proceed.isError) && (
+        <p className="pb-3 text-xs text-ink-700">{note ?? proceed.error?.message}</p>
       )}
     </div>
   );

@@ -7,9 +7,10 @@ import { api, ApiError, documentDownloadUrl } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
 import { MenuItem, MoreMenu } from "@/components/MoreMenu";
 import { Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
-import { FitPill, MatchPanel, scoreColor } from "@/components/match";
+import { FitPill, WhatsMissing, WhyItFits, scoreColor } from "@/components/match";
 import { completeApplication } from "@/lib/extensionBridge";
-import { duplicateKey, formatLocation, formatPosted, formatSalary, mayBeClosed } from "@/lib/jobText";
+import { stageOf } from "@/lib/homeData";
+import { duplicateKey, formatLocation, formatPosted, formatPostedBoth, formatSalary, mayBeClosed } from "@/lib/jobText";
 import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api";
 
 /**
@@ -17,41 +18,30 @@ import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api"
  * browser extension). Nothing runs automatically: scoring, proceeding and
  * tailoring each happen only when you click.
  */
-type Stage = "all" | "going" | "ready" | "progress" | "applied";
+type Stage = "all" | "saved" | "ready" | "applying" | "applied";
+// Older links and bookmarks used the retired names.
+const LEGACY_STAGE: Record<string, Stage> = { scored: "saved", going: "saved", progress: "applying", completed: "applied" };
 type SortBy = "newest" | "fit";
 
 const STAGES: { value: Stage; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "going", label: "Going after" },
+  { value: "saved", label: "Saved" },
   { value: "ready", label: "Ready to apply" },
-  { value: "progress", label: "Application in progress" },
-  { value: "applied", label: "Completed" },
+  { value: "applying", label: "Applying" },
+  { value: "applied", label: "Applied" },
 ];
 
-function hasResumeDoc(job: JobOut): boolean {
-  return job.documents.some((d) => d.document_type === "resume");
-}
-
-/** Each job sits in exactly one stage (the furthest it has reached), so the tab counts add up. */
+/** Each job sits in exactly one status (the furthest it has reached), so the tab counts add up. */
 function inStage(job: JobOut, stage: Stage): boolean {
   if (stage === "all") return true;
-  const going = job.application_status === "proceeding";
-  const applied = !!job.applied_at;
-  const started = !!job.application_started_at;
-  const resume = hasResumeDoc(job);
-  if (stage === "applied") return applied;
-  if (applied) return false;
-  if (stage === "progress") return started;
-  if (started) return false;
-  if (stage === "ready") return going && resume;
-  if (stage === "going") return going && !resume;
-  return false;
+  return stageOf(job) === stage;
 }
 
 export function Jobs() {
   const jobsQuery = useQuery({ queryKey: ["jobs"], queryFn: api.listJobs });
   const [params] = useSearchParams();
-  const wanted = params.get("stage");
+  const rawStage = params.get("stage") ?? "";
+  const wanted = LEGACY_STAGE[rawStage] ?? rawStage;
   const highlightId = Number(params.get("highlight")) || null;
   const [stage, setStage] = useState<Stage>(() => (STAGES.some((s) => s.value === wanted) ? (wanted as Stage) : "all"));
   const [sortBy, setSortBy] = useState<SortBy>("newest");
@@ -198,12 +188,11 @@ export function Jobs() {
 }
 
 function Progress({ job }: { job: JobOut }) {
+  const proceeding = job.application_status === "proceeding";
   const steps = [
-    { label: "Added", done: true },
-    { label: "Scored", done: !!job.evaluation },
-    { label: "Going after", done: job.application_status === "proceeding" },
-    { label: "Resume ready", done: job.documents.some((d) => d.document_type === "resume") },
-    { label: "Application started", done: !!job.application_started_at || !!job.applied_at },
+    { label: "Saved", done: true },
+    { label: "Ready to apply", done: (proceeding && job.documents.some((d) => d.document_type === "resume")) || !!job.application_started_at || !!job.applied_at },
+    { label: "Applying", done: !!job.application_started_at || !!job.applied_at },
     { label: "Applied", done: !!job.applied_at },
   ];
   return (
@@ -351,21 +340,21 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
       aria-expanded={expanded}
       className="text-[13px] font-bold text-brand-600 hover:text-brand-700 hover:underline"
     >
-      {expanded ? "Hide details" : "Show details"}
+      {expanded ? "Hide job details" : "Show job details"}
     </button>
   );
 
   const menu = (
     <MoreMenu>
       <MenuItem href={job.canonical_application_url}>Open job posting</MenuItem>
-      {(evaluation || proceeding) && (
+      {evaluation && (
         <MenuItem onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
           {evaluation ? "Re-score match" : "Score match"}
         </MenuItem>
       )}
       {proceeding && (
         <MenuItem onClick={() => undoMutation.mutate()} disabled={undoMutation.isPending}>
-          Undo proceeding
+          Move back to Saved
         </MenuItem>
       )}
       {job.applied_at && (
@@ -395,8 +384,8 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
             <div className="mt-0.5 text-sm font-semibold text-ink-500">{job.company}</div>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-400">
               <span>{formatLocation(job.location) || "Location not listed"}</span>
-              {job.remote_type && <span className="capitalize">{job.remote_type}</span>}
-              {formatPosted(job.posted_at) && <span>Posted {formatPosted(job.posted_at)}</span>}
+              {job.remote_type && !/remote/i.test(job.location ?? "") && <span className="capitalize">{job.remote_type}</span>}
+              {formatPostedBoth(job.posted_at) && <span>Posted {formatPostedBoth(job.posted_at)}</span>}
               {formatSalary(job.salary) && <span>{formatSalary(job.salary)}</span>}
               <span>Saved {formatPosted(job.first_seen)}</span>
               {duplicate && <span className="font-semibold text-amber-700">Saved twice</span>}
@@ -415,8 +404,8 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
                 </Ring>
               </div>
             ) : (
-              <Button size="sm" variant="primary" className={requalifyMutation.isPending ? "ai-working" : ""} onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
-                {requalifyMutation.isPending ? "Scoring…" : "Score"}
+              <Button size="sm" variant="secondary" className={requalifyMutation.isPending ? "ai-working" : ""} onClick={() => requalifyMutation.mutate()} disabled={requalifyMutation.isPending}>
+                {requalifyMutation.isPending ? "Scoring…" : "Score fit"}
               </Button>
             )}
           </div>
@@ -460,26 +449,26 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {!job.applied_at && !proceeding && (
               <Button
-                variant={evaluation ? "primary" : "secondary"}
+                variant="primary"
                 onClick={() => proceedMutation.mutate()}
                 disabled={proceedMutation.isPending}
               >
-                {proceedMutation.isPending ? "Starting…" : "Go after it"}
+                {proceedMutation.isPending ? "Starting…" : "Apply"}
               </Button>
             )}
             {!job.applied_at && proceeding && !hasResume && (
               <>
                 <Button variant="primary" className={tailorMutation.isPending ? "ai-working" : ""} onClick={() => setChoosingStrength(true)} disabled={busyResume}>
-                  {tailorMutation.isPending ? "Creating…" : "Tailor my resume first"}
+                  {tailorMutation.isPending ? "Creating…" : "Tailor resume"}
                 </Button>
-                <button type="button" className={linkClass} onClick={() => originalMutation.mutate()} disabled={busyResume}>
+                <Button variant="secondary" onClick={() => originalMutation.mutate()} disabled={busyResume}>
                   {originalMutation.isPending ? "Saving…" : "Use my original resume"}
-                </button>
+                </Button>
               </>
             )}
             {!job.applied_at && proceeding && hasResume && (
               <Button variant="primary" onClick={startApplication} disabled={applyState.kind === "starting"}>
-                {applyState.kind === "starting" ? "Opening…" : "Complete application"}
+                {applyState.kind === "starting" ? "Opening…" : job.application_started_at ? "Finish application" : "Start application"}
               </Button>
             )}
             {!job.applied_at && !markingApplied && (
@@ -531,15 +520,13 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
 
         {expanded && (evaluation || showResumePanel) && (
           <div className="mt-4 border-t border-ink-900/5 pt-4">
-            <div className={`grid gap-6 ${evaluation && showResumePanel ? "md:grid-cols-[1.3fr_1fr]" : ""}`}>
-              {evaluation && (
-                <div className="min-w-0 self-start">
-                  <MatchPanel score={evaluation.overall_score} summary={evaluation.summary} gaps={gaps} stacked />
-                </div>
-              )}
+            <div className={`grid items-start gap-3 ${evaluation ? "md:grid-cols-[1.3fr_1fr]" : ""}`}>
+              {evaluation && <WhyItFits score={evaluation.overall_score} summary={evaluation.summary} />}
 
+              <div className="flex min-w-0 flex-col gap-3">
+              {evaluation && <WhatsMissing gaps={gaps} />}
               {showResumePanel && (
-                <div className="self-start overflow-hidden rounded-[18px] border border-[#e7e1fa] bg-[#f6f3ff]">
+                <div className="overflow-hidden rounded-2xl border border-[#e7e1fa] bg-[#f6f3ff]">
                   <div className="flex items-center gap-3 px-4 pb-3 pt-3.5">
                     <div
                       className="flex h-12 w-10 shrink-0 flex-col justify-center gap-1 rounded-lg bg-white px-2 shadow-soft"
@@ -620,6 +607,7 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
                   </div>
                 </div>
               )}
+              </div>
             </div>
 
             {showResumePanel && tailorMutation.data?.used_original_wording && (

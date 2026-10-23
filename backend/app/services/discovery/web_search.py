@@ -1059,7 +1059,9 @@ async def _finalized(criteria: JobSearchIn, known_keys: set[str]) -> list[dict[s
     """
     from app.services.jobcache import matcher, service as cache_service
 
+    t_start = time.time()
     ranked = await cache_service.ranked_items(criteria)
+    cache_service.timing_note(f"[page] ranked list ready ({len(ranked)} jobs)", t_start)
     key = (cache_service._ranked_key(criteria), id(ranked), len(ranked))
     hit = _FINAL.get(key)
     if hit and time.time() - hit[0] < cache_service.RANKED_TTL_SECONDS:
@@ -1069,8 +1071,10 @@ async def _finalized(criteria: JobSearchIn, known_keys: set[str]) -> list[dict[s
         extra_titles = await cache_service.expand_titles(criteria.titles)
     except Exception:
         extra_titles = []
+    cache_service.timing_note("[page] titles expanded", t_start)
     plan = matcher.build_plan(criteria, extra_titles)
     kept, rejected = await _check_page(criteria.model_copy(update={"count": FINAL_MAX}), plan, available, 0)
+    cache_service.timing_note(f"[page] final list checked ({len(kept)} kept, {len(rejected)} rejected)", t_start)
     for item in kept:
         item["fit_score"] = item.get("fit")
         item["fit_note"] = fit_note(plan, item)

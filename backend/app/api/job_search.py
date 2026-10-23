@@ -266,12 +266,16 @@ async def search_page(payload: JobSearchIn, db: Session = Depends(get_db)) -> Jo
     One page of the saved-list matches (any page, quickly). The jobs shown are saved as results too, so adding, hiding and
     scoring work on them like any other result. Jobs already in Jobs or removed are left out.
     """
+    from app.services.jobcache.service import timing_note
+
+    t_req = time.time()
     page = payload.page or 0
     known: set[str] = set()
     for (url,) in db.query(Job.canonical_application_url).all():
         known |= loose_keys(url)
     for (url,) in db.query(JobSearchResult.url).filter(JobSearchResult.status.in_(("removed", "added"))).all():
         known |= loose_keys(url)
+    timing_note(f"[page request] start: known jobs read ({len(known)} keys), searching {payload.titles!r} {payload.location!r}", t_req)
     try:
         scores = {}
         if payload.sort == "resume":
@@ -281,12 +285,14 @@ async def search_page(payload: JobSearchIn, db: Session = Depends(get_db)) -> Jo
         )
     except (httpx.HTTPError, LLMError) as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="The search service didn't answer. Try again in a minute.") from exc
+    timing_note(f"[page request] search done ({len(items)} on this page, {total} in all)", t_req)
     rows: list[JobSearchResult] = []
     for item in items:
         rows.append(_save_item(db, item, payload))
     db.commit()
     for row in rows:
         db.refresh(row)
+    timing_note("[page request] results saved: sending the answer", t_req)
     return JobSearchPageOut(total=total, results=[JobSearchResultOut.model_validate(r) for r in rows])
 
 

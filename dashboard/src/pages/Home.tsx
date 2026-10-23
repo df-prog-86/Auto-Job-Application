@@ -1,21 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { api, ApiError } from "@/api/client";
+import { OtterTile } from "@/components/OtterTile";
 import { scoreColor } from "@/components/match";
 import { Badge, Button, Card, CheckIcon, Ring } from "@/components/ui";
 import { answerValue, missingItems, profilePercent } from "@/lib/completeness";
 import { completeApplication, pingExtension } from "@/lib/extensionBridge";
 import {
   byStage,
+  dayCounts,
   daysSince,
   followUps,
   hasResume,
+  isOverdue,
+  perDayNeeded,
   stalledStage,
   weeklyCounts,
-  FOLLOW_UP_AFTER_DAYS,
+  FOLLOW_UP_METER_DAYS,
 } from "@/lib/homeData";
 import type { FollowUp, StageKey } from "@/lib/homeData";
 import { formatPosted, formatSalary } from "@/lib/jobText";
@@ -24,6 +27,8 @@ import type { JobOut, JobSearchResultOut } from "@/types/api";
 
 const DEFAULT_GOAL = 5;
 const HIDE_PROFILE_KEY = "home-hide-profile-banner";
+const TOP_SCORE = 0.9;
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 interface Step {
   key: string;
@@ -38,15 +43,15 @@ const STAGES: { key: StageKey; label: string }[] = [
   { key: "scored", label: "Scored" },
   { key: "going", label: "Going after" },
   { key: "ready", label: "Ready to apply" },
-  { key: "progress", label: "Application in progress" },
-  { key: "applied", label: "Application completed" },
+  { key: "progress", label: "In progress" },
+  { key: "applied", label: "Completed" },
 ];
 
 const ageText = (days: number) => (days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`);
 
 /**
- * Home: what to do next, how the week is going, where every job stands, and
- * the follow-ups that are due. Each fact appears once. New people see the
+ * Home: how the week is going, where every job stands, the best new matches
+ * and the follow-ups that are due. Each fact appears once. New people see the
  * get-started checklist until every step is done.
  */
 export function Home() {
@@ -58,7 +63,6 @@ export function Home() {
   const profileQuery = useQuery({ queryKey: ["profile"], queryFn: api.getProfile, retry: false });
   const answersQuery = useQuery({ queryKey: ["answers"], queryFn: api.listAnswers, retry: false });
   const jobsQuery = useQuery({ queryKey: ["jobs"], queryFn: api.listJobs });
-  const attentionQuery = useQuery({ queryKey: ["needs-attention"], queryFn: api.listNeedsAttention, retry: false });
   const resultsQuery = useQuery({ queryKey: ["job-search-results"], queryFn: api.listSearchResults, retry: false });
   const extensionQuery = useQuery({ queryKey: ["extension-ping"], queryFn: pingExtension, staleTime: 60_000 });
 
@@ -67,13 +71,14 @@ export function Home() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["automation-status"] }),
   });
 
-  const jobs = jobsQuery.data ?? [];
+  const jobs = useMemo(() => jobsQuery.data ?? [], [jobsQuery.data]);
   const hasProfile = !!profileQuery.data;
   const missing = missingItems(profileQuery.data, answersQuery.data);
   const stages = useMemo(() => byStage(jobs), [jobs]);
   const stalled = stalledStage(stages, now);
   const due = useMemo(() => followUps(jobs, now), [jobs, now]);
   const { thisWeek, lastWeek } = weeklyCounts(jobs, now);
+  const days = useMemo(() => dayCounts(jobs, now), [jobs, now]);
   const savedGoal = Number(answerValue(answersQuery.data, "weekly_goal"));
   const goal = Number.isFinite(savedGoal) && savedGoal >= 1 ? Math.min(30, Math.round(savedGoal)) : DEFAULT_GOAL;
 
@@ -129,10 +134,6 @@ export function Home() {
   const allDone = doneCount === steps.length;
   const loading = masterQuery.isLoading || profileQuery.isLoading || jobsQuery.isLoading;
 
-  const questions = attentionQuery.data ?? [];
-  const openQuestions = new Set(questions.map((q) => q.label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim())).size;
-  const blockedJobs = new Set(questions.map((q) => q.job_id)).size;
-
   const matches = useMemo(
     () =>
       (resultsQuery.data ?? [])
@@ -145,16 +146,6 @@ export function Home() {
   const hour = now.getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
-  const readyTop = stages.ready[0];
-  const action = nextAction({
-    openQuestions,
-    blockedJobs,
-    readyCount: stages.ready.length,
-    readyTop,
-    dueCount: due.length,
-    matchCount: matches.length,
-  });
-
   const [openStage, setOpenStage] = useState<StageKey | null>(null);
 
   return (
@@ -166,12 +157,11 @@ export function Home() {
             {name ? `, ${name}` : ""}
           </h1>
           <p className="mt-1.5 text-sm text-ink-500">
-            {now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}. Here is what moves
-            your search forward today.
+            {now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <span className="inline-flex items-center gap-2 rounded-full bg-white px-3.5 py-2 text-xs font-semibold text-ink-700 shadow-soft">
+          <span className="inline-flex items-center gap-2 rounded-full bg-white py-1.5 pl-3.5 pr-1.5 text-xs font-semibold text-ink-700 shadow-pill">
             <span
               className={`h-2 w-2 rounded-full ${extensionQuery.data?.ok ? "bg-emerald-500" : "bg-ink-300"}`}
               aria-hidden="true"
@@ -185,12 +175,17 @@ export function Home() {
                 Extension not detected
               </Link>
             )}
+            {statusQuery.data && (
+              <button
+                type="button"
+                onClick={() => toggle.mutate()}
+                disabled={toggle.isPending}
+                className="rounded-full px-3 py-1 text-xs font-bold text-brand-700 transition hover:bg-brand-50 disabled:opacity-50"
+              >
+                {statusQuery.data.mode === "PAUSED" ? "Start automation" : "Pause automation"}
+              </button>
+            )}
           </span>
-          {statusQuery.data && (
-            <Button size="sm" onClick={() => toggle.mutate()} disabled={toggle.isPending}>
-              {statusQuery.data.mode === "PAUSED" ? "Start automation" : "Pause automation"}
-            </Button>
-          )}
           <Link to="/job-search">
             <Button variant="primary" tabIndex={-1}>
               Find new jobs
@@ -200,39 +195,20 @@ export function Home() {
       </div>
 
       {statusQuery.isError && (
-        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           Can&apos;t reach the app. Make sure it&apos;s running, then refresh.
         </div>
       )}
       {toggle.isError && <p className="text-xs text-red-600">{toggle.error.message}</p>}
 
-      {!allDone && !loading ? (
-        <SetupChecklist steps={steps} doneCount={doneCount} nextIndex={nextIndex} />
-      ) : (
-        allDone && (
-          <section className="flex flex-wrap items-center justify-between gap-5 rounded-3xl bg-brand-700 px-8 py-7 text-white shadow-glow">
-            <div className="max-w-xl">
-              <span className="inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold text-brand-100">
-                Do this first
-              </span>
-              <h2 className="mt-3 text-2xl font-extrabold leading-snug tracking-tight">{action.title}</h2>
-              <p className="mt-2 text-sm leading-relaxed text-brand-100">{action.body}</p>
-            </div>
-            <Link
-              to={action.to}
-              className="rounded-full bg-white px-7 py-3.5 text-base font-extrabold text-brand-700 shadow-soft transition hover:bg-brand-50"
-            >
-              {action.cta}
-            </Link>
-          </section>
-        )
-      )}
+      {!allDone && !loading && <SetupChecklist steps={steps} doneCount={doneCount} nextIndex={nextIndex} />}
 
       {allDone && (
         <WeeklyGoal
           thisWeek={thisWeek}
           lastWeek={lastWeek}
           goal={goal}
+          days={days}
           onSave={async (n) => {
             await api.saveAnswer("weekly_goal", { value_type: "number", value: n });
             await queryClient.invalidateQueries({ queryKey: ["answers"] });
@@ -242,12 +218,9 @@ export function Home() {
 
       {allDone && (
         <section aria-label="Pipeline">
-          <div className="mb-3 flex items-baseline justify-between">
-            <h2 className="text-base font-extrabold text-ink-900">Pipeline</h2>
-            <span className="text-xs text-ink-500">Select a stage to see those jobs</span>
-          </div>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-            {STAGES.map((s) => {
+          <h2 className="mb-3 text-base font-bold text-ink-900">Pipeline</h2>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5 lg:gap-8">
+            {STAGES.map((s, i) => {
               const on = openStage === s.key;
               return (
                 <button
@@ -255,28 +228,43 @@ export function Home() {
                   type="button"
                   aria-pressed={on}
                   onClick={() => setOpenStage(on ? null : s.key)}
-                  className={`relative rounded-2xl border-2 bg-white px-5 pb-4 pt-5 text-left shadow-soft transition hover:border-brand-200 ${
+                  className={`relative rounded-2xl border-2 bg-white px-5 py-4 text-left shadow-soft transition hover:border-brand-200 ${
                     on ? "border-brand-500" : "border-transparent"
                   }`}
                 >
-                  <div className={`text-xs font-semibold ${on ? "text-brand-600" : "text-ink-500"}`}>{s.label}</div>
-                  <div className="mt-1 text-4xl font-extrabold tracking-tight text-ink-900">{stages[s.key].length}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-brand-200" aria-hidden="true" />
+                    <span className={`text-xs font-semibold ${on ? "text-brand-600" : "text-ink-500"}`}>{s.label}</span>
+                  </div>
+                  <div className="mt-1.5 text-4xl font-extrabold tracking-tight text-ink-900">{stages[s.key].length}</div>
                   {stalled === s.key && (
                     <div className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-bold text-amber-700">
                       <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
                       Waiting longest
                     </div>
                   )}
+                  {i < STAGES.length - 1 && (
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute -right-[30px] top-1/2 hidden h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-[#ddd8f3] bg-white text-brand-500 shadow-pill lg:flex"
+                    >
+                      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M5 12h13M13 6l6 6-6 6" />
+                      </svg>
+                    </span>
+                  )}
                 </button>
               );
             })}
           </div>
-          {openStage && <StagePanel stage={openStage} jobs={stages[openStage]} now={now} onClose={() => setOpenStage(null)} />}
+          {openStage && (
+            <StagePanel stage={openStage} jobs={stages[openStage]} now={now} onClose={() => setOpenStage(null)} />
+          )}
         </section>
       )}
 
       {allDone && (
-        <div className="grid items-stretch gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
           <MatchesCard matches={matches} loading={resultsQuery.isLoading} />
           <FollowUpCard items={due} />
         </div>
@@ -287,55 +275,6 @@ export function Home() {
       {hasProfile && missing.length > 0 && <ProfileBanner profile={profileQuery.data} answers={answersQuery.data} />}
     </div>
   );
-}
-
-function nextAction(a: {
-  openQuestions: number;
-  blockedJobs: number;
-  readyCount: number;
-  readyTop: JobOut | undefined;
-  dueCount: number;
-  matchCount: number;
-}): { title: string; body: string; cta: string; to: string } {
-  if (a.openQuestions > 0) {
-    const jobsText = a.blockedJobs === 1 ? "1 application" : `${a.blockedJobs} applications`;
-    return {
-      title: `Answer ${a.openQuestions} ${a.openQuestions === 1 ? "question" : "questions"} to unblock ${jobsText}`,
-      body: "A few questions are holding things up. Answer once and they are filled in every time after.",
-      cta: "Answer now",
-      to: "/needs-attention",
-    };
-  }
-  if (a.readyCount > 0 && a.readyTop) {
-    return {
-      title: `Apply to ${a.readyTop.title} at ${a.readyTop.company}`,
-      body: `${a.readyCount} ${a.readyCount === 1 ? "job is" : "jobs are"} ready, each with a resume. This one fits you best.`,
-      cta: "See ready jobs",
-      to: "/jobs?stage=ready",
-    };
-  }
-  if (a.dueCount > 0) {
-    return {
-      title: `Follow up with ${a.dueCount} ${a.dueCount === 1 ? "employer" : "employers"}`,
-      body: "A friendly nudge goes a long way. One click and we'll draft a customized follow-up email.",
-      cta: "See follow-ups",
-      to: "/",
-    };
-  }
-  if (a.matchCount > 0) {
-    return {
-      title: `Review ${a.matchCount} new ${a.matchCount === 1 ? "match" : "matches"}`,
-      body: "Your saved search found some new ones.",
-      cta: "Open Job Search",
-      to: "/job-search",
-    };
-  }
-  return {
-    title: "Find your next job",
-    body: "All caught up! Run a search or paste a job link.",
-    cta: "Find new jobs",
-    to: "/job-search",
-  };
 }
 
 function SetupChecklist({ steps, doneCount, nextIndex }: { steps: Step[]; doneCount: number; nextIndex: number }) {
@@ -350,9 +289,8 @@ function SetupChecklist({ steps, doneCount, nextIndex }: { steps: Step[]; doneCo
           </Ring>
           <div className="flex-1">
             <h2 className="text-lg font-bold text-ink-900">Get started</h2>
-            <p className="mt-1 text-sm text-ink-500">
-              {steps.length - doneCount} {steps.length - doneCount === 1 ? "step" : "steps"} left. Finish them in any
-              order.
+            <p className="mt-1 text-sm font-semibold text-ink-500">
+              {doneCount} of {steps.length} done
             </p>
           </div>
         </div>
@@ -400,11 +338,13 @@ function WeeklyGoal({
   thisWeek,
   lastWeek,
   goal,
+  days,
   onSave,
 }: {
   thisWeek: number;
   lastWeek: number;
   goal: number;
+  days: { counts: number[]; today: number };
   onSave: (n: number) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -414,11 +354,22 @@ function WeeklyGoal({
   useEffect(() => setDraft(String(goal)), [goal]);
 
   const left = Math.max(0, goal - thisWeek);
-  const caption =
-    thisWeek >= goal
-      ? `Goal reached${thisWeek > goal ? `, with ${thisWeek - goal} to spare` : ""}. Nice work.`
-      : `${left} more by Sunday and you hit your goal.`;
-  const last = lastWeek === 0 ? "" : ` Last week you sent ${lastWeek}.`;
+  const hit = left === 0;
+  const per = perDayNeeded(thisWeek, goal, days.today);
+  const pace = hit
+    ? thisWeek > goal
+      ? `Goal reached, ${thisWeek - goal} to spare`
+      : "Goal reached"
+    : thisWeek === 0
+      ? `About ${per} a day gets you there`
+      : `${left} to go. ${per <= 1 ? "One a day" : `About ${per} a day`} does it`;
+  const bubble = hit
+    ? "Goal reached! Time to celebrate, then keep it going."
+    : thisWeek === 0
+      ? "Fresh week. Let's get the first one in today."
+      : thisWeek >= goal / 2
+        ? "More than halfway. Keep it going!"
+        : "Nice start. You're building momentum.";
 
   const save = async () => {
     const n = Math.round(Number(draft));
@@ -436,51 +387,116 @@ function WeeklyGoal({
   };
 
   return (
-    <Card className="p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-baseline gap-2.5">
-          <h2 className="text-base font-extrabold text-ink-900">Weekly goal</h2>
-          <span className="text-sm text-ink-500">
-            <b className="text-xl font-extrabold text-ink-900">{thisWeek}</b> of {goal} applications sent
-          </span>
-        </div>
-        {editing ? (
-          <div className="flex items-center gap-2">
-            <label className="sr-only" htmlFor="goal-input">
-              Applications per week
-            </label>
-            <input
-              id="goal-input"
-              type="number"
-              min={1}
-              max={30}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              className="w-20 rounded-xl border border-[#ddd8f3] bg-white px-3 py-1.5 text-sm"
-            />
-            <Button size="sm" variant="primary" onClick={save} disabled={saving}>
-              {saving ? "Saving…" : "Save"}
-            </Button>
-            <Button size="sm" onClick={() => setEditing(false)}>
-              Cancel
-            </Button>
+    <Card className={`p-6 md:p-7 ${hit ? "bg-gradient-to-br from-white to-emerald-50" : ""}`}>
+      <div className="grid items-center gap-x-10 gap-y-5 md:grid-cols-[minmax(230px,300px)_minmax(0,1fr)]">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-base font-bold text-ink-900">Weekly goal</h2>
+          <div className="flex items-baseline gap-2.5">
+            <strong className="text-5xl font-extrabold leading-none tracking-tight text-ink-900">{thisWeek}</strong>
+            <span className="text-sm font-semibold text-ink-700">of {goal} sent this week</span>
           </div>
-        ) : (
-          <Button size="sm" onClick={() => setEditing(true)}>
-            Change goal
-          </Button>
-        )}
+          <div>
+            <span
+              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                hit ? "bg-emerald-50 text-emerald-700" : "bg-brand-50 text-brand-700"
+              }`}
+            >
+              {pace}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-ink-500">
+            {lastWeek > 0 && (
+              <>
+                <span>Last week: {lastWeek} sent</span>
+                <span aria-hidden="true">&middot;</span>
+              </>
+            )}
+            {editing ? (
+              <span className="flex flex-wrap items-center gap-2">
+                <label className="sr-only" htmlFor="goal-input">
+                  Applications per week
+                </label>
+                <input
+                  id="goal-input"
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  className="w-20 rounded-xl border border-[#ddd8f3] bg-white px-3 py-1.5 text-sm"
+                />
+                <Button size="sm" variant="primary" onClick={save} disabled={saving}>
+                  {saving ? "Saving…" : "Save"}
+                </Button>
+                <Button size="sm" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="rounded-lg px-1 py-1 text-xs font-bold text-brand-600 hover:underline"
+              >
+                Change goal
+              </button>
+            )}
+          </div>
+          {failed && <p className="text-xs text-red-600">Couldn't save the goal. Try again.</p>}
+        </div>
+
+        <div className="min-w-0">
+          <div className="mb-3.5 flex items-center justify-start gap-4 md:justify-end">
+            <p
+              role="status"
+              className="relative m-0 max-w-[260px] rounded-2xl border border-[#ddd8f3] bg-white px-4 py-3 text-[13.5px] font-semibold leading-snug text-ink-900 shadow-pill"
+            >
+              {bubble}
+              <span
+                aria-hidden="true"
+                className="absolute -right-[8px] top-1/2 h-3.5 w-3.5 -translate-y-1/2 rotate-45 rounded-tr border-r border-t border-[#ddd8f3] bg-white"
+              />
+            </p>
+            <OtterTile size={64} className="shrink-0 drop-shadow-lg" />
+          </div>
+          <div className="mb-3 flex gap-2" role="img" aria-label={`${thisWeek} of ${goal} applications sent this week`}>
+            {Array.from({ length: goal }, (_, i) => (
+              <div
+                key={i}
+                className={`h-3.5 flex-1 rounded-full ${
+                  i < thisWeek
+                    ? hit
+                      ? "bg-emerald-500"
+                      : "bg-gradient-to-r from-brand-400 to-brand-500 shadow-glow"
+                    : "bg-brand-100"
+                }`}
+              />
+            ))}
+          </div>
+          <ul className="grid grid-cols-7 gap-1.5" aria-label="Applications sent each day this week">
+            {DAY_NAMES.map((d, i) => {
+              const c = days.counts[i];
+              const isToday = i === days.today;
+              return (
+                <li
+                  key={d}
+                  aria-label={`${d}: ${c} sent`}
+                  className={`flex flex-col items-center gap-1 text-[11px] font-bold ${isToday ? "text-brand-700" : "text-ink-500"}`}
+                >
+                  <b
+                    className={`grid h-[30px] w-[30px] place-items-center rounded-full text-xs ${
+                      c > 0 ? (hit ? "bg-emerald-500 text-white" : "bg-brand-500 text-white") : "bg-brand-50 text-ink-400"
+                    } ${isToday ? "ring-2 ring-brand-500 ring-offset-2" : ""}`}
+                  >
+                    {c > 0 ? c : ""}
+                  </b>
+                  <span>{d}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       </div>
-      <div className="mt-4 flex gap-2" role="img" aria-label={`${thisWeek} of ${goal} applications sent this week`}>
-        {Array.from({ length: goal }, (_, i) => (
-          <div key={i} className={`h-3.5 flex-1 rounded-full ${i < thisWeek ? "bg-emerald-500" : "bg-brand-100"}`} />
-        ))}
-      </div>
-      <p className="mt-3 text-sm text-ink-500">
-        {caption}
-        {last}
-      </p>
-      {failed && <p className="mt-2 text-xs text-red-600">Couldn't save the goal. Try again.</p>}
     </Card>
   );
 }
@@ -527,7 +543,7 @@ function StagePanel({
   return (
     <div className="relative mt-5 rounded-2xl border-2 border-brand-500 bg-white px-6 pb-2 pt-3">
       <div className="flex items-center justify-between py-2">
-        <div className="text-sm font-extrabold text-brand-700">{label}</div>
+        <div className="text-sm font-bold text-ink-900">{label}</div>
         <div className="flex items-center gap-3">
           <Link to={sees} className="text-xs font-bold text-brand-600 hover:underline">
             {jobs.length > shown.length ? `See all ${jobs.length} in Jobs` : "Open in Jobs"}
@@ -606,6 +622,7 @@ function MatchesCard({ matches, loading }: { matches: JobSearchResultOut[]; load
   const saved = useMemo(loadSavedCriteria, []);
   const canRefresh = !!(saved.titles && saved.titles.trim());
   const [notice, setNotice] = useState<string | null>(null);
+  const [onlyTop, setOnlyTop] = useState(false);
 
   const refresh = useMutation<unknown, ApiError, void>({
     mutationFn: async () => {
@@ -626,42 +643,56 @@ function MatchesCard({ matches, loading }: { matches: JobSearchResultOut[]; load
     },
   });
 
-  const top = matches.slice(0, 4);
+  const pool = onlyTop ? matches.filter((r) => (r.match_score ?? 0) >= TOP_SCORE) : matches;
+  const top = pool.slice(0, 3);
+  const chip = (on: boolean) =>
+    `rounded-full border px-3.5 py-1.5 text-[13px] font-semibold shadow-pill transition ${
+      on ? "border-brand-500 bg-brand-100 text-brand-700" : "border-[#ddd8f3] bg-white text-ink-700 hover:bg-brand-50"
+    }`;
   return (
     <Card className="p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-base font-extrabold text-ink-900">Best new matches</h2>
-          <p className="mt-1 text-xs text-ink-500">From your saved search</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <h2 className="text-base font-bold text-ink-900">Best new matches</h2>
+          {matches.length > 0 && <Badge tone="brand">{matches.length} new</Badge>}
         </div>
-        <div className="flex items-center gap-3">
-          {canRefresh ? (
-            <Button size="sm" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
-              {refresh.isPending ? "Searching…" : "Refresh saved search"}
-            </Button>
-          ) : (
-            <Link to="/job-search">
-              <Button size="sm" tabIndex={-1}>
-                Open Job Search
-              </Button>
-            </Link>
-          )}
-          {matches.length > top.length && (
-            <Link to="/job-search" className="text-xs font-bold text-brand-600 hover:underline">
-              See all {matches.length}
-            </Link>
-          )}
-        </div>
+        {canRefresh ? (
+          <button
+            type="button"
+            onClick={() => refresh.mutate()}
+            disabled={refresh.isPending}
+            className="rounded-lg px-1 py-1 text-xs font-bold text-brand-600 hover:underline disabled:opacity-50"
+          >
+            {refresh.isPending ? "Searching…" : "Refresh"}
+          </button>
+        ) : (
+          <Link to="/job-search" className="text-xs font-bold text-brand-600 hover:underline">
+            Open Job Search
+          </Link>
+        )}
       </div>
+      {matches.length > 0 && (
+        <div className="mt-3 flex gap-2" role="group" aria-label="Filter matches">
+          <button type="button" aria-pressed={!onlyTop} onClick={() => setOnlyTop(false)} className={chip(!onlyTop)}>
+            All
+          </button>
+          <button type="button" aria-pressed={onlyTop} onClick={() => setOnlyTop(true)} className={chip(onlyTop)}>
+            {Math.round(TOP_SCORE * 100)}%+
+          </button>
+        </div>
+      )}
       {refresh.isPending && <p className="mt-3 animate-pulse text-xs text-ink-500">Searching the web. This can take a minute.</p>}
       {refresh.isError && <p className="mt-3 text-xs text-red-600">{refresh.error.message}</p>}
       {notice && !refresh.isPending && !refresh.isError && <p className="mt-3 text-xs text-ink-700">{notice}</p>}
       {loading && <p className="mt-4 text-sm text-ink-400">Loading…</p>}
-      {!loading && top.length === 0 && (
-        <p className="mt-4 text-sm text-ink-500">
-          No new matches waiting.{" "}
-          {canRefresh ? "Refresh your saved search to look again." : "Run a search and your matches show up here."}
-        </p>
+      {!loading && matches.length === 0 && (
+        <div className="flex flex-col items-center gap-1.5 px-3 py-7 text-center text-sm text-ink-500">
+          <b className="text-[15px] text-ink-900">No new matches waiting</b>
+          <span>{canRefresh ? "Refresh your saved search to look again." : "Run a search and your matches show up here."}</span>
+        </div>
+      )}
+      {!loading && matches.length > 0 && top.length === 0 && (
+        <p className="mt-4 text-sm text-ink-500">None at {Math.round(TOP_SCORE * 100)}% or higher right now.</p>
       )}
       <ul className="mt-2">
         {top.map((r) => {
@@ -671,19 +702,26 @@ function MatchesCard({ matches, loading }: { matches: JobSearchResultOut[]; load
             <li key={r.id} className="flex items-center gap-4 border-t border-ink-900/5 py-3.5 first:border-t-0">
               <ScoreDot score={r.match_score} />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-bold text-ink-900">{r.title}</div>
+                <div className="text-sm font-bold text-ink-900">{r.title}</div>
                 <div className="mt-0.5 text-xs text-ink-500">
-                  {meta.filter(Boolean).join(". ")}
-                  {posted ? `. Posted ${posted}` : ""}
+                  {meta.filter(Boolean).join(" \u00b7 ")}
+                  {posted ? ` \u00b7 Posted ${posted}` : ""}
                 </div>
               </div>
-              <Button size="sm" onClick={() => add.mutate(r.id)} disabled={add.isPending}>
-                Add to jobs
+              <Button size="sm" onClick={() => add.mutate(r.id)} disabled={add.isPending} aria-label={`Add ${r.title} to jobs`}>
+                Add
               </Button>
             </li>
           );
         })}
       </ul>
+      {pool.length > top.length && (
+        <div className="mt-1.5 border-t border-ink-900/5 pt-3">
+          <Link to="/job-search" className="text-xs font-bold text-brand-600 hover:underline">
+            See all {pool.length} matches
+          </Link>
+        </div>
+      )}
       {add.isError && <p className="mt-2 text-xs text-red-600">{add.error.message}</p>}
     </Card>
   );
@@ -724,65 +762,106 @@ function FollowUpCard({ items }: { items: FollowUp[] }) {
   const shown = items.slice(0, 5);
   return (
     <Card className="p-6">
-      <h2 className="text-base font-extrabold text-ink-900">Follow up</h2>
-      <p className="mt-1 text-xs text-ink-500">
-        Applications with no reply after {FOLLOW_UP_AFTER_DAYS} days.
-      </p>
-      {shown.length === 0 && <p className="mt-4 text-sm text-ink-500">Nobody to follow up with right now.</p>}
-      <ul className="mt-2">
-        {shown.map((f) => (
-          <li key={f.job.id} className="border-t border-ink-900/5 py-3.5 first:border-t-0">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-bold text-ink-900">{f.job.company}</div>
-                <div className="mt-0.5 text-xs text-ink-500">
-                  {`Applied ${f.days} days ago, no reply`}
+      <div className="flex items-center gap-2.5">
+        <h2 className="text-base font-bold text-ink-900">Follow up</h2>
+        {items.length > 0 && <Badge>{items.length} waiting</Badge>}
+      </div>
+      {shown.length === 0 && (
+        <div className="flex flex-col items-center gap-1.5 px-3 py-7 text-center text-sm text-ink-500">
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-emerald-50 text-emerald-700" aria-hidden="true">
+            <CheckIcon className="h-5 w-5" />
+          </span>
+          <b className="text-[15px] text-ink-900">All caught up</b>
+          <span>Nobody to follow up with right now.</span>
+        </div>
+      )}
+      <ul className="mt-3 space-y-2.5">
+        {shown.map((f) => {
+          const overdue = isOverdue(f.days);
+          const fill = Math.min(100, Math.round((f.days / FOLLOW_UP_METER_DAYS) * 100));
+          const initial = (f.job.company.trim()[0] ?? "?").toUpperCase();
+          return (
+            <li key={f.job.id} className="rounded-2xl border border-[#ddd8f3] bg-brand-50/60 px-4 py-3.5">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-100 text-[15px] font-extrabold text-brand-700"
+                  aria-hidden="true"
+                >
+                  {initial}
+                </span>
+                <div className="min-w-[8rem] flex-1">
+                  <div className="text-sm font-bold text-ink-900">{f.job.company}</div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-500">
+                    <span>Applied {f.days} days ago</span>
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                        overdue ? "bg-red-50 text-red-700" : "bg-ink-900/5 text-ink-500"
+                      }`}
+                    >
+                      {overdue ? "Overdue" : "Due now"}
+                    </span>
+                  </div>
                 </div>
+                <Button size="sm" onClick={() => start(f)} disabled={make.isPending && draftFor === f.job.id}>
+                  {make.isPending && draftFor === f.job.id ? "Writing…" : "Draft message"}
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => done.mutate(f.job.id)}
+                  disabled={done.isPending}
+                  aria-label={`Mark ${f.job.company} done`}
+                  title="Mark done"
+                  className="grid h-8 w-8 place-items-center rounded-full border border-[#ddd8f3] bg-white text-ink-500 transition hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50"
+                >
+                  <CheckIcon className="h-4 w-4" />
+                </button>
               </div>
-              <Button size="sm" onClick={() => start(f)} disabled={make.isPending && draftFor === f.job.id}>
-                {make.isPending && draftFor === f.job.id ? "Writing…" : "Draft message"}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => done.mutate(f.job.id)} disabled={done.isPending}>
-                Done
-              </Button>
-            </div>
-            {draftFor === f.job.id && make.isError && (
-              <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">{make.error.message}</p>
-            )}
-            {draftFor === f.job.id && draft && (
-              <div className="mt-3 rounded-2xl bg-brand-50/60 p-4">
-                <div className="text-xs font-bold text-ink-900">{draft.subject}</div>
-                <label className="sr-only" htmlFor={`draft-${f.job.id}`}>
-                  Message
-                </label>
-                <textarea
-                  id={`draft-${f.job.id}`}
-                  value={draft.body}
-                  onChange={(e) => {
-                    setDraft({ ...draft, body: e.target.value });
-                    setCopied(false);
-                  }}
-                  rows={6}
-                  className="mt-2 w-full rounded-xl border border-[#ddd8f3] bg-white px-3 py-2 text-sm leading-relaxed text-ink-900"
+              <div className="relative mt-3 h-1.5 overflow-hidden rounded-full bg-brand-100" aria-hidden="true">
+                <div
+                  className={`h-full rounded-full ${overdue ? "bg-red-500" : "bg-brand-400"}`}
+                  style={{ width: `${fill}%` }}
                 />
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <Button size="sm" variant="primary" onClick={() => void copy(`Subject: ${draft.subject}\n\n${draft.body}`)}>
-                    {copied ? "Copied" : "Copy message"}
-                  </Button>
-                  <Button size="sm" onClick={() => make.mutate(f)} disabled={make.isPending}>
-                    {make.isPending ? "Writing…" : "Write another"}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setDraftFor(null)}>
-                    Close
-                  </Button>
-                </div>
-                <p className="mt-2 text-xs text-ink-500">You send it yourself. Edit it first if you like.</p>
+                <span className="absolute inset-y-0 left-1/2 w-0.5 bg-white" />
               </div>
-            )}
-          </li>
-        ))}
+              {draftFor === f.job.id && make.isError && (
+                <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">{make.error.message}</p>
+              )}
+              {draftFor === f.job.id && draft && (
+                <div className="mt-3 rounded-2xl bg-white p-4">
+                  <div className="text-xs font-bold text-ink-900">{draft.subject}</div>
+                  <label className="sr-only" htmlFor={`draft-${f.job.id}`}>
+                    Message
+                  </label>
+                  <textarea
+                    id={`draft-${f.job.id}`}
+                    value={draft.body}
+                    onChange={(e) => {
+                      setDraft({ ...draft, body: e.target.value });
+                      setCopied(false);
+                    }}
+                    rows={6}
+                    className="mt-2 w-full rounded-xl border border-[#ddd8f3] bg-white px-3 py-2 text-sm leading-relaxed text-ink-900"
+                  />
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Button size="sm" variant="primary" onClick={() => void copy(`Subject: ${draft.subject}\n\n${draft.body}`)}>
+                      {copied ? "Copied" : "Copy message"}
+                    </Button>
+                    <Button size="sm" onClick={() => make.mutate(f)} disabled={make.isPending}>
+                      {make.isPending ? "Writing…" : "Write another"}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setDraftFor(null)}>
+                      Close
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-ink-500">You send it yourself. Edit it first if you like.</p>
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
       {items.length > shown.length && <p className="mt-2 text-xs text-ink-500">And {items.length - shown.length} more.</p>}
+      {done.isError && <p className="mt-2 text-xs text-red-600">{done.error.message}</p>}
     </Card>
   );
 }
@@ -803,7 +882,6 @@ function ProfileBanner({
   });
   if (hidden) return null;
   const percent = profilePercent(profile, answers);
-  const missing = missingItems(profile, answers);
   const hide = () => {
     setHidden(true);
     try {
@@ -812,30 +890,25 @@ function ProfileBanner({
       // hiding is a convenience only
     }
   };
-  const next = missing.slice(0, 2).join(" and ").toLowerCase();
-  const body: ReactNode = `Add your ${next}${missing.length > 2 ? ` and ${missing.length - 2} more` : ""} to fill more forms automatically.`;
   return (
-    <section
-      aria-label="Profile completeness"
-      className="flex flex-wrap items-center gap-5 rounded-2xl bg-brand-100/70 px-7 py-6"
-    >
-      <Ring value={percent / 100} size={64} stroke={7} color="#5b57f5">
-        <span className="text-sm font-extrabold text-ink-900">{percent}%</span>
+    <section aria-label="Profile completeness" className="relative flex flex-wrap items-center gap-4 rounded-2xl bg-white px-6 py-4 shadow-soft">
+      <Ring value={percent / 100} size={48} stroke={6} color="#5b57f5">
+        <span className="text-[11px] font-extrabold text-ink-900">{percent}%</span>
       </Ring>
-      <div className="min-w-[16rem] flex-1">
-        <h2 className="text-base font-extrabold text-ink-900">Your profile is almost there</h2>
-        <p className="mt-1 text-sm text-ink-700">{body}</p>
-      </div>
-      <div className="flex items-center gap-2">
-        <Link to="/profile">
-          <Button variant="primary" tabIndex={-1}>
-            Finish profile
-          </Button>
-        </Link>
-        <Button variant="ghost" onClick={hide}>
-          Hide
+      <h2 className="min-w-[12rem] flex-1 text-[15px] font-bold text-ink-900">Your profile is almost there</h2>
+      <Link to="/profile">
+        <Button variant="primary" size="sm" tabIndex={-1}>
+          Finish profile
         </Button>
-      </div>
+      </Link>
+      <button
+        type="button"
+        onClick={hide}
+        aria-label="Hide profile reminder"
+        className="grid h-8 w-8 place-items-center rounded-full text-lg text-ink-500 transition hover:bg-brand-50 hover:text-brand-700"
+      >
+        &times;
+      </button>
     </section>
   );
 }

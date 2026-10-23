@@ -5,6 +5,10 @@ import type { JobOut } from "@/types/api";
 export type StageKey = "scored" | "going" | "ready" | "progress" | "applied";
 
 export const FOLLOW_UP_AFTER_DAYS = 7;
+/** A follow-up this old is labelled "Overdue"; between the two it is "Due now". */
+export const OVERDUE_AFTER_DAYS = 10;
+/** The follow-up meter fills over this many days; its halfway tick is the 7-day mark. */
+export const FOLLOW_UP_METER_DAYS = 14;
 const DAY = 86_400_000;
 
 export const hasResume = (j: JobOut) => j.documents.some((d) => d.document_type === "resume");
@@ -93,3 +97,26 @@ export function followUps(jobs: JobOut[], now: Date): FollowUp[] {
   }
   return out.sort((a, b) => b.days - a.days);
 }
+
+/** Applications sent on each day of this week, Monday first, plus which day today is (0 = Monday). */
+export function dayCounts(jobs: JobOut[], now: Date): { counts: number[]; today: number } {
+  const start = weekStart(now).getTime();
+  const counts = [0, 0, 0, 0, 0, 0, 0];
+  for (const j of jobs) {
+    if (!j.applied_at) continue;
+    const t = new Date(j.applied_at);
+    if (t.getTime() < start) continue;
+    const idx = (t.getDay() + 6) % 7;
+    counts[idx]++;
+  }
+  return { counts, today: (now.getDay() + 6) % 7 };
+}
+
+/** How many a day it takes to reach the goal, counting today. Zero once the goal is met. */
+export function perDayNeeded(thisWeek: number, goal: number, today: number): number {
+  const left = Math.max(0, goal - thisWeek);
+  if (left === 0) return 0;
+  return Math.ceil(left / Math.max(1, 7 - today));
+}
+
+export const isOverdue = (days: number) => days >= OVERDUE_AFTER_DAYS;

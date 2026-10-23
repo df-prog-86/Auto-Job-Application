@@ -54,8 +54,6 @@ export function postedDaysAgo(date?: string | null, now: Date = new Date()): num
 export const MAY_BE_CLOSED_AFTER_DAYS = 60;
 export const mayBeClosed = (date?: string | null, now: Date = new Date()): boolean => (postedDaysAgo(date, now) ?? 0) > MAY_BE_CLOSED_AFTER_DAYS;
 
-const HOURS_PER_YEAR = 2080;
-
 /** "$92.7K", "$150K", "$950" for a yearly amount. */
 function compactMoney(n: number): string {
   if (n >= 1000) return `$${(Math.round(n / 100) / 10).toString().replace(/\.0$/, "")}K`;
@@ -63,7 +61,7 @@ function compactMoney(n: number): string {
 }
 
 /**
- * The one way every page writes pay: "$92.7K to $148.4K / yr". Hourly pay is turned into a yearly figure (2,080 hours), cents and
+ * The one way every page writes pay: "$92.7K to $148.4K / yr". Hourly pay stays hourly ("$55 to $75 / hr"), cents and
  * notes such as "Offers Equity" are dropped, and no dash is ever used. Null when the text has no dollar amount.
  */
 export function formatPayText(text?: string | null): string | null {
@@ -78,8 +76,13 @@ export function formatPayText(text?: string | null): string | null {
   }
   if (amounts.length === 0) return null;
   const hourly = /(?:\/\s*h(?:ou)?r|per\s+hour|an\s+hour|hourly)/i.test(t) || Math.max(...amounts) < 1000;
-  const yearly = hourly ? amounts.map((a) => a * HOURS_PER_YEAR) : amounts;
-  const [lo, hi] = [Math.min(...yearly), Math.max(...yearly)];
+  if (hourly) {
+    // Hourly pay is shown the way the posting states it: a part-time or short-hours role would look far too high as a yearly figure.
+    const [h1, h2] = [Math.min(...amounts), Math.max(...amounts)];
+    const rate = (n: number) => (Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`);
+    return h1 === h2 ? `${rate(h1)} / hr` : `${rate(h1)} to ${rate(h2)} / hr`;
+  }
+  const [lo, hi] = [Math.min(...amounts), Math.max(...amounts)];
   return lo === hi ? `${compactMoney(lo)} / yr` : `${compactMoney(lo)} to ${compactMoney(hi)} / yr`;
 }
 
@@ -94,8 +97,8 @@ export function formatSalary(salary?: Record<string, unknown> | null): string | 
   if (min === null && max === null) return null;
   // Older saved jobs may say "hour" for a yearly range; real hourly pay is never in the thousands.
   const hourly = salary.period === "hour" && (max ?? min ?? 0) < 1000;
-  const money = (n: number) => String(hourly ? n * HOURS_PER_YEAR : n);
-  return formatPayText(min !== null && max !== null ? `$${money(min)} - $${money(max)}` : `$${money((min ?? max) as number)}`);
+  const unit = hourly ? " per hour" : "";
+  return formatPayText(min !== null && max !== null ? `$${min} - $${max}${unit}` : `$${(min ?? max) as number}${unit}`);
 }
 
 /** The location without placeholder words such as "Not specified". Null when nothing real is left. */

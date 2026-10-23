@@ -50,3 +50,14 @@ def test_pay_period_comes_from_the_words_next_to_the_number():
     assert parse_salary("$25/hr")["period"] == "hour"
     assert parse_salary("$90,000 a year")["period"] == "year"
     assert parse_salary("$38 - $52")["period"] == "hour"  # small numbers with no unit read as hourly
+
+
+def test_a_companys_money_is_not_read_as_pay():
+    from app.services.discovery.normalization import parse_salary
+
+    # "$250 million" of funding used to be read as $250 an hour
+    out = parse_salary("Commure has raised $250 million in funding. Pay: $120K - $160K")
+    assert out["period"] == "year" and out["min"] == 120000 and out["max"] == 160000
+    assert parse_salary("We are backed by $250M and growing.") == {}
+    assert parse_salary("We raised $25M. $120,000 - $160,000 per year")["min"] == 120000
+    assert parse_salary("$25/hr")["min"] == 25  # real hourly pay still reads

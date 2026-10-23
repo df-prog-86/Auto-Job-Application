@@ -112,6 +112,10 @@ _SALARY_PATTERN = re.compile(
 )
 
 
+_NOT_SALARY_AFTER = re.compile(r"^\s?(?:m\b|mm\b|million|billion|bn\b|b\b)")
+_NOT_SALARY_BEFORE = re.compile(r"\b(raised|funding|valuation|revenue of|series [a-f]|backed by|invested|budget of|bonus of)\W*(?:of |up to |over |\w+ ){0,3}$")
+
+
 def parse_posted_date(value: object) -> dt.date | None:
     """A posting date from "2026-09-30" or a full ISO timestamp. None if unreadable or in the future."""
     if not isinstance(value, str):
@@ -135,10 +139,19 @@ def parse_salary(text: str | None) -> dict:
     """
     if not text:
         return {}
-    match = _SALARY_PATTERN.search(text)
-    if not match:
+    match = None
+    for candidate in _SALARY_PATTERN.finditer(text):
+        after = text[candidate.end(): candidate.end() + 12].lower()
+        before = text[max(0, candidate.start() - 60): candidate.start()].lower()
+        if _NOT_SALARY_AFTER.match(after) or _NOT_SALARY_BEFORE.search(before):
+            continue  # "raised $250 million", "$25M in funding": a company's money, not pay
+        marked = re.search(r"(/|per\s|an\s|a\s)\s?(hour|hr|year|yr)\b|hourly|annual|yearly", text[candidate.start(): candidate.end() + 40].lower())
+        if candidate.group(2) is None and "k" not in text[candidate.start(): candidate.end()].lower() and float(candidate.group(1).replace(",", "")) < 1000 and not marked:
+            continue  # one small number with no unit is not clearly pay
+        match = candidate
+        break
+    if match is None:
         return {}
-
     def to_number(raw: str | None) -> float | None:
         if raw is None:
             return None

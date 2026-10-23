@@ -7,12 +7,13 @@ controlled dev use.
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.api import (
     answers,
@@ -56,6 +57,12 @@ def create_app() -> FastAPI:
     )
 
     app.add_middleware(LocalOnlyMiddleware)
+
+    @app.exception_handler(Exception)
+    async def _unexpected(request, exc):  # type: ignore[no-untyped-def]
+        # The cause goes to the backend log with the request that triggered it; the person sees a plain line.
+        logging.getLogger("app.errors").error("500 on %s %s", request.method, request.url.path, exc_info=exc)
+        return JSONResponse(status_code=500, content={"detail": "Something went wrong on our side. Try again, and if it keeps happening check the backend log."})
 
     # The extension origin is the only cross-origin caller this API expects;
     # the dashboard is served same-origin by this same process (spec §14).

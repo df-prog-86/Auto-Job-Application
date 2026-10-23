@@ -150,3 +150,4 @@ class ClearOut(BaseModel):
 class JobSearchWebOut(BaseModel):
     added: int  # jobs from the web search that were ranked into the list
     total: int  # how many matches the list has now
+    timed_out: bool = False  # the web part took longer than a minute and was stopped; the saved-list results are unaffected

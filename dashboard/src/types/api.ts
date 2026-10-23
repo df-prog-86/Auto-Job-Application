@@ -414,6 +414,7 @@ export interface JobSearchRunOut {
 export interface JobSearchWebOut {
   added: number;
   total: number;
+  timed_out?: boolean;
 }
 
 export interface JobSearchPageOut {

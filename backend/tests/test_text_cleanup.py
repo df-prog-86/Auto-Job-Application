@@ -99,3 +99,18 @@ def test_tidy_jobs_script_dry_run_then_apply(app_and_db):
         assert db.get(Job, 3).company == "Clean Inc"
         groups = duplicate_groups(db)
         assert len(groups) == 1 and {j.id for j in groups[0]} == {1, 2}
+
+
+def test_places_are_shown_plainly():
+    from app.services.jobcache.text import display_place
+
+    assert display_place("USA-NC-Virtual", "hybrid") == ("Remote (NC)", "remote")
+    assert display_place("Location not listed", "remote") == ("Remote", "remote")
+    assert display_place("Remote: United States", None) == ("Remote (US)", "remote")
+    assert display_place("Working Virtually", None) == ("Remote", "remote")
+    assert display_place("BRG-Chicago IL", None)[0] == "Chicago, IL"
+    assert display_place("NJ-Jersey City", None)[0] == "Jersey City, NJ"
+    assert display_place("Boston MA", None)[0] == "Boston, MA"
+    assert display_place("Client Site - USA - NY - New York - 11 Madison Avenue", None)[0] == "New York, NY"
+    assert display_place("New York, NY; Atlanta, GA; Roseland, NJ; Dallas, TX; Austin, TX", None)[0] == "New York, NY +4 more"
+    assert display_place("Remote, USA", "remote") == ("Remote, USA", "remote")

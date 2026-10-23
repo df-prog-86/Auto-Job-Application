@@ -1081,7 +1081,7 @@ def test_the_web_search_alone_ranks_its_finds_into_the_list_and_never_fails_the_
 
     client, SessionLocal = search
     out = client.post("/api/v1/job-search/web", json={"titles": "revenue cycle analyst", "web": "only"})
-    assert out.status_code == 200 and set(out.json()) == {"added", "total"}
+    assert out.status_code == 200 and set(out.json()) == {"added", "total", "timed_out"}
 
     async def boom(*a, **k):
         raise RuntimeError("web search down")
@@ -1195,3 +1195,20 @@ def test_pages_are_cut_from_one_checked_list_so_nothing_changes_between_pages(mo
     assert len(first) == 10 and len(second) == 10
     assert [i["title"] for i in first] == [i["title"] for i in again]  # opening page 2 changed nothing on page 1
     assert not ({i["title"] for i in first} & {i["title"] for i in second})
+
+
+def test_a_web_step_that_runs_past_its_minute_leaves_the_saved_results_alone(app_and_db, monkeypatch):
+    import asyncio
+
+    from app.api import job_search as js
+    from app.services.discovery import web_search
+
+    client, _ = app_and_db
+    monkeypatch.setattr(js, "WEB_STEP_SECONDS", 0.05)
+
+    async def slow(*a, **k):
+        await asyncio.sleep(2)
+
+    monkeypatch.setattr(web_search, "search_jobs_full", slow)
+    out = client.post("/api/v1/job-search/web", json={"titles": "analyst", "web": "only"})
+    assert out.status_code == 200 and out.json()["added"] == 0 and out.json()["timed_out"] is True

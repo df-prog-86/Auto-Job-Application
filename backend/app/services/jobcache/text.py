@@ -841,7 +841,7 @@ def clean_title(title: str | None, company: str | None = None) -> str:
     return out
 
 
-_VIRTUAL = re.compile(r"\b(virtual|remote|work from home|telecommute|home[- ]based)\b", re.I)
+_VIRTUAL = re.compile(r"\b(virtual(?:ly)?|remote|work(?:ing)? from home|telecommute|home[- ]based)\b", re.I)
 _NO_PLACE = re.compile(r"^\s*(location not (?:listed|stated|specified)|not (?:listed|stated|specified)|n/?a|none|unknown)\s*$", re.I)
 
 
@@ -861,3 +861,48 @@ def reconcile_place(location: str | None, work_type: str | None) -> tuple[str | 
     if not loc:
         return (("Remote" if work_type == "remote" else None), work_type)
     return loc, work_type
+
+
+_REMOTE_US = re.compile(r"^\s*remote\s*[:\-]\s*(?:united states(?: of america)?|usa|us)\s*$", re.I)
+_CODE_DASH = re.compile(r"^[A-Z]{2,5}\s*-\s*(?=[A-Z][a-z])")  # an office code before the city: "BRG-Chicago IL"
+_STATE_DASH_CITY = re.compile(r"^([A-Z]{2})\s*-\s*([A-Z][A-Za-z. ]+)$")  # "NJ-Jersey City"
+_CITY_SPACE_STATE = re.compile(r"^([A-Z][A-Za-z.' ]+?)\s+([A-Z]{2})$")  # "Boston MA"
+_USA_STATE_CITY = re.compile(r"\bUSA?\s*-\s*([A-Z]{2})\s*-\s*([A-Z][A-Za-z. ]+?)(?:\s*-|\s*$)")  # "Client Site - USA - NY - New York - 11 Madison Avenue"
+
+
+def _plain_place(part: str) -> str:
+    part = part.strip()
+    m = _USA_STATE_CITY.search(part)
+    if m and m.group(1) in US_STATES:
+        return f"{m.group(2).strip()}, {m.group(1)}"
+    m = _STATE_DASH_CITY.match(part)
+    if m and m.group(1) in US_STATES:
+        return f"{m.group(2).strip()}, {m.group(1)}"
+    part = _CODE_DASH.sub("", part)
+    m = _CITY_SPACE_STATE.match(part)
+    if m and m.group(2) in US_STATES:
+        return f"{m.group(1).strip()}, {m.group(2)}"
+    return part
+
+
+def display_place(location: str | None, work_type: str | None) -> tuple[str | None, str | None]:
+    """
+    A place and work type as a person should read them: no codes or street addresses, "Remote: United States" and "Working Virtually"
+    as plain remote, "Location not listed" as nothing, and a list of places as the first one and "+N more". Used when a result is shown;
+    the ranking works from the original text.
+    """
+    if not location:
+        return location, work_type
+    if _REMOTE_US.match(location):
+        return "Remote (US)", "remote"
+    place, work_type = reconcile_place(location, work_type)
+    if not place:
+        return place, work_type
+    parts = [p for p in re.split(r"\s*;\s*", place.strip()) if p]
+    shown: list[str] = []
+    for part in parts:
+        plain = _plain_place(part)
+        plain = tidy_place(part) if plain == part.strip() else plain
+        shown.append(re.sub(r"\s+-\s+\d.*$", "", plain or part))  # "Chicago - 550 Van Buren" reads "Chicago"
+    first = shown[0] if shown else place
+    return (f"{first} +{len(shown) - 1} more" if len(shown) > 1 else first), work_type

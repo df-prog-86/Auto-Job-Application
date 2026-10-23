@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import html
 import threading
@@ -34,6 +35,8 @@ from app.services.discovery.pipeline import ingest_manual_posting
 from app.services.jobcache.keys import loose_keys
 from app.services.llm.exceptions import LLMError, LLMNotConfiguredError
 from app.services.qualification.pipeline import QualificationError, score_against
+
+WEB_STEP_SECONDS = 60.0  # the most a search waits for the web part; the saved employer lists always show
 
 router = APIRouter(prefix="/api/v1/job-search", tags=["job-search"])
 
@@ -68,9 +71,10 @@ def _save_item(db: Session, item: dict, payload: JobSearchIn) -> JobSearchResult
     The result row for a found job. A job already on the list is reused, and one set aside by an earlier search comes back
     with its resume score intact, so a job is never saved twice and never scored twice.
     """
-    from app.services.jobcache.text import effective_work_type
+    from app.services.jobcache.text import display_place, effective_work_type
 
     item = {**item, "work_type": effective_work_type(item.get("work_type"), item.get("location"))}  # on site unless the employer says otherwise
+    item["location"], item["work_type"] = display_place(item.get("location"), item.get("work_type"))  # shown plainly; ranking used the original text
     row = (
         db.query(JobSearchResult)
         .filter(JobSearchResult.url_key == item["url_key"], JobSearchResult.status.in_(("new", "stale")))
@@ -187,7 +191,14 @@ async def run_search(payload: JobSearchIn, db: Session = Depends(get_db)) -> Job
     for (url,) in seen.all():
         known |= loose_keys(url)
     try:
-        outcome = await web_search.search_jobs_full(payload, known_keys=known, cache_only=payload.more or payload.web == "saved")
+        try:
+            outcome = await asyncio.wait_for(
+                web_search.search_jobs_full(payload, known_keys=known, cache_only=payload.more or payload.web == "saved"),
+                timeout=WEB_STEP_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            # The web part ran past its minute: show the saved-list results rather than make the person wait longer.
+            outcome = await web_search.search_jobs_full(payload, known_keys=known, cache_only=True)
     except LLMNotConfiguredError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -232,8 +243,11 @@ async def search_web(payload: JobSearchIn, db: Session = Depends(get_db)) -> Job
     if cache_service.web_searched_recently(payload):  # the identical search ran within the hour: its finds are already in the saved lists
         return JobSearchWebOut(added=0, total=len(await cache_service.ranked_items(payload)))
     try:
-        outcome = await web_search.search_jobs_full(payload, known_keys=known, web_only=True)
+        outcome = await asyncio.wait_for(web_search.search_jobs_full(payload, known_keys=known, web_only=True), timeout=WEB_STEP_SECONDS)
         cache_service.note_web_searched(payload)
+    except asyncio.TimeoutError:  # ran past its minute: nothing is added, and the same search may try again
+        total = len(await cache_service.ranked_items(payload))
+        return JobSearchWebOut(added=0, total=total, timed_out=True)
     except Exception:  # the web search is a bonus on top of the saved lists: any failure just means nothing is added
         total = len(await cache_service.ranked_items(payload))
         return JobSearchWebOut(added=0, total=total)

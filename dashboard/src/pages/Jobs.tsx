@@ -46,6 +46,7 @@ export function Jobs() {
   const [stage, setStage] = useState<Stage>(() => (STAGES.some((s) => s.value === wanted) ? (wanted as Stage) : "all"));
   const [sortBy, setSortBy] = useState<SortBy>("newest");
   const [query, setQuery] = useState("");
+  const [dupHidden, setDupHidden] = useState(false);
   const all = useMemo(() => jobsQuery.data ?? [], [jobsQuery.data]);
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const searched = terms.length
@@ -170,10 +171,15 @@ export function Jobs() {
         </p>
       )}
 
-      {dupIds.size > 0 && (
-        <p role="status" className="rounded-xl bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800">
-          {dupIds.size} jobs look like duplicates and are marked "Saved twice". Delete the extra copy from its menu.
-        </p>
+      {dupIds.size > 0 && !dupHidden && (
+        <div role="status" className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800">
+          <span>
+            {dupIds.size} jobs look like duplicates and are marked "Saved twice". Delete the extra copy from its menu.
+          </span>
+          <button type="button" onClick={() => setDupHidden(true)} className="ml-auto rounded-full px-3 py-1 text-[13px] font-bold text-amber-900 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-300">
+            Clear
+          </button>
+        </div>
       )}
 
       {visible.length > 0 && (

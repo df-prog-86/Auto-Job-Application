@@ -199,6 +199,7 @@ export function JobSearch() {
       const apiCriteria = toApiCriteria(c);
       lastCriteria.current = apiCriteria;
       setStep(0);
+      setNotice(null);
       setSearched(c);
       // Nothing is shown until every check is done: the saved lists, then the web search, then the first page checked against the
       // employers' own systems. What appears is the final list, so the number and the jobs never change under the person.
@@ -606,8 +607,8 @@ export function JobSearch() {
               Go to job listing
             </Link>
           )}
-          <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)} className="ml-auto px-2 text-lg leading-none">
-            &#215;
+          <button type="button" onClick={() => setNotice(null)} className="ml-auto rounded-full px-3 py-1 text-[13px] font-bold hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-brand-200">
+            Clear
           </button>
         </div>
       )}

@@ -175,30 +175,37 @@ class JobCache:
                     _DESC_OK[self.path] = fts
                 except sqlite3.OperationalError:
                     _DESC_OK[self.path] = False
-                for row in conn.execute("SELECT id, ats, identifier, name FROM employers").fetchall():
-                    proper = known_name(row["ats"], row["identifier"])
-                    if proper and row["name"] != proper:  # fixes names saved before the proper one was known
-                        conn.execute("UPDATE employers SET name = ? WHERE id = ?", (proper, row["id"]))
                 conn.commit()
+                try:
+                    # Fixes names saved before the proper one was known. Housekeeping only: when a long background job holds the
+                    # database it is skipped (and tried again the next time the app starts) rather than making a search wait.
+                    conn.execute("PRAGMA busy_timeout=2000")
+                    for row in conn.execute("SELECT id, ats, identifier, name FROM employers").fetchall():
+                        proper = known_name(row["ats"], row["identifier"])
+                        if proper and row["name"] != proper:
+                            conn.execute("UPDATE employers SET name = ? WHERE id = ?", (proper, row["id"]))
+                    conn.commit()
+                except sqlite3.OperationalError:
+                    conn.rollback()
             finally:
                 conn.close()
             _INITIALISED[self.path] = fts
             return fts
 
-    def _raw(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, timeout=30)
+    def _raw(self, busy_seconds: float = 30.0) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path, timeout=busy_seconds)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute(f"PRAGMA busy_timeout={int(busy_seconds * 1000)}")
         conn.execute("PRAGMA temp_store=MEMORY")
         conn.execute("PRAGMA cache_size=-20000")
         return conn
 
     @contextmanager
-    def session(self) -> Iterator[sqlite3.Connection]:
-        conn = self._raw()
+    def session(self, busy_seconds: float = 30.0) -> Iterator[sqlite3.Connection]:
+        conn = self._raw(busy_seconds)
         try:
             yield conn
             conn.commit()
@@ -481,15 +488,18 @@ class JobCache:
         location = (location or "").strip()[:300]
         if not location:
             return False
-        with self.session() as db:
-            row = db.execute(
-                "SELECT p.id, p.title, e.name AS company FROM postings p JOIN employers e ON e.id = p.employer_id WHERE p.url = ? AND p.closed_at IS NULL LIMIT 1", (url,)
-            ).fetchone()
-            if not row:
-                return False
-            db.execute("UPDATE postings SET location = ? WHERE id = ?", (location, row["id"]))
-            self._fts_delete(db, [row["id"]])
-            self._fts_insert(db, [(row["id"], row["title"], row["company"], location)])
+        try:
+            with self.session(busy_seconds=3.0) as db:  # a search must not wait long on a background job: a skipped save is redone next search
+                row = db.execute(
+                    "SELECT p.id, p.title, e.name AS company FROM postings p JOIN employers e ON e.id = p.employer_id WHERE p.url = ? AND p.closed_at IS NULL LIMIT 1", (url,)
+                ).fetchone()
+                if not row:
+                    return False
+                db.execute("UPDATE postings SET location = ? WHERE id = ?", (location, row["id"]))
+                self._fts_delete(db, [row["id"]])
+                self._fts_insert(db, [(row["id"], row["title"], row["company"], location)])
+        except sqlite3.OperationalError:
+            return False
         return True
 
     def cleanup(self, now: int | None = None) -> int:

@@ -2288,3 +2288,28 @@ def test_strict_scoring_generic_searches_never_rank_top_and_other_functions_rank
     assert fit(plan, "Product Manager, Revenue Cycle Manager") < fit(plan, "Revenue Cycle Manager") - 0.05
     # a remote job from anywhere sits further behind a job in the city
     assert fit(plan, "Revenue Cycle Manager", "Remote", "remote") < fit(plan, "Revenue Cycle Manager") - 0.04
+
+
+def test_setup_does_not_wait_for_a_busy_database_and_a_busy_location_save_is_skipped(tmp_path, monkeypatch):
+    """A long background job holding the database must not make a search wait or fail: housekeeping and location saves are skipped."""
+    import sqlite3
+    import time
+
+    from app.services.jobcache import store
+
+    path = str(tmp_path / "cache.db")
+    cache = JobCache(path)
+    cache.upsert_employer("greenhouse", "acme", "Acme", "test")
+
+    holder = sqlite3.connect(path, timeout=1)
+    holder.execute("PRAGMA journal_mode=WAL")
+    holder.execute("BEGIN IMMEDIATE")  # a background job in the middle of a write
+
+    monkeypatch.setattr(store, "known_name", lambda ats, ident: "A Different Name")  # makes the name fix want to write
+    store._INITIALISED.pop(path, None)
+    t0 = time.time()
+    JobCache(path)  # must not raise, and must not wait the full 30 seconds
+    assert time.time() - t0 < 10
+    assert cache.set_location("https://jobs.example.com/1", "Boston, MA") is False  # nothing to save here, and no error while the database is busy
+    holder.rollback()
+    holder.close()

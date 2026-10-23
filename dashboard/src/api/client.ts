@@ -90,12 +90,29 @@ function decodeEntities(text: string): string {
   return out;
 }
 
+/** A job's title and company as shown: no employer reference code in front of the company, and commas instead of dashes in the title. */
+function tidyCompany(name: string): string {
+  const cleaned = name.replace(/^(?:\d{3,5}|[A-Z]{1,3}\d{2,4})\s+(?=[A-Za-z])/, "").trim();
+  return cleaned || name;
+}
+function tidyTitle(title: string): string {
+  return title.replace(/\s*[\u2013\u2014-]\s+/g, ", ").replace(/\s{2,}/g, " ").trim();
+}
+
 function cleanNames(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(cleanNames);
   if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    // Only job records get the display tidy-up; a person's own job history is left exactly as typed.
+    const isJob = typeof obj.company === "string" || typeof obj.job_title === "string";
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) {
-      out[k] = typeof v === "string" && NAME_KEYS.has(k) && ENTITY.test(v) ? decodeEntities(v) : cleanNames(v);
+    for (const [k, v] of Object.entries(obj)) {
+      let next: unknown = typeof v === "string" && NAME_KEYS.has(k) && ENTITY.test(v) ? decodeEntities(v) : cleanNames(v);
+      if (isJob && typeof next === "string") {
+        if (k === "company") next = tidyCompany(next);
+        else if (k === "title" || k === "job_title") next = tidyTitle(next);
+      }
+      out[k] = next;
     }
     return out;
   }

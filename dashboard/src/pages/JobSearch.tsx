@@ -466,7 +466,7 @@ export function JobSearch() {
         <button
           type="submit"
           disabled={!canSearch}
-          className={`h-[46px] rounded-xl bg-brand-500 px-7 text-[15px] font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50 ${search.isPending ? "ai-working" : ""}`}
+          className={`h-[46px] min-w-[132px] rounded-xl bg-brand-500 px-7 text-[15px] font-semibold text-white transition hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50 ${search.isPending ? "ai-working" : ""}`}
         >
           {search.isPending ? "Searching..." : "Search"}
         </button>
@@ -638,8 +638,12 @@ export function JobSearch() {
                 Searching for {searchedFor}
               </h2>
               <ul className="mb-3.5 grid gap-1.5 text-[13.5px] font-semibold">
-                {["Searching saved employers", "Searching the web", "Checking each job is still open"].map((label, i) => (
-                  <li key={label} className={`flex items-center gap-2.5 ${i <= step ? "text-ink-900" : "text-ink-500"}`}>
+                {[
+                  ["Searching saved employers", "Searched saved employers"],
+                  ["Searching the web", "Searched the web"],
+                  ["Checking each job is still open", "Checked that each job is still open"],
+                ].map(([doing, done], i) => (
+                  <li key={doing} className={`flex items-center gap-2.5 ${i <= step ? "text-ink-900" : "text-ink-500"}`}>
                     {i < step ? (
                       <span className="grid h-[18px] w-[18px] place-items-center rounded-full bg-[#12b76a] text-[11px] font-extrabold text-white" aria-hidden="true">
                         &#10003;
@@ -649,7 +653,7 @@ export function JobSearch() {
                     ) : (
                       <span className="h-[18px] w-[18px] rounded-full border-2 border-[#d3d0ff]" aria-hidden="true" />
                     )}
-                    {label}
+                    {i < step ? done : doing}
                   </li>
                 ))}
               </ul>
@@ -1239,7 +1243,7 @@ function FiltersPopover(p: {
       </div>
       <div className="flex flex-col gap-2">
         <label htmlFor="js-salary" className="text-sm font-semibold text-ink-900">
-          Desired Salary
+          Desired salary
         </label>
         <input id="js-salary" className={inputCls} inputMode="numeric" value={formatPay(p.targetSalary)} onChange={(e) => p.setTargetSalary(formatPay(e.target.value))} placeholder="$85,000" />
         <label className="mt-2.5 flex items-center gap-2.5 text-sm text-ink-700">

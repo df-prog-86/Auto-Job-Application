@@ -80,6 +80,7 @@ export function Home() {
   const jobsQuery = useQuery({ queryKey: ["jobs"], queryFn: api.listJobs });
   const resultsQuery = useQuery({ queryKey: ["job-search-results"], queryFn: api.listSearchResults, retry: false });
   const extensionQuery = useQuery({ queryKey: ["extension-ping"], queryFn: pingExtension, staleTime: 60_000 });
+  const pairingQuery = useQuery({ queryKey: ["pairing-status"], queryFn: api.pairingStatus, staleTime: 60_000 });
 
   const toggle = useMutation<unknown, ApiError, void>({
     mutationFn: () => (statusQuery.data?.mode === "PAUSED" ? api.startAutomation() : api.pauseAutomation()),
@@ -192,7 +193,7 @@ export function Home() {
               "Extension connected"
             ) : (
               <>
-                Extension not connected
+                {pairingQuery.data?.paired ? "Paired, not connected right now" : "Extension not connected"}
                 <Link to="/pairing" className="rounded-full px-3 py-1 text-xs font-bold text-brand-700 transition hover:bg-brand-50">
                   Connect
                 </Link>

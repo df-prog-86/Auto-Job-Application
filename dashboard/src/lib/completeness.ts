@@ -43,7 +43,7 @@ export function missingItems(profile: ProfileOut | undefined, answers: AnswerOut
   profile.education.forEach((edu, i) => {
     if (!filled(edu.institution)) missing.push(`School ${i + 1} name`);
     if (!filled(edu.degree)) missing.push(`School ${i + 1} degree`);
-    if (autofillFields && !filled(edu.degree_short)) missing.push(`School ${i + 1} degree abbreviation`);
+    if (autofillFields && !filled(edu.degree_short)) missing.push(`${filled(edu.institution) ? edu.institution.trim() : `School ${i + 1}`} degree abbreviation`);
   });
   return missing;
 }

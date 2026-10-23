@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api } from "@/api/client";
 import { PageHeader } from "@/components/PageHeader";
 import { Button, Card } from "@/components/ui";
+import { pingExtension } from "@/lib/extensionBridge";
 
 /**
  * First-run pairing (spec §8.3): the dashboard requests a one-time secret
@@ -16,7 +17,9 @@ export function Pairing() {
   const [secret, setSecret] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const queryClient = useQueryClient();
-  const status = useQuery({ queryKey: ["pairing-status"], queryFn: api.pairingStatus, refetchInterval: 5000 });
+  const status = useQuery({ queryKey: ["pairing-status"], queryFn: api.pairingStatus, refetchInterval: 30000 });
+  const ping = useQuery({ queryKey: ["extension-ping"], queryFn: pingExtension, staleTime: 60_000 });
+  const connected = ping.data?.ok === true;
   const paired = status.data?.paired === true;
   const pairedOn = status.data?.paired_at
     ? new Date(status.data.paired_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
@@ -56,9 +59,9 @@ export function Pairing() {
           }`}
         >
           <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-current" aria-hidden="true" />
-          {paired ? `Paired${pairedOn ? ` on ${pairedOn}` : ""}` : "Not paired"}
+          {paired ? `Paired${pairedOn ? ` on ${pairedOn}` : ""} \u00b7 ${ping.isLoading ? "Checking" : connected ? "Connected" : "Not connected right now"}` : "Not paired"}
           <span className="basis-full pl-[22px] text-[13px] font-semibold opacity-85">
-            {paired ? "Create a new code only to connect another browser." : "Create a code below to connect the extension."}
+            {paired ? (connected || ping.isLoading ? "Create a new code only to connect another browser." : "Open Chrome to reconnect, or create a new code below.") : "Create a code below to connect the extension."}
           </span>
         </div>
       )}

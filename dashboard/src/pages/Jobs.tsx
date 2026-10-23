@@ -64,6 +64,8 @@ export function Jobs() {
   // "Show duplicates" lists only the repeated jobs, each copy next to its twin, whatever tab is open.
   const [dupOnly, setDupOnly] = useState(false);
   const showingDups = dupOnly && dupIds.size > 0;
+  // How many jobs are saved more than once (a job saved twice counts once).
+  const dupJobs = useMemo(() => new Set(all.filter((j) => dupIds.has(j.id)).map((j) => duplicateKey(j))).size, [all, dupIds]);
   const visible = showingDups
     ? searched.filter((j) => dupIds.has(j.id)).sort((a, b) => duplicateKey(a).localeCompare(duplicateKey(b)))
     : searched
@@ -176,12 +178,14 @@ export function Jobs() {
         </p>
       )}
 
-      {dupIds.size > 0 && (!dupHidden || showingDups) && (
+      {dupIds.size > 0 && (showingDups || (!dupHidden && visible.some((j) => dupIds.has(j.id)))) && (
         <div role="status" className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800">
           <span>
             {showingDups
-              ? `Showing the ${dupIds.size} copies side by side. Delete the extra copy from its menu.`
-              : `${dupIds.size} jobs are saved more than once and marked "Saved twice".`}
+              ? `Showing ${dupJobs === 1 ? "the copies" : "the copies of each"} side by side. Delete the extra copy from its menu.`
+              : dupJobs === 1
+                ? 'One job is saved twice and marked "Saved twice".'
+                : `${dupJobs} jobs are saved more than once and marked "Saved twice".`}
           </span>
           <span className="ml-auto flex items-center gap-1.5">
             <button

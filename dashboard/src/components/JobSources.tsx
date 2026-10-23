@@ -238,13 +238,13 @@ export function EmployersPanel() {
     queryKey: ["job-employers", filter],
     queryFn: () => api.listEmployers(filter),
     enabled: open,
-    refetchInterval: (query) => (query.state.data?.refreshing ? 3000 : false),
+    refetchInterval: (query) => (query.state.data?.refreshing ? 15000 : false),
   });
   const summary = useQuery({
     queryKey: ["job-employers", ""],
     queryFn: () => api.listEmployers(""),
     staleTime: 30_000,
-    refetchInterval: (query) => (query.state.data?.refreshing ? 3000 : false),
+    refetchInterval: (query) => (query.state.data?.refreshing ? 15000 : false),
   });
   const totals = summary.data;
 

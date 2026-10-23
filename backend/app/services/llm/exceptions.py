@@ -22,6 +22,8 @@ class StructuredOutputError(LLMError):
     retries before escalating to the fallback model).
     """
 
-    def __init__(self, message: str, attempts: list[str]):
+    def __init__(self, message: str, attempts: list[str], busy: bool = False):
         super().__init__(message)
         self.attempts = attempts
+        # True when every failure was the provider saying it is busy (HTTP 429) or down (5xx), not bad output.
+        self.busy = busy

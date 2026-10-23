@@ -15,10 +15,12 @@ Policy (spec §11, §76):
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from typing import Callable, Literal, TypeVar
 
+import httpx
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
@@ -32,6 +34,12 @@ ModelRole = Literal["FAST", "FALLBACK", "ESCALATION", "EMBEDDING"]
 T = TypeVar("T", bound=BaseModel)
 
 MAX_STRUCTURED_RETRIES_PER_TIER = 2  # spec §11: "no more than two structured retries"
+# Seconds to wait before retrying after the provider says it is busy (HTTP 429) or errors (5xx); doubles each time.
+BUSY_BACKOFF_SECONDS = 2.0
+
+
+def _is_busy(exc: Exception) -> bool:
+    return isinstance(exc, httpx.HTTPStatusError) and (exc.response.status_code == 429 or exc.response.status_code >= 500)
 
 
 def _model_for_role(role: ModelRole) -> str | None:
@@ -69,6 +77,8 @@ class ModelRouter:
         in — callers must handle it, not treat it as a bug).
         """
         attempts: list[str] = []
+        busy_failures = 0
+        other_failures = 0
         last_content = ""
         schema = response_model.model_json_schema()
 
@@ -104,6 +114,12 @@ class ModelRouter:
                     raise
                 except Exception as exc:  # network/HTTP error from the provider
                     attempts.append(f"{model_name} (attempt {attempt_num + 1}): request failed: {exc}")
+                    if _is_busy(exc):
+                        busy_failures += 1
+                        # Retrying at once only makes a busy provider busier.
+                        await asyncio.sleep(BUSY_BACKOFF_SECONDS * (2**attempt_num))
+                    else:
+                        other_failures += 1
                     self._log_run(
                         purpose, model_name, prompt_version, 0, 0, success=False, status="request_error"
                     )
@@ -113,6 +129,7 @@ class ModelRouter:
                 try:
                     parsed = response_model.model_validate_json(result.content)
                 except (ValidationError, ValueError) as exc:
+                    other_failures += 1
                     attempts.append(
                         f"{model_name} (attempt {attempt_num + 1}): schema validation failed: {exc}"
                     )
@@ -154,6 +171,7 @@ class ModelRouter:
             f"Structured output for purpose={purpose!r} failed after exhausting retry budget. "
             f"Last problem: {(attempts[-1] if attempts else 'none recorded')[:300]}",
             attempts=attempts,
+            busy=busy_failures > 0 and other_failures == 0,
         )
 
     def _log_run(

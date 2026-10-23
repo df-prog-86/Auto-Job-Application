@@ -8,6 +8,7 @@ compliance concerns that govern the automated per-employer discovery loop."""
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from pathlib import Path
 from typing import Literal
 
@@ -33,7 +34,7 @@ from app.schemas.discovery import (
 from app.services.discovery import ats, manual_extraction
 from app.services.discovery.pipeline import ingest_manual_posting
 from app.services.followup.draft import FollowUpDraftError, draft_follow_up
-from app.services.qualification.pipeline import qualify_job
+from app.services.qualification.pipeline import QualificationError, qualify_job
 from app.services.resume.service import (
     MasterMissingError,
     is_safe_document_path,
@@ -150,9 +151,12 @@ async def requalify_job(job_id: int, db: Session = Depends(get_db)) -> JobOut:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
     try:
         await qualify_job(db, job)
+    except QualificationError as exc:  # already worded for the person, with no provider detail
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     except Exception as exc:  # scoring is best-effort; never a 500 for the button click
+        logging.getLogger(__name__).warning("Scoring failed: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Couldn't score this job: {exc}"
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Couldn't score this job right now. Try again in a minute."
         ) from exc
     db.refresh(job)
     return JobOut.model_validate(job)

@@ -11,7 +11,7 @@ from app.models.jobs import Job
 from app.models.questions import PendingQuestion
 from app.repositories.profile_repository import get_current_profile
 from app.schemas.apply import AnswerQuestionIn, ClearQuestionsIn, PendingQuestionOut
-from app.services.apply.questions import answer_key_for
+from app.services.apply.questions import answer_key_for, normalize_question
 
 router = APIRouter(prefix="/api/v1/needs-attention", tags=["needs-attention"])
 
@@ -90,6 +90,9 @@ def _settle_covered(db: Session) -> None:
             for group in _SAME_QUESTION:
                 if q.question_key in group:
                     value = next((saved.get(answer_key_for(k)) for k in group if isinstance(saved.get(answer_key_for(k)), str) and saved.get(answer_key_for(k)).strip()), None)
+        if not (isinstance(value, str) and value.strip()):
+            # An answer remembered for this exact question (compared by normalized text, so capitals and punctuation don't matter).
+            value = saved.get(answer_key_for(normalize_question(q.question_key))) or saved.get(answer_key_for(q.question_key))
         if isinstance(value, str) and value.strip():
             q.status = "answered"
             q.answer_text = value.strip()

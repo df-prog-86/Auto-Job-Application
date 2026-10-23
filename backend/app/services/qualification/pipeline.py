@@ -12,6 +12,7 @@ never automatically on add.
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from sqlalchemy.orm import Session
@@ -22,6 +23,8 @@ from app.services.llm.exceptions import LLMError
 from app.services.llm.router import ModelRouter
 from app.services.llm.schemas import ResumeJobMatchResult
 from app.services.qualification.resume_summary import summarize_candidate
+
+logger = logging.getLogger(__name__)
 
 
 class QualificationError(RuntimeError):
@@ -100,8 +103,12 @@ async def score_against(db: Session, *, title: str, company: str, description: s
             salvage=_salvage_match,
         )
     except LLMError as exc:
+        # The technical detail (provider errors, web addresses) goes to the log, never to the person.
+        logger.warning("Scoring failed: %s", exc)
+        if getattr(exc, "busy", False):
+            raise QualificationError("Scoring is busy right now. Try again in a minute.") from exc
         raise QualificationError(
-            f"Couldn't score this job ({exc}). If this keeps happening, check the AI provider settings."
+            "Couldn't score this job right now. Try again in a minute. If it keeps happening, check the AI provider settings."
         ) from exc
     return result
 

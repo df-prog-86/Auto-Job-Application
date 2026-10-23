@@ -44,6 +44,22 @@ function groupQuestions(items: PendingQuestionOut[]): Group[] {
   return Array.from(byKey.values());
 }
 
+/** The employer's form instructions ("If Yes, please answer the questions below.") are not part of the question. */
+function tidyQuestion(label: string): string {
+  const cleaned = label
+    .replace(/\s*\bIf\s+(yes|no)\b[^.?!]*[.?!]?/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || label;
+}
+
+/** A question with no listed choices that is plainly yes or no ("Have you previously worked for…?"). */
+function isYesNo(label: string, fieldType: string, options: string[]): boolean {
+  if (options.length > 0 || fieldType === "textarea") return false;
+  const text = tidyQuestion(label);
+  return text.length <= 200 && /^(have|has|had|are|is|were|was|do|does|did|will|would|can|could|should)\b/i.test(text);
+}
+
 interface JobGroup {
   id: number;
   title: string;
@@ -241,7 +257,7 @@ function QuestionCard({ group, jobId }: { group: Group; jobId: number }) {
     <li className="border-t border-[#ebe8f6] first:border-t-0">
       <div className="px-5 py-4">
         <h3 className="text-[14.5px] font-bold leading-snug text-ink-900">
-          {group.label}
+          {tidyQuestion(group.label)}
           {group.required && (
             <span className="ml-2 align-middle">
               <Badge tone="warning">Required</Badge>
@@ -262,7 +278,22 @@ function QuestionCard({ group, jobId }: { group: Group; jobId: number }) {
             if (answer.trim()) save.mutate();
           }}
         >
-          {group.options.length > 0 ? (
+          {isYesNo(group.label, group.fieldType, group.options) ? (
+            <div role="group" aria-label="Answer" className="flex gap-2">
+              {["Yes", "No"].map((choice) => (
+                <Button
+                  key={choice}
+                  type="button"
+                  size="sm"
+                  variant={answer === choice ? "primary" : "secondary"}
+                  aria-pressed={answer === choice}
+                  onClick={() => setAnswer(choice)}
+                >
+                  {choice}
+                </Button>
+              ))}
+            </div>
+          ) : group.options.length > 0 ? (
             <select value={answer} onChange={(e) => setAnswer(e.target.value)} className={inputClass}>
               <option value="">Choose an answer</option>
               {group.options.map((o) => (

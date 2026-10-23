@@ -567,3 +567,37 @@ def test_interviewing_implies_applied_and_follow_up_can_be_cleared(app_and_db, m
     out = client.post(f"/api/v1/jobs/{job['id']}/unapplied").json()
     assert out["applied_at"] is None and out["interviewing_at"] is None
     assert client.post("/api/v1/jobs/9999/interviewing").status_code == 404
+
+
+def test_a_busy_ai_provider_gets_a_friendly_message_with_no_technical_detail(app_and_db, monkeypatch):
+    import asyncio
+
+    import httpx
+
+    from app.services.llm import router as llm_router
+    from app.services.llm.exceptions import StructuredOutputError
+    from app.services.qualification.pipeline import QualificationError, score_against
+
+    monkeypatch.setattr(llm_router, "BUSY_BACKOFF_SECONDS", 0)
+    monkeypatch.setattr(llm_router.settings, "PRIMARY_FAST_MODEL", "m")
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+
+    class Busy:
+        async def chat_completion(self, **kw):
+            raise httpx.HTTPStatusError("429 Too Many Requests", request=request, response=httpx.Response(429, request=request))
+
+    _, SessionLocal = app_and_db
+    with SessionLocal() as db:
+        router = llm_router.ModelRouter(db, client=Busy())
+        try:
+            asyncio.run(router.get_structured(purpose="t", prompt_version="v1", messages=[], response_model=__import__("app.services.llm.schemas", fromlist=["ResumeJobMatchResult"]).ResumeJobMatchResult))
+            raise AssertionError("should have failed")
+        except StructuredOutputError as exc:
+            assert exc.busy is True
+
+        monkeypatch.setattr("app.services.qualification.pipeline.ModelRouter", lambda db: llm_router.ModelRouter(db, client=Busy()))
+        try:
+            asyncio.run(score_against(db, title="A", company="B", description="C"))
+            raise AssertionError("should have failed")
+        except QualificationError as exc:
+            assert str(exc) == "Scoring is busy right now. Try again in a minute."

@@ -323,11 +323,21 @@ def report_fill(payload: ApplyReportIn, db: Session = Depends(get_db)) -> None:
         q.question_key: q
         for q in db.query(PendingQuestion).filter(PendingQuestion.job_id == job.id).all()
     }
+    profile = get_current_profile(db)
+    remembered: set[str] = set()
+    if profile is not None:
+        remembered = {
+            a.answer_key
+            for a in db.query(CandidateAnswer).filter(CandidateAnswer.profile_id == profile.id).all()
+            if a.answer_key.startswith("q:") and isinstance(a.value, dict) and str(a.value.get("raw") or "").strip()
+        }
     for field in payload.flagged:
         key = normalize_question(field.label)
         if not key:
             continue
         row = existing.get(key)
+        if row is None and answer_key_for(key) in remembered:
+            continue  # already remembered; asking again would only repeat a question the person has answered
         if row is None:
             db.add(
                 PendingQuestion(

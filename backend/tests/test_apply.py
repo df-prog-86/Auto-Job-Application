@@ -439,3 +439,34 @@ def test_needs_attention_settles_known_answers_and_lists_choices_once(app_and_db
     # An answer given under a sister label ("Country") settles this one too.
     assert client.put("/api/v1/profile/answers/q:country", json={"value_type": "str", "value": "United States of America (+1)"}).status_code == 200
     assert client.get("/api/v1/needs-attention").json() == []
+
+
+def test_a_remembered_answer_clears_its_question_and_is_not_asked_again(app_and_db):
+    from app.models.candidate import CandidateAnswer
+    from app.repositories.profile_repository import get_current_profile
+
+    client, SessionLocal = app_and_db
+    client.post("/api/v1/profile/commit", json=_COMMIT)
+    job_id = _job(SessionLocal)
+    headers = _token(client)
+    flagged = [{"label": "How Did You Hear About Us?", "field_type": "text"}]
+    client.post("/api/v1/apply/report", json={"job_id": job_id, "flagged": flagged}, headers=headers)
+    assert len(client.get("/api/v1/needs-attention").json()) == 1
+
+    with SessionLocal() as db:
+        db.add(
+            CandidateAnswer(
+                profile_id=get_current_profile(db).id,
+                answer_key="q:how did you hear about us",
+                value_type="str",
+                value={"raw": "LinkedIn"},
+                provenance="needs_attention",
+                user_confirmed=True,
+            )
+        )
+        db.commit()
+    assert client.get("/api/v1/needs-attention").json() == []  # closed by the remembered answer
+
+    other = _job(SessionLocal, url="https://job-boards.greenhouse.io/acme/jobs/456")
+    client.post("/api/v1/apply/report", json={"job_id": other, "flagged": flagged}, headers=headers)
+    assert client.get("/api/v1/needs-attention").json() == []  # and not asked again on the next job

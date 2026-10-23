@@ -2224,3 +2224,39 @@ def test_the_place_fill_can_be_limited_to_one_hiring_system():
     assert len(cache.vague_place_postings(10, 10)) == 2
     only = cache.vague_place_postings(10, 10, ["icims"])
     assert len(only) == 1 and ".icims.com" in only[0]["url"]
+
+
+def test_strict_scoring_demotes_description_only_matches_old_postings_and_wrong_seniority():
+    import datetime as dt
+    from types import SimpleNamespace
+
+    from app.services.jobcache import matcher
+
+    crit = SimpleNamespace(titles="revenue cycle manager", location="Boston, MA", work_type="any", include_remote=False, posted_within_days=0, keywords=None, exclude_companies=None, target_salary=None)
+    plan = matcher.build_plan(crit)
+    today = dt.date(2026, 10, 1)
+    fresh = (today - dt.timedelta(days=3)).isoformat()
+    old = (today - dt.timedelta(days=120)).isoformat()
+    desc = "Our team improves the revenue cycle for hospitals. " * 10
+
+    def row(title, posted=fresh, description=None):
+        return {"title": title, "company": "Acme", "location": "Boston, MA", "work_type": "onsite", "posted_at": posted, "description": description}
+
+    def fit(r, strict):
+        matcher.STRICT_OVERRIDE = strict
+        try:
+            s = matcher.score_row(plan, r, today)
+            return None if s is None else s.fit
+        finally:
+            matcher.STRICT_OVERRIDE = None
+
+    exact = row("Revenue Cycle Manager")
+    assert fit(exact, True) >= 0.9
+    # found only through its description: Possible at best
+    only_desc = row("Software Engineering Manager", description=desc)
+    assert fit(only_desc, False) > 0.55 and fit(only_desc, True) < 0.55
+    # a director when a manager was asked for ranks below the manager
+    assert fit(row("Senior Director Revenue Cycle Manager"), True) < fit(exact, True) - 0.1
+    # old postings: hidden over 90 days, and behind a fresh one
+    assert fit(row("Revenue Cycle Manager", posted=old), True) is None
+    assert fit(row("Revenue Cycle Manager", posted=old), False) is not None

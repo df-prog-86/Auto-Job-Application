@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     JOB_CACHE_MAX_POSTINGS: int = 1_200_000  # oldest closed postings go first when the copy grows past this (open jobs are only cut after every closed one is gone)
     # Hiring systems to switch off, comma separated: workday, greenhouse, lever, ashby, smartrecruiters. A kill switch if one ever objects.
     JOB_CACHE_DISABLED_SYSTEMS: str = ""
+    # Stricter ranking: seniority and job function count for more, a match found only through the description stays below "Good",
+    # and postings over 90 days old are left out. Off until its before-and-after check has been approved.
+    JOB_SEARCH_STRICT_SCORING: bool = False
     JOB_SEARCH_USE_DESCRIPTION: bool = True  # search also reads the opening lines of job descriptions (False turns it off)
     # Postings whose description is read (and a portion saved) after each background refresh. 0 turns it off. Small on purpose:
     # the saved lists fill in gradually and no employer's site is read hard.

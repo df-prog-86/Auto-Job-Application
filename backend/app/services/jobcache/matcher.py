@@ -46,6 +46,21 @@ LOOKALIKE_WEIGHT = 0.30 # ...and one that names only PART of it ("revenue operat
 STALE_DAYS = 180
 STALE_FACTOR = 0.85
 
+# Stricter ranking (settings.JOB_SEARCH_STRICT_SCORING). `STRICT_OVERRIDE` lets a test or the before-and-after script switch it either way.
+STRICT_OVERRIDE: bool | None = None
+HIDE_AFTER_DAYS = 90  # strict: older postings are not shown
+DESC_ONLY_CAP = 0.50  # strict: a job found only through its description ranks as "Possible" at best (below 55)
+DIRECTOR_LEVEL = 5  # strict: a director or above when no level was asked for loses a little
+DESC_OTHER_WORK = 0.9  # strict: a good title whose description is about something else is marked down a little
+
+
+def strict() -> bool:
+    if STRICT_OVERRIDE is not None:
+        return STRICT_OVERRIDE
+    from app.config import settings
+
+    return bool(getattr(settings, "JOB_SEARCH_STRICT_SCORING", False))
+
 W_TITLE, W_PLACE, W_RECENT, W_PAY, W_KEYWORD = 0.62, 0.22, 0.08, 0.04, 0.04
 W_DESC = 0.05  # added when the opening of the description names the kind of work asked for; the total is capped at 1
 DESC_TITLE_FLOOR = 0.40  # the title credit of a posting found only through its description: above the cut-off, below a real title match
@@ -266,9 +281,11 @@ def title_fit(plan: Plan, title: str, typed_only: bool = False) -> float:
         if len(q.stems) >= 3 and q.stems[-2] not in p_set:
             score *= 0.6  # the word that names the field ("cycle" in "revenue cycle manager") is missing: "Revenue Operations Manager" is not it
         if q.level is not None and p_level is not None:
-            score -= min(0.3, 0.12 * abs(q.level - p_level))
+            score -= min(0.4, 0.16 * abs(q.level - p_level)) if strict() else min(0.3, 0.12 * abs(q.level - p_level))
         elif p_level is not None and p_level <= 1 and (q.level is None or q.level > 1):
             score -= 0.2  # an assistant or intern role when none was asked for
+        elif strict() and q.level is None and p_level is not None and p_level >= DIRECTOR_LEVEL:
+            score -= 0.15  # a director, VP or chief when no level was asked for
         elif q.level is not None and p_level is None:
             score -= 0.03
         best = max(best, max(0.0, min(1.0, score)) * q.weight)
@@ -327,11 +344,16 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
             tf = min(1.0, tf + DESC_CONFIRM_BONUS)
         elif signal < 0:
             tf *= DESC_DEMOTE
+    elif strict() and tf >= BORDERLINE_TITLE and plan.desc_phrases and description_signal(plan, row.get("description")) < 0:
+        tf *= DESC_OTHER_WORK  # the title matches but a real description is about something else
     if tf < MIN_TITLE_FIT:
         if desc_hit(plan, row.get("description"), set(all_stems(row["title"]))):
             tf, via_desc = DESC_TITLE_FLOOR, True  # "Business Analyst" whose description is about revenue cycle work
         else:
             return None
+    posted_early = _date(row.get("posted_at") or row.get("seen_date"))
+    if strict() and posted_early and (today - posted_early).days > HIDE_AFTER_DAYS:
+        return None  # open more than 90 days: probably filled or forgotten
     wt = effective_work_type(row.get("work_type"), row.get("location"))  # on site unless the employer says remote or hybrid; unknown only when the place is
     if plan.work_type != "any" and wt is not None and wt != plan.work_type:
         return None  # a job whose place is unknown is kept; one that is something else is not
@@ -366,8 +388,13 @@ def score_row(plan: Plan, row: dict[str, Any], today: dt.date | None = None) -> 
     fit = W_TITLE * tf + W_PLACE * lf + W_RECENT * _recency(posted, today) + W_PAY * (1.0 if mid is not None else 0.0) + W_KEYWORD * kw
     if posted and (today - posted).days > STALE_DAYS:
         fit *= STALE_FACTOR  # a posting open for half a year or more is often forgotten: it ranks below fresher ones
+    if strict() and posted:
+        age = (today - posted).days
+        fit *= 0.88 if age > 60 else (0.95 if age > 30 else 1.0)  # fresher postings rank first
     if via_desc or desc_hit(plan, row.get("description")):
         fit += W_DESC
+    if strict() and via_desc:
+        fit = min(fit, DESC_ONLY_CAP)
     return Scored(row=row, fit=round(min(fit, 1.0), 4), title_fit=tf, place_fit=lf, via_description=via_desc, needs_description=needs_text)
 
 

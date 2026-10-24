@@ -177,12 +177,40 @@ def _gap_notes(changelog: list[str]) -> list[str]:
     return [n.strip() for n in changelog if n.strip() and not _CLAIMED_CHANGE.search(n)]
 
 
-def _change_notes(plan: TailorPlan, blocks: list[Block], parts: list[TextPart], existing: list[str] | None = None) -> list[str]:
+_FILLER_WORDS = frozenset(
+    "the and for with that this from into over across your you our their its are was were has have had been being will can may "
+    "all any each every both such than then them they those these who whom which what when where while how also not but per via".split()
+)
+
+
+def _root(word: str) -> str:
+    return word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word
+
+
+def _new_words(new: str, original: str, master_text: str) -> list[str]:
+    """Words in rewritten text that neither the original wording nor anywhere else in the master resume uses ("dashboard" and "dashboards" count as one)."""
+    known = {_root(w) for w in re.findall(r"[a-z0-9]+", f"{original} {master_text}".lower())}
+    out: list[str] = []
+    for w in re.findall(r"[A-Za-z][A-Za-z0-9+#/-]*", new):
+        low = w.lower()
+        if len(low) < 3 or low in _FILLER_WORDS or _root(low) in known or low in out:
+            continue
+        out.append(low)
+    return out
+
+
+def _change_notes(plan: TailorPlan, blocks: list[Block], parts: list[TextPart], existing: list[str] | None = None, master_text: str = "") -> list[str]:
     """Plain notes written by the code itself from what the plan really changes, so "What changed" is always true."""
     c = plan_changes(plan, blocks, parts)
     notes: list[str] = []
+    by_part = {p.id: p for p in parts}
     if c["summary"]:
         notes.append("Reworded your summary for this job. Read it over to make sure it still sounds like you.")
+        for planned in plan.summaries:
+            part = by_part.get(planned.part_id)
+            fresh = _new_words(planned.text, part.text, master_text) if part and planned.text != part.text else []
+            if fresh:
+                notes.append(f"New wording in your summary that your master doesn't use: {', '.join(fresh[:8])}. Check each one is true for you.")
     if c["skills_reordered"]:
         notes.append("Reordered your skills so the ones this job asks for come first.")
     if c["reordered_roles"]:
@@ -191,12 +219,20 @@ def _change_notes(plan: TailorPlan, blocks: list[Block], parts: list[TextPart], 
     if c["reworded"]:
         n = c["reworded"]
         notes.append(f"Reworded {n} {'bullet' if n == 1 else 'bullets'} to fit the job.")
+        originals = {b.id: b.text for block in blocks for b in block.bullets}
+        context = {block.id: " | ".join(block.context.split(" | ")[:2]) or f"role {block.id + 1}" for block in blocks}
+        for planned_block in plan.blocks:
+            for position, b in enumerate(planned_block.bullets, start=1):
+                if b.bullet_id in originals and b.text != originals[b.bullet_id]:
+                    fresh = _new_words(b.text, originals[b.bullet_id], master_text)
+                    if fresh:
+                        notes.append(f"New wording in bullet {position} of {context.get(planned_block.block_id, 'a role')}: {', '.join(fresh[:8])}. Check each one is true for you.")
     return notes
 
 
-def _final_notes(plan: TailorPlan, blocks: list[Block], parts: list[TextPart]) -> list[str]:
+def _final_notes(plan: TailorPlan, blocks: list[Block], parts: list[TextPart], master_text: str = "") -> list[str]:
     """The changelog shown to the person: what really changed (counted by the code), then the AI's notes on what the master lacks."""
-    notes = _change_notes(plan, blocks, parts) + _added_note(plan, parts)
+    notes = _change_notes(plan, blocks, parts, None, master_text) + _added_note(plan, parts)
     if not notes:
         notes.append("Nothing was changed: the resume already leads with what this job asks for, or the edits were not safe to make.")
     return notes + _gap_notes(list(plan.changelog))
@@ -298,7 +334,7 @@ async def generate_plan(
                     }
                 ]
                 continue
-            return PlanResult(plan, [], _final_notes(plan, blocks, parts))
+            return PlanResult(plan, [], _final_notes(plan, blocks, parts, master_text))
         logger.warning("resume tailor (%s) failed checks: %s", strength, "; ".join(problems)[:1500])
         all_problems.extend(problems)
         messages = messages + [
@@ -316,7 +352,7 @@ async def generate_plan(
             return PlanResult(
                 cleaned,
                 [],
-                _final_notes(cleaned, blocks, parts)
+                _final_notes(cleaned, blocks, parts, master_text)
                 + (["Some edits didn't pass the accuracy checks and were left as you wrote them:"] + skipped if skipped else []),
             )
 

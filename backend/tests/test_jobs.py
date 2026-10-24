@@ -701,3 +701,27 @@ def test_skills_lines_written_as_bullets_are_edited_as_skills_not_as_a_role():
 
     docx_editor.apply_text_plan(parts, {}, {skills[0].id: ["Advanced Excel", "Power BI"]})
     assert "Data Analytics: Advanced Excel, Power BI" in [p.text for p in doc.paragraphs]
+
+
+def test_notes_name_new_keywords_and_where_they_were_added():
+    from app.services.llm.schemas import PlannedSummary
+    from app.services.resume.docx_editor import Bullet, Block, TextPart
+    from app.services.resume.generation import _change_notes
+
+    master = "Engineered executive Power BI dashboards and briefed senior leadership. Led teams of consultants."
+    blocks = [Block(0, "Senior Consultant | Tria Federal | Arlington, VA", [
+        Bullet(0, None, "Engineered executive Power BI dashboards", ""),
+        Bullet(1, None, "Led teams of consultants", ""),
+    ])]
+    parts = [TextPart(100, "summary", None, "Experienced consultant who builds Power BI dashboards.", 0)]
+    plan = TailorPlan(
+        summaries=[PlannedSummary(part_id=100, text="Experienced consultant who builds Power BI dashboards and predictive models.")],
+        blocks=[PlannedBlock(block_id=0, bullets=[
+            PlannedBullet(bullet_id=1, text="Led teams of consultants on stakeholder engagement"),
+            PlannedBullet(bullet_id=0, text="Engineered executive Power BI dashboards"),
+        ])],
+    )
+    notes = _change_notes(plan, blocks, parts, None, master)
+    assert "New wording in your summary that your master doesn't use: predictive, models. Check each one is true for you." in notes
+    assert any(n.startswith("New wording in bullet 1 of Senior Consultant | Tria Federal: stakeholder, engagement.") for n in notes)
+    assert not any("dashboards" in n and n.startswith("New wording") for n in notes)  # a word the master already uses is never flagged

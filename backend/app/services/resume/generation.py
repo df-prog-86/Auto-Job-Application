@@ -103,20 +103,15 @@ FIRM_PROMPT = (
 
 
 def _debug_note(strength: str, attempt: int, what: str) -> None:
-    """One line per model answer in data/tailor_debug.log: what it changed and what the checks said (counts and rule names only, no resume text)."""
+    """One line per model answer, added to data/search_timing.log: what it changed and which rules it broke (counts and rule names only, no resume text)."""
     try:
         import time
-        from pathlib import Path
 
-        from app.config import settings
+        from app.services.jobcache.service import timing_note
 
-        path = Path(settings.JOB_CACHE_PATH).parent / "tailor_debug.log"
-        if path.exists() and path.stat().st_size > 200_000:
-            path.write_text("")
-        with path.open("a") as fh:
-            fh.write(f"{time.strftime('%H:%M:%S')} {strength} try {attempt + 1}: {what}\n")
+        timing_note(f"[tailor {strength} try {attempt + 1}] {what}", time.time())
     except Exception:
-        pass
+        logger.exception("could not write the tailoring note")
 
 
 def plan_changes(plan: TailorPlan, blocks: list[Block], parts: list[TextPart]) -> dict[str, int | bool]:

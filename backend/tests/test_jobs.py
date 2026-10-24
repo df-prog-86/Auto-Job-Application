@@ -659,3 +659,22 @@ def test_a_busy_ai_provider_gets_a_friendly_message_with_no_technical_detail(app
             raise AssertionError("should have failed")
         except QualificationError as exc:
             assert str(exc) == "Scoring is busy right now. Try again in a minute."
+
+
+def test_skills_and_summary_numbered_wrongly_by_the_model_are_matched_by_what_they_list():
+    from app.services.llm.schemas import PlannedSkills, PlannedSummary
+    from app.services.resume.docx_editor import TextPart
+    from app.services.resume.generation import repair_part_ids
+
+    parts = [
+        TextPart(100, "summary", None, "A long enough summary paragraph for a revenue cycle consultant.", 0),
+        TextPart(101, "skills", None, "Power BI, Excel", 0, label="Data: ", items=["Power BI", "Excel"], seps=[", "]),
+        TextPart(102, "skills", None, "Epic, SSI", 0, label="Systems: ", items=["Epic", "SSI"], seps=[", "]),
+    ]
+    plan = TailorPlan(
+        summaries=[PlannedSummary(part_id=0, text="Reworded.")],
+        skills=[PlannedSkills(part_id=1, items=["SSI", "Epic"]), PlannedSkills(part_id=2, items=["Excel", "Power BI", "Change Management"])],
+    )
+    fixed = repair_part_ids(plan, parts)
+    assert fixed.summaries[0].part_id == 100
+    assert [(s.part_id, s.items[0]) for s in fixed.skills] == [(102, "SSI"), (101, "Excel")]

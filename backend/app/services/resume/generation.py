@@ -102,6 +102,39 @@ FIRM_PROMPT = (
 )
 
 
+def repair_part_ids(plan: TailorPlan, parts: list[TextPart]) -> TailorPlan:
+    """
+    The model sometimes numbers a skills line or the summary differently from the numbers it was given. A skills line is recognised by
+    the items it lists (they are the ones it was shown), and a lone summary by being the only one, so a wrong number no longer throws
+    the whole part away. Entries that cannot be matched are left as they are and fail the usual checks.
+    """
+    by_id = {p.id: p for p in parts}
+    used_skills = {s.part_id for s in plan.skills if by_id.get(s.part_id) is not None and by_id[s.part_id].kind == "skills"}
+    skills = []
+    for entry in plan.skills:
+        part = by_id.get(entry.part_id)
+        if part is None or part.kind != "skills":
+            listed = {i.strip().lower() for i in entry.items}
+            best, best_share = None, 0.0
+            for cand in parts:
+                if cand.kind != "skills" or cand.id in used_skills or not cand.items:
+                    continue
+                share = len({i.lower() for i in cand.items} & listed) / len(cand.items)
+                if share > best_share:
+                    best, best_share = cand, share
+            if best is not None and best_share >= 0.8:
+                used_skills.add(best.id)
+                entry = entry.model_copy(update={"part_id": best.id})
+        skills.append(entry)
+    summary_parts = [p for p in parts if p.kind == "summary"]
+    summaries = list(plan.summaries)
+    if len(summary_parts) == 1 and len(summaries) == 1:
+        only = by_id.get(summaries[0].part_id)
+        if only is None or only.kind != "summary":
+            summaries = [summaries[0].model_copy(update={"part_id": summary_parts[0].id})]
+    return plan.model_copy(update={"skills": skills, "summaries": summaries})
+
+
 def _debug_note(strength: str, attempt: int, what: str) -> None:
     """One line per model answer, added to data/search_timing.log: what it changed and which rules it broke (counts and rule names only, no resume text)."""
     try:
@@ -228,6 +261,7 @@ async def generate_plan(
         except LLMError as exc:
             all_problems.append(f"model call failed: {exc}")
             break
+        plan = repair_part_ids(plan, parts)
         last_plan = plan
         problems = validate_plan(plan, blocks, master_text, firm, parts, job.description or "")
         # Rule names only: the checks quote bullet text, which stays out of the log.

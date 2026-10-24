@@ -179,7 +179,7 @@ export function Jobs() {
       )}
 
       {dupIds.size > 0 && (showingDups || (!dupHidden && visible.some((j) => dupIds.has(j.id)))) && (
-        <div role="status" className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800">
+        <div role="status" className="mb-3.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl bg-amber-50 px-4 py-1.5 text-[13px] font-semibold text-amber-800">
           <span>
             {showingDups
               ? `Showing ${dupJobs === 1 ? "the copies" : "the copies of each"} side by side. Delete the extra copy from its menu.`
@@ -191,12 +191,12 @@ export function Jobs() {
             <button
               type="button"
               onClick={() => setDupOnly((v) => !v)}
-              className="rounded-full bg-amber-100 px-3.5 py-1 text-[13px] font-bold text-amber-900 hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-300"
+              className="rounded-full bg-amber-100 px-3 py-0.5 text-[13px] font-bold text-amber-900 hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-300"
             >
               {showingDups ? "Show all jobs" : "Show duplicates"}
             </button>
             {!showingDups && (
-              <button type="button" onClick={() => setDupHidden(true)} className="rounded-full px-3 py-1 text-[13px] font-bold text-amber-900 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-300">
+              <button type="button" onClick={() => setDupHidden(true)} className="rounded-full px-2.5 py-0.5 text-[13px] font-bold text-amber-900 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-300">
                 Clear
               </button>
             )}

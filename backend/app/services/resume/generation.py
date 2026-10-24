@@ -261,8 +261,17 @@ async def generate_plan(
         except LLMError as exc:
             all_problems.append(f"model call failed: {exc}")
             break
+        before_repair = plan
         plan = repair_part_ids(plan, parts)
         last_plan = plan
+        _debug_note(
+            strength, attempt,
+            "offered parts "
+            + str({"summary": [x.id for x in parts if x.kind == "summary"], "skills": [x.id for x in parts if x.kind == "skills"]})
+            + "; model sent skills ids " + str([(e.part_id, len(e.items)) for e in before_repair.skills])
+            + " summary ids " + str([e.part_id for e in before_repair.summaries])
+            + "; after matching " + str([e.part_id for e in plan.skills]),
+        )
         problems = validate_plan(plan, blocks, master_text, firm, parts, job.description or "")
         # Rule names only: the checks quote bullet text, which stays out of the log.
         rules = sorted({re.sub(r"\d+|'[^']*'|\[[^\]]*\]", "#", p)[:70] for p in problems})

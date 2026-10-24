@@ -71,20 +71,21 @@ def _is_bullet(el, text: str) -> bool:
 def find_blocks(doc) -> list[Block]:
     """Each run of consecutive bullet paragraphs (one role's bullets) is a block."""
     paragraphs = list(doc.element.body.iter(qn("w:p")))
+    # A skills line written as a bullet is edited as a skills line (its items), never as a bullet of a role.
+    skills_lines = {id(p.element) for p in find_text_parts(doc) if p.kind == "skills"}
+    is_role_bullet = lambda p: _is_bullet(p, _text(p)) and id(p) not in skills_lines  # noqa: E731
     blocks: list[Block] = []
     next_bullet_id = 0
     i = 0
     while i < len(paragraphs):
         el = paragraphs[i]
-        if not _is_bullet(el, _text(el)):
+        if not is_role_bullet(el):
             i += 1
             continue
         parent = el.getparent()
         run: list = []
         j = i
-        while j < len(paragraphs) and paragraphs[j].getparent() is parent and _is_bullet(
-            paragraphs[j], _text(paragraphs[j])
-        ):
+        while j < len(paragraphs) and paragraphs[j].getparent() is parent and is_role_bullet(paragraphs[j]):
             run.append(paragraphs[j])
             j += 1
 
@@ -286,8 +287,10 @@ def find_text_parts(doc, first_id: int = 100) -> list[TextPart]:
             if t.strip():
                 body.append(paragraphs[j])
             j += 1
-        if not body or len(body) > MAX_SECTION_PARAGRAPHS or any(_is_bullet(p, _text(p)) for p in body):
-            continue  # bullet lists are already handled as blocks
+        if not body or len(body) > MAX_SECTION_PARAGRAPHS:
+            continue
+        if kind == "summary" and any(_is_bullet(p, _text(p)) for p in body):
+            continue  # a bulleted summary is handled as a list of bullets
         for p in body:
             full = _text(p)
             if kind == "summary":

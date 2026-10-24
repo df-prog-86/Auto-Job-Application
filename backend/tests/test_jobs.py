@@ -678,3 +678,26 @@ def test_skills_and_summary_numbered_wrongly_by_the_model_are_matched_by_what_th
     fixed = repair_part_ids(plan, parts)
     assert fixed.summaries[0].part_id == 100
     assert [(s.part_id, s.items[0]) for s in fixed.skills] == [(102, "SSI"), (101, "Excel")]
+
+
+def test_skills_lines_written_as_bullets_are_edited_as_skills_not_as_a_role():
+    from app.services.resume import docx_editor
+
+    doc = Document()
+    doc.add_paragraph("Professional Experience")
+    doc.add_paragraph("Analyst, Acme | 2020 - Present")
+    doc.add_paragraph("Reduced report time by 40% using SQL", style="List Bullet")
+    doc.add_paragraph("Led a team of 5 analysts", style="List Bullet")
+    doc.add_paragraph("Skills and Proficiencies")
+    doc.add_paragraph("Data Analytics: Power BI, Advanced Excel", style="List Bullet")
+    doc.add_paragraph("Healthcare Strategy: EHR Implementation, Patient Financial Services (A/R, Billing)", style="List Bullet")
+
+    blocks = docx_editor.find_blocks(doc)
+    parts = docx_editor.find_text_parts(doc)
+    assert [len(b.bullets) for b in blocks] == [2]  # only the role's bullets
+    skills = [p for p in parts if p.kind == "skills"]
+    assert [p.label for p in skills] == ["Data Analytics: ", "Healthcare Strategy: "]
+    assert skills[1].items == ["EHR Implementation", "Patient Financial Services (A/R, Billing)"]
+
+    docx_editor.apply_text_plan(parts, {}, {skills[0].id: ["Advanced Excel", "Power BI"]})
+    assert "Data Analytics: Advanced Excel, Power BI" in [p.text for p in doc.paragraphs]

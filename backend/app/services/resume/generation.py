@@ -102,6 +102,23 @@ FIRM_PROMPT = (
 )
 
 
+def _debug_note(strength: str, attempt: int, what: str) -> None:
+    """One line per model answer in data/tailor_debug.log: what it changed and what the checks said (counts and rule names only, no resume text)."""
+    try:
+        import time
+        from pathlib import Path
+
+        from app.config import settings
+
+        path = Path(settings.JOB_CACHE_PATH).parent / "tailor_debug.log"
+        if path.exists() and path.stat().st_size > 200_000:
+            path.write_text("")
+        with path.open("a") as fh:
+            fh.write(f"{time.strftime('%H:%M:%S')} {strength} try {attempt + 1}: {what}\n")
+    except Exception:
+        pass
+
+
 def plan_changes(plan: TailorPlan, blocks: list[Block], parts: list[TextPart]) -> dict[str, int | bool]:
     """What a plan really does to the master, counted from the plan itself (never from what the AI says it did)."""
     by_id = {p.id: p for p in parts}
@@ -218,6 +235,9 @@ async def generate_plan(
             break
         last_plan = plan
         problems = validate_plan(plan, blocks, master_text, firm, parts, job.description or "")
+        # Rule names only: the checks quote bullet text, which stays out of the log.
+        rules = sorted({re.sub(r"\d+|'[^']*'|\[[^\]]*\]", "#", p)[:70] for p in problems})
+        _debug_note(strength, attempt, f"asked for {plan_changes(plan, blocks, parts)}; {len(problems)} problems {rules}")
         if not problems:
             if is_no_change(plan_changes(plan, blocks, parts)) and attempt == 0:
                 # A plan that changes nothing, while the notes may claim otherwise: ask once for a real tailoring.

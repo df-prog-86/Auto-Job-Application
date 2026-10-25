@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS postings (
 );
 CREATE INDEX IF NOT EXISTS idx_postings_open ON postings (closed_at, employer_id);
 CREATE INDEX IF NOT EXISTS idx_postings_posted ON postings (posted_at);
+-- Finding a posting by its address, and by its place, would otherwise read the whole table (and the descriptions kept in it) every time.
+CREATE INDEX IF NOT EXISTS idx_postings_url ON postings (url);
+CREATE INDEX IF NOT EXISTS idx_postings_location ON postings (location);
 
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 

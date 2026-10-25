@@ -64,6 +64,7 @@ export function EditableField({
   if (editing) {
     return (
       <form
+        data-field={label}
         className={className}
         onSubmit={(e) => {
           e.preventDefault();
@@ -104,7 +105,7 @@ export function EditableField({
   }
 
   return (
-    <div className={className}>
+    <div className={className} data-field={label}>
       <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-ink-500">
         {label}
         {needsCompletion && (
@@ -161,7 +162,7 @@ export function SelectField({ label, value, options, onSave, required = false }:
   }
 
   return (
-    <div>
+    <div data-field={label}>
       <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-ink-500">
         {label}
         {needsCompletion && (

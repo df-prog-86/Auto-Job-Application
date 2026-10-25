@@ -49,6 +49,15 @@
 }
 .added-pulse { animation: added-pulse 1.6s ease-out 1; border-radius: 1rem; }
 
+/* The one profile field a "to finish" item points to: a purple glow that holds, then fades after about two seconds. */
+@keyframes field-glow {
+  0% { box-shadow: 0 0 0 0 rgba(91, 87, 245, 0); border-color: transparent; }
+  15%, 70% { box-shadow: 0 0 0 4px rgba(91, 87, 245, 0.28), 0 6px 18px -4px rgba(91, 87, 245, 0.45); border-color: #5b57f5; }
+  100% { box-shadow: 0 0 0 0 rgba(91, 87, 245, 0); border-color: transparent; }
+}
+.field-glow { animation: field-glow 2.2s ease-out 1; }
+@media (prefers-reduced-motion: reduce) { .field-glow { animation: none; box-shadow: 0 0 0 3px rgba(91, 87, 245, 0.4); border-color: #5b57f5; } }
+
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .added-toast { animation: toast-in 0.25s ease-out; }
 

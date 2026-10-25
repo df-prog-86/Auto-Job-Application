@@ -431,15 +431,59 @@ const SECTION_LABELS: Record<string, string> = {
   "profile-education": "Education",
 };
 
-function jumpTo(id: string) {
+/** The field label, and which one when a section repeats it (role 2, school 1), for each item in the "to finish" alert. */
+function fieldFor(item: string): { label: string | RegExp; index: number } | null {
+  const fixed: Record<string, string> = {
+    Name: "Name",
+    Email: "Email",
+    Phone: "Phone",
+    Location: "Location",
+    "Phone country code": "Phone country code",
+    "Work authorization": "Work authorization",
+    "Sponsorship answer": "Need visa sponsorship now or later?",
+    "Age 18 or older": "Are you 18 or older?",
+    "Background check answer": "Willing to complete a background check?",
+    "Criminal record check answer": "Willing to complete a criminal record check?",
+    "Drug screen answer": "Willing to complete a drug screen?",
+    "Desired salary": "Desired salary (as you want it written)",
+    "Start date": "Available to start",
+  };
+  if (fixed[item]) return { label: fixed[item], index: 0 };
+  const role = /^Role (\d+) (title|company|start date)$/.exec(item);
+  if (role) return { label: { title: "Job title", company: "Company", "start date": "Start date" }[role[2]]!, index: Number(role[1]) - 1 };
+  const school = /^School (\d+) (name|degree)$/.exec(item);
+  if (school) return { label: school[2] === "name" ? "School" : "Degree", index: Number(school[1]) - 1 };
+  if (/degree abbreviation$/.test(item)) return { label: /^Degree abbreviation/, index: -1 };
+  return null;
+}
+
+function jumpTo(id: string, item?: string) {
   const anchor = document.getElementById(id);
   if (!anchor) return;
-  // Some anchors are a heading inside their card: flash the card.
-  const el = anchor.tagName === "H2" ? (anchor.parentElement ?? anchor) : anchor;
+  // Some anchors are a heading inside their card: use the card.
+  const section = anchor.tagName === "H2" ? (anchor.parentElement ?? anchor) : anchor;
+  const want = item ? fieldFor(item) : null;
+  let control: HTMLElement | null = null;
+  if (want) {
+    const cells = Array.from(section.querySelectorAll<HTMLElement>("[data-field]")).filter((c) => {
+      const name = c.dataset.field ?? "";
+      return typeof want.label === "string" ? name === want.label : want.label.test(name);
+    });
+    let cell = cells[want.index] ?? null;
+    if (want.index < 0) {
+      // "<School name> degree abbreviation": the one in the card that names that school.
+      const school = item!.replace(/ degree abbreviation$/, "");
+      cell = cells.find((c) => c.parentElement?.textContent?.includes(school)) ?? cells[0] ?? null;
+    }
+    control = cell?.querySelector<HTMLElement>("button, select, input") ?? null;
+  }
+  const el = control ?? section;
+  const cls = control ? "field-glow" : "added-pulse";
   el.scrollIntoView({ behavior: "smooth", block: "center" });
-  el.classList.remove("added-pulse");
+  el.classList.remove("field-glow", "added-pulse");
   void el.offsetWidth;
-  el.classList.add("added-pulse");
+  el.classList.add(cls);
+  window.setTimeout(() => el.classList.remove(cls), 2400);
 }
 
 function CompletionBanner({ missing }: { missing: string[] }) {
@@ -487,7 +531,7 @@ function CompletionBanner({ missing }: { missing: string[] }) {
                   <button
                     key={m}
                     type="button"
-                    onClick={() => jumpTo(id)}
+                    onClick={() => jumpTo(id, m)}
                     className="inline-flex items-center gap-1.5 rounded-full border border-[#f1d58a] bg-white px-3 py-1.5 text-[12.5px] font-bold text-[#6b4300] hover:border-[#e8bb4c] hover:bg-[#fff4d6] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
                   >
                     {m} <span className="opacity-60" aria-hidden="true">&rsaquo;</span>

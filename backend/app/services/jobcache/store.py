@@ -436,6 +436,15 @@ class JobCache:
 
     def vague_place_postings(self, limit: int, per_employer: int, only_systems: list[str] | None = None) -> list[dict[str, Any]]:
         """Open postings whose list says only "3 Locations" (or nothing): the busiest employers first, a few from each."""
+        import os
+        import time as _time
+
+        t0 = _time.time()
+
+        def trace(msg: str) -> None:  # OTTER_TRACE=1 prints how long each step took (to find what makes a batch slow)
+            if os.environ.get("OTTER_TRACE"):
+                print(f"    [places pick {_time.time() - t0:6.1f}s] {msg}", flush=True)
+
         sys_sql = f" AND e.ats IN ({','.join('?' for _ in only_systems)})" if only_systems else ""
         sys_args = list(only_systems or [])
         with self.session() as db:
@@ -446,6 +455,7 @@ class JobCache:
                 + sys_sql + " ORDER BY e.hits DESC, p.first_seen DESC LIMIT ?",
                 [*sys_args, limit * 30],
             ).fetchall()
+        trace(f"first query done ({len(rows)} rows)")
         taken: dict[int, int] = {}
         out: list[dict[str, Any]] = []
         for r in rows:
@@ -455,10 +465,13 @@ class JobCache:
             out.append({"id": r["id"], "url": r["url"], "location": r["location"]})
             if len(out) >= limit:
                 break
+        trace(f"{len(out)} picked from the first query")
         if len(out) < limit:  # then the ones that name only a state ("PA", "US; PA; NJ"): a city search cannot use them until the town is known
             with self.session() as db:
                 short = [r[0] for r in db.execute("SELECT DISTINCT location FROM postings WHERE closed_at IS NULL AND location IS NOT NULL AND length(location) <= 40")]
+                trace(f"distinct short places read ({len(short)})")
                 state_only = [loc for loc in short if names_no_town(loc)]
+                trace(f"state-only places found ({len(state_only)})")
                 rows = []
                 for i in range(0, len(state_only), 400):
                     chunk = state_only[i : i + 400]
@@ -468,6 +481,7 @@ class JobCache:
                         + sys_sql + " ORDER BY e.hits DESC, p.first_seen DESC LIMIT ?",
                         [*chunk, *sys_args, limit * 10],
                     ).fetchall()
+                    trace(f"chunk {i // 400 + 1} of {(len(state_only) + 399) // 400} looked up ({len(rows)} rows so far)")
             for r in rows:
                 if taken.get(r["employer_id"], 0) >= per_employer:
                     continue

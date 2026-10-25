@@ -249,9 +249,15 @@ async def fill_places(cache: JobCache, limit: int = 150, per_employer: int = 10,
         return 0, 0
     icims = [i for i in todo if (urlsplit(i["url"]).hostname or "").endswith(".icims.com")]
     todo = [i for i in todo if i not in icims]
+    import os
+    import time as _time
+
+    t_open = _time.time()
     saved = await _icims_places(cache, icims)
     before = {id(i): i["location"] for i in todo}
     await web_search.enrich_from_ats(todo)
+    if os.environ.get("OTTER_TRACE"):
+        print(f"    [places open {_time.time() - t_open:6.1f}s] opened {len(icims)} iCIMS and {len(todo)} other postings", flush=True)
     unresolved: list[str] = []
     for item in todo:
         loc = item.get("location")

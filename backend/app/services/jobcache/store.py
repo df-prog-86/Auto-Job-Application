@@ -69,7 +69,7 @@ CREATE INDEX IF NOT EXISTS idx_postings_open ON postings (closed_at, employer_id
 CREATE INDEX IF NOT EXISTS idx_postings_posted ON postings (posted_at);
 -- Finding a posting by its address, and by its place, would otherwise read the whole table (and the descriptions kept in it) every time.
 CREATE INDEX IF NOT EXISTS idx_postings_url ON postings (url);
-CREATE INDEX IF NOT EXISTS idx_postings_location ON postings (location);
+CREATE INDEX IF NOT EXISTS idx_postings_open_location ON postings (closed_at, location);
 
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 
@@ -471,9 +471,12 @@ class JobCache:
         trace(f"{len(out)} picked from the first query")
         if len(out) < limit:  # then the ones that name only a state ("PA", "US; PA; NJ"): a city search cannot use them until the town is known
             with self.session() as db:
-                short = [r[0] for r in db.execute("SELECT DISTINCT location FROM postings WHERE closed_at IS NULL AND location IS NOT NULL AND length(location) <= 40")]
-                trace(f"distinct short places read ({len(short)})")
-                state_only = [loc for loc in short if names_no_town(loc)]
+                state_only = getattr(self, "_state_only_places", None)
+                if state_only is None:  # worked out once per run: a batch only needs to look these places up, not find them again
+                    short = [r[0] for r in db.execute("SELECT DISTINCT location FROM postings WHERE closed_at IS NULL AND location IS NOT NULL AND length(location) <= 40")]
+                    trace(f"distinct short places read ({len(short)})")
+                    state_only = [loc for loc in short if names_no_town(loc)]
+                    self._state_only_places = state_only
                 trace(f"state-only places found ({len(state_only)})")
                 rows = []
                 for i in range(0, len(state_only), 400):

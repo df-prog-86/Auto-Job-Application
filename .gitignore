@@ -39,4 +39,5 @@ htmlcov/
 
 # Env files anywhere
 .env
-.env.local
+.env.*
+!.env.example

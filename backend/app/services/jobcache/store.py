@@ -543,7 +543,7 @@ class JobCache:
 
     # ---- search -----------------------------------------------------------------------------------------
 
-    def candidates(self, match: str | None, like_terms: list[str], limit: int, earliest_posted: dt.date | None = None) -> list[dict[str, Any]]:
+    def candidates(self, match: str | None, like_terms: list[str], limit: int, earliest_posted: dt.date | None = None, skip_systems: set[str] | None = None) -> list[dict[str, Any]]:
         """
         Open postings whose TITLE shares words with the search, best text matches first, at most `limit` of them.
         `match` is a full-text query; `like_terms` is the fallback when this SQLite has no full-text search.
@@ -553,6 +553,9 @@ class JobCache:
         if earliest_posted is not None:
             date_clause = " AND (p.posted_at IS NULL OR p.posted_at >= ?)"
             params.append(earliest_posted.isoformat())
+        if skip_systems:  # hiring systems left out of this search (switched off, or hidden by default such as USAJOBS)
+            date_clause += f" AND e.ats NOT IN ({','.join('?' for _ in skip_systems)})"
+            params.extend(sorted(skip_systems))
         with self.session() as db:
             if self.has_fts and match:
                 sql = (
@@ -763,7 +766,7 @@ class JobCache:
         return done
 
     def candidates_by_description(
-        self, match: str, limit: int, earliest_posted: dt.date | None = None, exclude_ids: set[int] | None = None
+        self, match: str, limit: int, earliest_posted: dt.date | None = None, exclude_ids: set[int] | None = None, skip_systems: set[str] | None = None
     ) -> list[dict[str, Any]]:
         """Open postings whose description opening matches a full-text query, best matches first. Empty until the index is built."""
         if not self.desc_ready() or not match:
@@ -773,6 +776,9 @@ class JobCache:
         if earliest_posted is not None:
             date_clause = " AND (p.posted_at IS NULL OR p.posted_at >= ?)"
             params.append(earliest_posted.isoformat())
+        if skip_systems:
+            date_clause += f" AND e.ats NOT IN ({','.join('?' for _ in skip_systems)})"
+            params.extend(sorted(skip_systems))
         with self.session() as db:
             rows = db.execute(
                 "SELECT p.*, e.name AS company, e.ats AS ats, e.id AS eid, e.last_ok AS read_ok FROM postings_desc_fts f "

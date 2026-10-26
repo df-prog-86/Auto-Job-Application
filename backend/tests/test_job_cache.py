@@ -2384,3 +2384,17 @@ def test_usajobs_reader_pages(monkeypatch):
     assert len(res.postings) == 2 and res.complete and seen == [("https://data.usajobs.gov/api/search", 1, "k")]
     with pytest.raises(readers.ReaderError):
         asyncio.run(readers._read_usajobs("../x", None, None))
+
+
+def test_federal_roles_hidden_unless_asked(tmp_path):
+    from app.services.jobcache import service
+    cache = JobCache(str(tmp_path / "fed.db"))
+    now = now_ts()
+    for ats, ident, name, ext in (("greenhouse", "acme", "Acme", "1"), ("usajobs", "VA00", "Veterans Health Administration", "2")):
+        eid, _ = cache.upsert_employer(ats, ident, name, "search")
+        cache.apply_refresh(eid, [PostingIn(ext_id=ext, title="Revenue Cycle Analyst", url=f"https://example.com/{ext}", location="Boston, MA")], now, 24.0, True)
+    names = lambda skip: sorted(r["company"] for r in cache.candidates("revenue", [], 50, None, skip))
+    assert names(None) == ["Acme", "Veterans Health Administration"]
+    assert names({"usajobs"}) == ["Acme"]
+    assert service.hidden_by_default(SimpleNamespace()) == {"usajobs"}
+    assert service.hidden_by_default(SimpleNamespace(include_federal=True)) == set()

@@ -61,6 +61,11 @@ def disabled_systems() -> set[str]:
 
 # ---- searching --------------------------------------------------------------------------------------------------
 
+def hidden_by_default(criteria: Any) -> set[str]:
+    """Hiring systems kept out of a search unless the person asks for them: federal (USAJOBS) roles show only when the search sets include_federal."""
+    return set() if getattr(criteria, "include_federal", False) else {"usajobs"}
+
+
 @dataclass
 class CacheOutcome:
     items: list[dict[str, Any]] = field(default_factory=list)
@@ -390,10 +395,10 @@ def search_sync(criteria: Any, known_keys: set[str], extra_titles: list[str] | N
     plan = matcher.build_plan(criteria, extra_titles, extra_places)
     if coverage["postings"] == 0 or not plan.queries:
         return CacheOutcome(coverage=coverage)
-    off = disabled_systems()
+    off = disabled_systems() | hidden_by_default(criteria)
     rows: list[dict[str, Any]] = []
     for query in matcher.fts_queries(plan) or [None]:
-        rows = cache.candidates(query, matcher.like_terms(plan), matcher.CANDIDATE_LIMIT, plan.earliest())
+        rows = cache.candidates(query, matcher.like_terms(plan), matcher.CANDIDATE_LIMIT, plan.earliest(), off)
         if len(rows) >= matcher.ENOUGH_TIGHT:
             break
     capped = len(rows) >= matcher.CANDIDATE_LIMIT
@@ -401,7 +406,7 @@ def search_sync(criteria: Any, known_keys: set[str], extra_titles: list[str] | N
     # every job near the person. A search that names a city also pulls the best title matches within that city and its neighbors.
     have = {r["id"] for r in rows}
     for query in matcher.fts_place_queries(plan):
-        near = cache.candidates(query, matcher.like_terms(plan), matcher.CANDIDATE_LIMIT, plan.earliest())
+        near = cache.candidates(query, matcher.like_terms(plan), matcher.CANDIDATE_LIMIT, plan.earliest(), off)
         rows += [r for r in near if r["id"] not in have]
         have.update(r["id"] for r in near)
         if len(near) >= matcher.ENOUGH_TIGHT:
@@ -409,7 +414,7 @@ def search_sync(criteria: Any, known_keys: set[str], extra_titles: list[str] | N
     desc_query = matcher.fts_desc_query(plan)
     if desc_query and cache.desc_ready():
         # postings whose title is a different one but whose description opening names this kind of work
-        rows += cache.candidates_by_description(desc_query, matcher.DESC_CANDIDATE_LIMIT, plan.earliest(), {r["id"] for r in rows})
+        rows += cache.candidates_by_description(desc_query, matcher.DESC_CANDIDATE_LIMIT, plan.earliest(), {r["id"] for r in rows}, off)
     rows = [r for r in rows if r["ats"] not in off]
     scored = matcher.diversify(matcher.rank(plan, rows))
     fresh = [s for s in scored if not (loose_keys(s.row["url"]) & known_keys)]
@@ -430,7 +435,7 @@ RANKED_KEEP = 6
 
 
 def _ranked_key(criteria: Any) -> str:
-    fields = [getattr(criteria, k, None) for k in ("titles", "location", "work_type", "keywords", "exclude_companies", "target_salary", "require_salary", "posted_within_days", "include_remote")]
+    fields = [getattr(criteria, k, None) for k in ("titles", "location", "work_type", "keywords", "exclude_companies", "target_salary", "require_salary", "posted_within_days", "include_remote", "include_federal")]
     return json.dumps(fields, default=str)
 
 
@@ -443,7 +448,7 @@ def _web_key(criteria: Any) -> str:
     def norm(v: Any) -> Any:
         return re.sub(r"\s+", " ", v.strip().lower()) if isinstance(v, str) else v
 
-    fields = [norm(getattr(criteria, k, None)) for k in ("titles", "location", "work_type", "keywords", "exclude_companies", "target_salary", "require_salary", "posted_within_days", "include_remote")]
+    fields = [norm(getattr(criteria, k, None)) for k in ("titles", "location", "work_type", "keywords", "exclude_companies", "target_salary", "require_salary", "posted_within_days", "include_remote", "include_federal")]
     return json.dumps(fields, default=str)
 
 

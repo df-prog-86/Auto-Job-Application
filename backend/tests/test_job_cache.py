@@ -2415,3 +2415,23 @@ def test_usajobs_day_pay_remote_and_many_places():
     assert many.location.startswith("Town0, TX; Town1, TX") and len(many.location) <= 285 and "Italy" not in many.location
     both = job(PositionLocation=[{"LocationName": "Boston, Massachusetts"}], UserArea={"Details": {"RemoteIndicator": True}})
     assert both.work_type == "remote" and both.location == "Boston, MA"
+
+
+def test_repair_desc_index_rebuilds_from_saved_descriptions(tmp_path, monkeypatch):
+    import argparse, sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from scripts import cache_tools
+    path = str(tmp_path / "cache.db")
+    monkeypatch.setattr(cache_tools.settings, "JOB_CACHE_PATH", path)
+    cache = JobCache(path)
+    eid, _ = cache.upsert_employer("greenhouse", "acme", "Acme", "search")
+    cache.apply_refresh(eid, [PostingIn(ext_id="1", title="Billing Analyst", url="https://x.example/1", description="Resolve denied claims and appeals for hospital billing."),
+                              PostingIn(ext_id="2", title="Nurse", url="https://x.example/2", description="Care for patients on the ward.")], now_ts(), 24.0, True)
+    cache.reindex_descriptions()
+    assert cache.candidates_by_description('"denied claims"', 10)
+    assert cache_tools.cmd_repair_desc_index(argparse.Namespace(skip_backup=False, force_schema=False)) == 0
+    assert list((tmp_path / "backups").glob("job_cache-before-repair-*.db"))
+    again = JobCache(path)
+    assert [r["title"] for r in again.candidates_by_description('"denied claims"', 10)] == ["Billing Analyst"]
+    assert again.desc_ready()

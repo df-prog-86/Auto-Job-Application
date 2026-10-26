@@ -41,7 +41,10 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
   python -m scripts.cache_tools usajobs-probe [--out FILE]
                                                           # needs USAJOBS_API_KEY and USAJOBS_EMAIL in .env. Reads the agency code list and 5 federal
                                                           # jobs, prints how they parse, and saves the raw answer to FILE. Saves nothing to the job lists.
-  python -m scripts.cache_tools usajobs-seed [--apply] [--read]
+  python -m scripts.cache_tools repair-desc-index [--force-schema]
+                                                          # rebuilds a damaged description search index from the saved descriptions (backs up first).
+                                                          # Stop the app and background runs first. Nothing but the index is touched.
+  python -m scripts.cache_tools usajobs-seed [--apply] [--read] [--resume]
                                                           # adds one employer per federal agency; --read also reads their jobs now. Dry run without --apply.
 
 `reread` refuses to run on the live saved lists unless you add --live (the normal background refresh does the same job there).
@@ -1125,6 +1128,73 @@ def cmd_usshare(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_repair_desc_index(args: argparse.Namespace) -> int:
+    """
+    Rebuilds the description search index (postings_desc_fts) when it is damaged. The index is only a copy of the opening lines of the
+    descriptions kept in the postings table, so nothing is lost: it is backed up, dropped, and written again from the saved descriptions.
+    Stop the app and every background run first.
+    """
+    import sqlite3
+
+    from app.services.jobcache.store import DESC_FTS_SCHEMA, DESC_READY_KEY
+
+    path = Path(settings.JOB_CACHE_PATH)
+    if not args.skip_backup:
+        dest = path.parent / "backups" / f"job_cache-before-repair-{time.strftime('%Y%m%d-%H%M')}.db"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        print(f"1/4 Backing up {path.name} to {dest} (a few minutes) ...", flush=True)
+        src, dst = sqlite3.connect(str(path), timeout=120), sqlite3.connect(str(dest))
+        src.backup(dst, pages=4000)
+        dst.close()
+        src.close()
+    else:
+        print("1/4 Backup skipped.")
+    print("2/4 Removing the damaged index ...", flush=True)
+    conn = sqlite3.connect(str(path), timeout=120, isolation_level=None)
+    try:
+        conn.execute("DROP TABLE IF EXISTS postings_desc_fts")
+        conn.close()
+        print("    dropped.", flush=True)
+    except sqlite3.DatabaseError as exc:
+        print(f"    the normal drop failed: {exc}")
+        if not args.force_schema:
+            conn.close()
+            print("    Nothing was changed. Run again with --force-schema to remove it from the schema instead and compact the file.")
+            return 1
+        conn.execute("PRAGMA writable_schema = ON")
+        conn.execute("DELETE FROM sqlite_master WHERE name LIKE 'postings_desc_fts%'")
+        conn.execute("PRAGMA writable_schema = OFF")
+        conn.close()
+        print("    removed from the schema. Compacting the file (VACUUM, several minutes) ...", flush=True)
+        conn = sqlite3.connect(str(path), timeout=120, isolation_level=None)
+        conn.execute("VACUUM")
+        conn.close()
+    print("3/4 Writing the index again from the saved descriptions (this is the long step) ...", flush=True)
+    fresh = sqlite3.connect(str(path), timeout=120)
+    fresh.execute(DESC_FTS_SCHEMA)  # an empty index, ready to be filled
+    fresh.commit()
+    fresh.close()
+    cache = JobCache()
+    cache.meta_set(DESC_READY_KEY, "0")
+    n = cache.reindex_descriptions(rebuild=True, progress=lambda done: print(f"    {done:,} postings indexed", flush=True) if done % 20000 < 2000 else None)
+    print(f"    {n:,} postings indexed.", flush=True)
+    print("4/4 Checking the file ...", flush=True)
+    conn = sqlite3.connect(str(path), timeout=120)
+    ok = conn.execute("PRAGMA quick_check(20)").fetchall()
+    print("    quick_check:", ok)
+    bad = False
+    for name in ("postings_fts", "postings_desc_fts"):
+        try:
+            conn.execute(f"INSERT INTO {name}({name}) VALUES('integrity-check')")
+            print(f"    {name}: ok")
+        except sqlite3.DatabaseError as exc:
+            bad = True
+            print(f"    {name}: PROBLEM {exc}")
+    conn.commit()
+    conn.close()
+    return 1 if bad or ok != [("ok",)] else 0
+
+
 def cmd_reindex(args: argparse.Namespace) -> int:
     cache = JobCache(args.db) if args.db else JobCache()
     if not cache.has_desc:
@@ -1241,6 +1311,11 @@ async def _usajobs_seed(args: argparse.Namespace) -> int:
             added += 1 if created else 0
             if not args.read:
                 continue
+            if getattr(args, "resume", False):
+                with cache.session() as db:
+                    done_before = db.execute("SELECT last_ok FROM employers WHERE id = ?", (eid,)).fetchone()
+                if done_before and done_before["last_ok"]:
+                    continue
             try:
                 res = await read_employer("usajobs", code, client, throttle)
             except ReaderError as exc:
@@ -1365,7 +1440,13 @@ def main() -> None:
     us_seed.add_argument("--apply", action="store_true", help="actually add the agencies (without this it only lists some)")
     us_seed.add_argument("--read", action="store_true", help="also read each agency's jobs now (needs the key)")
     us_seed.add_argument("--source", default="curated")
+    us_seed.add_argument("--resume", action="store_true", help="skip agencies that were already read successfully")
+    rp = sub.add_parser("repair-desc-index")
+    rp.add_argument("--skip-backup", action="store_true")
+    rp.add_argument("--force-schema", action="store_true", help="if the damaged index cannot be dropped normally, remove it from the schema and compact the file")
     args = p.parse_args()
+    if args.cmd == "repair-desc-index":
+        sys.exit(cmd_repair_desc_index(args))
     if args.cmd == "usajobs-probe":
         sys.exit(asyncio.run(_usajobs_probe(args)))
     if args.cmd == "usajobs-seed":

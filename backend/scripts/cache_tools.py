@@ -1136,6 +1136,46 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _usajobs_sample(args: argparse.Namespace, client: Any, throttle: Throttle, readers: Any) -> None:
+    """Reads several pages spread across the whole federal list and reports how complete each field is (saves nothing to the job lists)."""
+    import statistics
+
+    pages = [1, 30, 60, 90, 120, 150, 180, 200][: max(1, args.sample // 50)]
+    rows: list[tuple[Any, dict]] = []
+    for pg in pages:
+        try:
+            data = await readers._request(client, throttle, "usajobs", "GET", f"https://{readers.USAJOBS_HOST}/api/search",
+                                          params={"ResultsPerPage": 50, "Page": pg}, headers=readers._usajobs_headers())
+        except ReaderError as exc:
+            print(f"  page {pg} failed: {exc}")
+            continue
+        got, _ = readers.parse_usajobs(data)
+        raws = {str(i.get("MatchedObjectId")): (i.get("MatchedObjectDescriptor") or {}) for i in (data.get("SearchResult") or {}).get("SearchResultItems") or []}
+        rows += [(p, raws.get(p.ext_id, {})) for p in got]
+    n = len(rows)
+    if not n:
+        print("Sample: nothing parsed.")
+        return
+    pct = lambda k: f"{100 * k / n:.0f}%"
+    lens = [len(p.description or "") for p, _ in rows]
+    agencies = {str(d.get("OrganizationName")) for _, d in rows}
+    print(f"\nSample of {n} jobs from {len(pages)} spread-out pages, {len(agencies)} agencies:")
+    print(f"  title {pct(sum(bool(p.title) for p, _ in rows))} | posted date {pct(sum(bool(p.posted_at) for p, _ in rows))} | pay {pct(sum(bool(p.pay_text) for p, _ in rows))} | "
+          f"location {pct(sum(bool(p.location) for p, _ in rows))} | description {pct(sum(bool(p.description) for p, _ in rows))}")
+    print(f"  several places {pct(sum(';' in (p.location or '') for p, _ in rows))} | hourly pay {pct(sum('hour' in (p.pay_text or '') for p, _ in rows))} | "
+          f"remote {pct(sum(p.work_type == 'remote' for p, _ in rows))} | description length min {min(lens)}, median {int(statistics.median(lens))}, max {max(lens)}")
+    odd = []
+    for label, pick in (("no pay", lambda p, d: not p.pay_text), ("several places", lambda p, d: ";" in (p.location or "")), ("hourly", lambda p, d: "hour" in (p.pay_text or "")),
+                        ("remote", lambda p, d: p.work_type == "remote"), ("short text", lambda p, d: len(p.description or "") < 400), ("vague place", lambda p, d: not p.location or readers.is_vague_place(p.location))):
+        hits = [(p, d) for p, d in rows if pick(p, d)][:3]
+        for p, d in hits:
+            odd.append(f"[{label}] {p.title[:70]} | {d.get('OrganizationName')} | place: {p.location} (raw: {str(d.get('PositionLocationDisplay'))[:60]}, {len(d.get('PositionLocation') or [])} locations) | "
+                       f"pay: {p.pay_text} (raw: {json.dumps(d.get('PositionRemuneration'))[:140]}) | posted {p.posted_at} | text {len(p.description or '')} chars | {p.url}")
+    out = Path(args.out).with_name("usajobs-sample.txt")
+    out.write_text("\n".join(odd) + "\n")
+    print(f"  {len(odd)} unusual examples written to {out}")
+
+
 async def _usajobs_probe(args: argparse.Namespace) -> int:
     """Checks the USAJOBS key and shows how real answers read. Saves nothing to the job lists; the raw answers go to --out."""
     from app.services.jobcache import readers
@@ -1166,6 +1206,8 @@ async def _usajobs_probe(args: argparse.Namespace) -> int:
             print(f"    {p.url}")
         if not got:
             print("  nothing parsed: check the raw answer in the output file.")
+        if args.sample:
+            await _usajobs_sample(args, client, throttle, readers)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(raw, indent=1)[:400_000])
@@ -1318,6 +1360,7 @@ def main() -> None:
     pr.add_argument("--out", help="also save the table to this file")
     up = sub.add_parser("usajobs-probe")
     up.add_argument("--out", default="data/work/usajobs-probe.json")
+    up.add_argument("--sample", type=int, default=0, help="also read this many jobs (50 per page, spread across the list) and report how complete each field is")
     us_seed = sub.add_parser("usajobs-seed")
     us_seed.add_argument("--apply", action="store_true", help="actually add the agencies (without this it only lists some)")
     us_seed.add_argument("--read", action="store_true", help="also read each agency's jobs now (needs the key)")

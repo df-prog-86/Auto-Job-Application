@@ -448,7 +448,8 @@ class JobCache:
             if os.environ.get("OTTER_TRACE"):
                 print(f"    [places pick {_time.time() - t0:6.1f}s] {msg}", flush=True)
 
-        sys_sql = f" AND e.ats IN ({','.join('?' for _ in only_systems)})" if only_systems else ""
+        # USAJOBS lists every location in its answer, so its postings pages are never opened to find a place
+        sys_sql = f" AND e.ats IN ({','.join('?' for _ in only_systems)})" if only_systems else " AND e.ats <> 'usajobs'"
         sys_args = list(only_systems or [])
         with self.session() as db:
             rows = db.execute(

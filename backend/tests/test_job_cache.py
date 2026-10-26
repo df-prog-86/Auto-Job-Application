@@ -2398,3 +2398,20 @@ def test_federal_roles_hidden_unless_asked(tmp_path):
     assert names({"usajobs"}) == ["Acme"]
     assert service.hidden_by_default(SimpleNamespace()) == {"usajobs"}
     assert service.hidden_by_default(SimpleNamespace(include_federal=True)) == set()
+
+
+def test_usajobs_day_pay_remote_and_many_places():
+    from app.services.jobcache import readers
+    def job(**kw):
+        d = {"PositionTitle": "T", "PositionURI": "https://www.usajobs.gov/job/1", "PublicationStartDate": "2026-10-01T00:00:00.0000", **kw}
+        return readers.parse_usajobs({"SearchResult": {"SearchResultItems": [{"MatchedObjectId": "1", "MatchedObjectDescriptor": d}]}})[0][0]
+    day = job(PositionRemuneration=[{"MinimumRange": "174.5", "MaximumRange": "174.5", "RateIntervalCode": "PD", "Description": "Per Day"}])
+    assert day.pay_text == "$174.50 / day" and day.pay_mid is None
+    month = job(PositionRemuneration=[{"MinimumRange": "5000", "MaximumRange": "6000", "RateIntervalCode": "PM", "Description": "Per Month"}])
+    assert month.pay_text == "$5,000 - $6,000 / month" and month.pay_mid == 66000
+    rem = job(PositionLocation=[{"LocationName": "Anywhere in the U.S. (remote job), United States"}])
+    assert rem.work_type == "remote" and rem.location == "Remote (United States)"
+    many = job(PositionLocation=[{"LocationName": "Rome, Italy"}] + [{"LocationName": f"Town{i}, Texas"} for i in range(80)] + [{"LocationName": "Boston, Massachusetts"}])
+    assert many.location.startswith("Town0, TX; Town1, TX") and len(many.location) <= 285 and "Italy" not in many.location
+    both = job(PositionLocation=[{"LocationName": "Boston, Massachusetts"}], UserArea={"Details": {"RemoteIndicator": True}})
+    assert both.work_type == "remote" and both.location == "Boston, MA"

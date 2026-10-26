@@ -1328,23 +1328,43 @@ def _us_state_abbr(tail: str) -> str | None:
     return t.upper() if len(t) == 2 and t.upper() in STATE_BY_NAME.values() else STATE_BY_NAME.get(fold(t))
 
 
-def _usajobs_place(d: dict[str, Any]) -> str | None:
+def _usajobs_names(d: dict[str, Any]) -> list[str]:
     out: list[str] = []
     for loc in d.get("PositionLocation") or []:
-        if not isinstance(loc, dict):
-            continue
-        place = str(loc.get("LocationName") or loc.get("CityName") or "").strip()
-        if not place:
-            continue
+        if isinstance(loc, dict):
+            place = str(loc.get("LocationName") or loc.get("CityName") or "").strip()
+            if place:
+                out.append(place)
+    return out
+
+
+def _usajobs_is_remote_name(name: str) -> bool:
+    n = name.lower()
+    return "remote" in n or "anywhere in the u" in n or "telework" in n
+
+
+def _usajobs_place(d: dict[str, Any]) -> str | None:
+    """"City, ST" for each place the job lists, US places first, as many as fit the saved place's length (a job in 400 places keeps the first few)."""
+    us: list[str] = []
+    other: list[str] = []
+    for place in _usajobs_names(d):
         head, _, tail = place.rpartition(",")
         abbr = _us_state_abbr(tail) if head else None
-        place = f"{head.strip()}, {abbr}" if abbr else place
-        if place not in out:
-            out.append(place)
-    return "; ".join(out[:5]) or (str(d.get("PositionLocationDisplay") or "").strip() or None)
+        label = f"{head.strip()}, {abbr}" if abbr else place
+        if label not in us and label not in other:
+            (us if abbr else other).append(label)
+    out: list[str] = []
+    size = 0
+    for label in us + other:
+        if size + len(label) + 2 > 280:
+            break
+        out.append(label)
+        size += len(label) + 2
+    return "; ".join(out) or (str(d.get("PositionLocationDisplay") or "").strip() or None)
 
 
 def _usajobs_pay(d: dict[str, Any]) -> tuple[str | None, float | None]:
+    """(pay text, yearly midpoint). Yearly, hourly (x 2,080) and monthly (x 12) pay give a midpoint; a daily or weekly rate is shown but not turned into a year."""
     rem = d.get("PositionRemuneration")
     r = rem[0] if isinstance(rem, list) and rem and isinstance(rem[0], dict) else None
     if not r:
@@ -1354,19 +1374,29 @@ def _usajobs_pay(d: dict[str, Any]) -> tuple[str | None, float | None]:
     except (TypeError, ValueError):
         return None, None
     kind = fold(str(r.get("RateIntervalCode") or "") + " " + str(r.get("Description") or ""))
+    words = kind.split()
     if lo <= 0 or hi < lo:
         return None, None
-    if "pa" in kind.split() or "year" in kind or "annum" in kind:
+    if "pa" in words or "year" in kind or "annum" in kind:
         factor, label, fmt = 1.0, "year", "{:,.0f}"
-    elif "ph" in kind.split() or "hour" in kind:
+    elif "ph" in words or "hour" in kind:
         factor, label, fmt = 2080.0, "hour", "{:,.2f}"
+    elif "pm" in words or "month" in kind:
+        factor, label, fmt = 12.0, "month", "{:,.0f}"
+    elif "pd" in words or "per day" in kind:
+        factor, label, fmt = None, "day", "{:,.2f}"
+    elif "pw" in words or "per week" in kind:
+        factor, label, fmt = None, "week", "{:,.2f}"
     else:
         return None, None
+    a, b = fmt.format(lo), fmt.format(hi)
+    text_ = f"${a} - ${b} / {label}" if hi > lo else f"${a} / {label}"
+    if factor is None:
+        return text_, None
     mid = (lo + hi) / 2 * factor
     if not 10_000 <= mid <= 1_000_000:
         return None, None
-    a, b = fmt.format(lo), fmt.format(hi)
-    return (f"${a} - ${b} / {label}" if hi > lo else f"${a} / {label}"), mid
+    return text_, mid
 
 
 def _usajobs_text(d: dict[str, Any], details: dict[str, Any]) -> str:
@@ -1410,7 +1440,10 @@ def parse_usajobs(data: Any) -> tuple[list[PostingIn], int | None]:
         user_area = d.get("UserArea") if isinstance(d.get("UserArea"), dict) else {}
         details = user_area.get("Details") if isinstance(user_area.get("Details"), dict) else {}
         loc = _usajobs_place(d)
+        names = _usajobs_names(d)
         remote = str(details.get("RemoteIndicator")).strip().lower() in ("true", "yes", "1")
+        if names and all(_usajobs_is_remote_name(n) for n in names):  # "Anywhere in the U.S. (remote job)"
+            remote, loc = True, "Remote (United States)"
         pay_text, mid = _usajobs_pay(d)
         body = _usajobs_text(d, details)
         out.append(PostingIn(

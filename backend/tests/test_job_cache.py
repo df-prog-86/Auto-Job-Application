@@ -2313,3 +2313,73 @@ def test_setup_does_not_wait_for_a_busy_database_and_a_busy_location_save_is_ski
     assert cache.set_location("https://jobs.example.com/1", "Boston, MA") is False  # nothing to save here, and no error while the database is busy
     holder.rollback()
     holder.close()
+
+
+USAJOBS_PAGE = {"SearchResult": {"SearchResultCountAll": 2, "SearchResultItems": [
+    {"MatchedObjectId": "812345600", "MatchedObjectDescriptor": {
+        "PositionID": "26-ABC-123", "PositionTitle": "Registered Nurse", "PositionURI": "https://www.usajobs.gov/job/812345600",
+        "ApplyURI": ["https://www.usajobs.gov/job/812345600"], "PublicationStartDate": "2026-10-20T00:00:00.0000",
+        "PositionLocation": [{"LocationName": "Boston, Massachusetts"}, {"LocationName": "Bedford, Massachusetts"}, {"LocationName": "Boston, Massachusetts"}],
+        "PositionRemuneration": [{"MinimumRange": "78592.0", "MaximumRange": "102171.0", "RateIntervalCode": "PA", "Description": "Per Year"}],
+        "QualificationSummary": "You must be a licensed RN.",
+        "UserArea": {"Details": {"JobSummary": "<p>Care for veterans.</p>", "MajorDuties": ["Assess patients", "Give care"], "RemoteIndicator": False}}}},
+    {"MatchedObjectId": "812345601", "MatchedObjectDescriptor": {
+        "PositionTitle": "IT Specialist", "PositionURI": "https://www.usajobs.gov/job/812345601", "PublicationStartDate": "2026-10-22T00:00:00.0000",
+        "PositionLocation": [{"LocationName": "Washington, District of Columbia"}],
+        "PositionRemuneration": [{"MinimumRange": "40.0", "MaximumRange": "50.0", "RateIntervalCode": "PH"}],
+        "UserArea": {"Details": {"JobSummary": "Run systems.", "RemoteIndicator": "True"}}}},
+    {"MatchedObjectId": "x", "MatchedObjectDescriptor": {"PositionTitle": "", "PositionURI": "https://www.usajobs.gov/job/x"}},
+]}}
+
+
+def test_usajobs_parse():
+    from app.services.jobcache import readers
+    got, total = readers.parse_usajobs(USAJOBS_PAGE)
+    assert total == 2 and [g.ext_id for g in got] == ["812345600", "812345601"]
+    a, b = got
+    assert a.location == "Boston, MA; Bedford, MA" and a.posted_at == dt.date(2026, 10, 20) and a.agency is False
+    assert a.pay_text == "$78,592 - $102,171 / year" and a.pay_mid == (78592 + 102171) / 2
+    assert "Care for veterans." in a.description and "- Assess patients" in a.description and "licensed RN" in a.description
+    assert a.url == "https://www.usajobs.gov/job/812345600"
+    assert b.location == "Washington, DC" and b.work_type == "remote"
+    assert b.pay_text == "$40.00 - $50.00 / hour" and b.pay_mid == 45 * 2080
+    assert readers.parse_usajobs({}) == ([], None) and readers.parse_usajobs({"SearchResult": {}}) == ([], None)
+
+
+def test_usajobs_codes_headers_and_switch(monkeypatch):
+    from app.services.jobcache import readers, service
+    from app.config import settings
+    out: dict[str, str] = {}
+    readers._walk_codes({"CodeList": [{"ValidValue": [{"Code": "va", "Value": "Veterans Health Administration", "IsDisabled": "No"},
+                                                      {"Code": "OLD", "Value": "Gone Agency", "IsDisabled": "Yes"}]}]}, out)
+    assert out == {"VA": "Veterans Health Administration"}
+    monkeypatch.setattr(settings, "USAJOBS_API_KEY", "", raising=False)
+    monkeypatch.setattr(settings, "USAJOBS_EMAIL", "", raising=False)
+    assert "usajobs" in service.disabled_systems()
+    with pytest.raises(readers.ReaderError):
+        readers._usajobs_headers()
+    monkeypatch.setattr(settings, "USAJOBS_API_KEY", "k", raising=False)
+    monkeypatch.setattr(settings, "USAJOBS_EMAIL", "me@example.com", raising=False)
+    assert "usajobs" not in service.disabled_systems()
+    assert readers._usajobs_headers()["User-Agent"] == "me@example.com"
+    assert readers.reader_url_allowed("https://data.usajobs.gov/api/search?Organization=VA")
+    assert not readers.reader_url_allowed("https://evil.example/api/search")
+
+
+def test_usajobs_reader_pages(monkeypatch):
+    import asyncio
+    from app.services.jobcache import readers
+    from app.config import settings
+    monkeypatch.setattr(settings, "USAJOBS_API_KEY", "k", raising=False)
+    monkeypatch.setattr(settings, "USAJOBS_EMAIL", "me@example.com", raising=False)
+    seen = []
+
+    async def fake(client, throttle, system, method, url, text=False, **kw):
+        seen.append((url, kw["params"]["Page"], kw["headers"]["Authorization-Key"]))
+        return USAJOBS_PAGE
+
+    monkeypatch.setattr(readers, "_request", fake)
+    res = asyncio.run(readers._read_usajobs("va", None, None))
+    assert len(res.postings) == 2 and res.complete and seen == [("https://data.usajobs.gov/api/search", 1, "k")]
+    with pytest.raises(readers.ReaderError):
+        asyncio.run(readers._read_usajobs("../x", None, None))

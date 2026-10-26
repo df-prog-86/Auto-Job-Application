@@ -58,8 +58,12 @@ class Settings(BaseSettings):
     JOB_CACHE_PATH: str = str(DEFAULT_DATA_DIR / "job_cache.db")
     JOB_CACHE_REFRESH_HOURS: int = 4  # how often the background refresh looks for employers that are due
     JOB_CACHE_MAX_POSTINGS: int = 1_200_000  # oldest closed postings go first when the copy grows past this (open jobs are only cut after every closed one is gone)
-    # Hiring systems to switch off, comma separated: workday, greenhouse, lever, ashby, smartrecruiters. A kill switch if one ever objects.
+    # Hiring systems to switch off, comma separated (any name in readers.SYSTEMS, e.g. workday, smartrecruiters, usajobs). A kill switch if one ever objects.
     JOB_CACHE_DISABLED_SYSTEMS: str = ""
+    # USAJOBS (federal jobs) Search API: a free key from developer.usajobs.gov, and the email it was issued to (sent as the User-Agent).
+    # Server side only. Without both, USAJOBS is switched off and nothing is requested.
+    USAJOBS_API_KEY: str = ""
+    USAJOBS_EMAIL: str = ""
     # Stricter ranking: seniority and job function count for more, a match found only through the description stays below "Good",
     # and postings over 90 days old are left out. Approved after a before-and-after check on real searches; False restores the old ranking.
     JOB_SEARCH_STRICT_SCORING: bool = True

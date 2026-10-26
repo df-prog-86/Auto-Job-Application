@@ -38,6 +38,12 @@ Two safe helpers for the saved job lists (the job cache). Neither touches your j
                                                           # employer we already read has (one company often runs several). Read only:
                                                           # it prints a list; nothing is added to the saved lists.
 
+  python -m scripts.cache_tools usajobs-probe [--out FILE]
+                                                          # needs USAJOBS_API_KEY and USAJOBS_EMAIL in .env. Reads the agency code list and 5 federal
+                                                          # jobs, prints how they parse, and saves the raw answer to FILE. Saves nothing to the job lists.
+  python -m scripts.cache_tools usajobs-seed [--apply] [--read]
+                                                          # adds one employer per federal agency; --read also reads their jobs now. Dry run without --apply.
+
 `reread` refuses to run on the live saved lists unless you add --live (the normal background refresh does the same job there).
 """
 
@@ -1130,6 +1136,82 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _usajobs_probe(args: argparse.Namespace) -> int:
+    """Checks the USAJOBS key and shows how real answers read. Saves nothing to the job lists; the raw answers go to --out."""
+    from app.services.jobcache import readers
+
+    if not readers.usajobs_ready():
+        print("USAJOBS_API_KEY and USAJOBS_EMAIL are not both set in backend/.env.")
+        return 1
+    raw: dict = {}
+    async with make_client() as client:
+        throttle = Throttle()
+        try:
+            agencies = await readers.read_usajobs_agencies(client, throttle)
+            print(f"Agency code list: {len(agencies)} agencies. Sample: {list(agencies.items())[:5]}")
+        except ReaderError as exc:
+            agencies = {}
+            print(f"Agency code list could not be read: {exc}")
+        try:
+            data = await readers._request(client, throttle, "usajobs", "GET", f"https://{readers.USAJOBS_HOST}/api/search",
+                                          params={"ResultsPerPage": 5, "Page": 1}, headers=readers._usajobs_headers())
+        except ReaderError as exc:
+            print(f"Search failed: {exc}")
+            return 1
+        raw["search"] = data
+        got, total = readers.parse_usajobs(data)
+        print(f"Search matched {total} jobs; parsed {len(got)} of the first 5.")
+        for p in got:
+            print(f"  {p.title[:60]} | {p.location} | posted {p.posted_at} | {p.pay_text} | {p.work_type} | text {len(p.description or '')} chars")
+            print(f"    {p.url}")
+        if not got:
+            print("  nothing parsed: check the raw answer in the output file.")
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(raw, indent=1)[:400_000])
+    print(f"Raw answer saved to {out} (the key is never written there).")
+    return 0
+
+
+async def _usajobs_seed(args: argparse.Namespace) -> int:
+    """Adds one employer per federal agency (from USAJOBS's public agency code list), and with --read reads each one now."""
+    from app.services.jobcache import readers
+
+    cache = JobCache()
+    async with make_client() as client:
+        throttle = Throttle()
+        agencies = await readers.read_usajobs_agencies(client, throttle)
+        print(f"{len(agencies)} agencies in the USAJOBS code list. {'WRITING to the saved lists.' if args.apply else 'Dry run: nothing is written.'}")
+        if not args.apply:
+            for code, name in list(agencies.items())[:15]:
+                print(f"  {code}  {name}")
+            return 0
+        if args.read and not readers.usajobs_ready():
+            print("USAJOBS_API_KEY and USAJOBS_EMAIL are not both set in backend/.env, so nothing can be read.")
+            return 1
+        added = jobs = failed = 0
+        for code, name in agencies.items():
+            eid, created = cache.upsert_employer("usajobs", code, name, args.source)
+            added += 1 if created else 0
+            if not args.read:
+                continue
+            try:
+                res = await read_employer("usajobs", code, client, throttle)
+            except ReaderError as exc:
+                failed += 1
+                print(f"  could not read {name} ({code}): {str(exc)[:100]}", flush=True)
+                if exc.retry_after:  # the site asked us to slow down: stop, never push on
+                    print("USAJOBS asked us to slow down; stopping. Run this again later.")
+                    break
+                continue
+            cache.apply_refresh(eid, res.postings, now_ts(), 24.0, res.complete)
+            jobs += len(res.postings)
+            if res.postings:
+                print(f"  {name} ({code}): {len(res.postings)} jobs", flush=True)
+    print(f"Done: {added} agencies added, {jobs} open jobs read, {failed} reads failed.")
+    return 0
+
+
 def main() -> None:
     sys.stdout.reconfigure(line_buffering=True)  # show each line as it happens, even when piped to a file or tee
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1218,7 +1300,17 @@ def main() -> None:
     pr.add_argument("employers", nargs="*", help="system:identifier, e.g. 'workday:bilh.wd1.myworkdayjobs.com|bilh|external'")
     pr.add_argument("--samples", type=int, default=8, help="(no longer used)")
     pr.add_argument("--out", help="also save the table to this file")
+    up = sub.add_parser("usajobs-probe")
+    up.add_argument("--out", default="data/work/usajobs-probe.json")
+    us_seed = sub.add_parser("usajobs-seed")
+    us_seed.add_argument("--apply", action="store_true", help="actually add the agencies (without this it only lists some)")
+    us_seed.add_argument("--read", action="store_true", help="also read each agency's jobs now (needs the key)")
+    us_seed.add_argument("--source", default="curated")
     args = p.parse_args()
+    if args.cmd == "usajobs-probe":
+        sys.exit(asyncio.run(_usajobs_probe(args)))
+    if args.cmd == "usajobs-seed":
+        sys.exit(asyncio.run(_usajobs_seed(args)))
     if args.cmd == "discover":
         sys.exit(asyncio.run(_discover(args)))
     if args.cmd == "add":

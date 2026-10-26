@@ -20,20 +20,21 @@ from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
+from app.config import settings
 from app.services.jobcache.store import PostingIn
-from app.services.jobcache.text import html_to_text, is_vague_place, location_from_text, pay_from_text, pay_midpoint, remote_from_flag, work_type_from, workday_posted
+from app.services.jobcache.text import STATE_BY_NAME, fold, html_to_text, is_vague_place, location_from_text, pay_from_text, pay_midpoint, remote_from_flag, work_type_from, workday_posted
 
 USER_AGENT = "JobAgent/1.0 (personal job search tool; reads public job lists)"
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
-SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle", "icims", "taleo", "phenom", "successfactors", "dayforce", "kpmg", "deloitte", "talentbrew", "jibe")
+SYSTEMS = ("workday", "greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "workable", "bamboohr", "pinpoint", "jazzhr", "jobvite", "oracle", "icims", "taleo", "phenom", "successfactors", "dayforce", "kpmg", "deloitte", "talentbrew", "jibe", "usajobs")
 WORKDAY_PAGE = 20  # Workday returns at most 20 jobs per request
 WORKDAY_MAX_JOBS = 4000  # a very large employer is read up to this many jobs, newest first as Workday lists them (IQVIA hit the old 1,500 limit)
 SMARTRECRUITERS_PAGE = 100  # postings per request from the public Posting API
 SMARTRECRUITERS_MAX_JOBS = 2000
 _MIN_GAP = {
     "workday": 0.6, "greenhouse": 0.3, "lever": 0.3, "ashby": 0.3, "smartrecruiters": 0.4,
-    "breezy": 0.5, "workable": 0.5, "bamboohr": 0.5, "pinpoint": 0.5, "jazzhr": 0.8, "jobvite": 0.8, "oracle": 0.6, "icims": 1.0, "taleo": 1.0, "phenom": 0.6, "successfactors": 1.0, "dayforce": 0.6, "kpmg": 1.0, "deloitte": 1.0, "talentbrew": 1.0, "jibe": 1.0,
+    "breezy": 0.5, "workable": 0.5, "bamboohr": 0.5, "pinpoint": 0.5, "jazzhr": 0.8, "jobvite": 0.8, "oracle": 0.6, "icims": 1.0, "taleo": 1.0, "phenom": 0.6, "successfactors": 1.0, "dayforce": 0.6, "kpmg": 1.0, "deloitte": 1.0, "talentbrew": 1.0, "jibe": 1.0, "usajobs": 1.0,
 }  # seconds between requests to one site
 JIBE_SITES = {"careers.amd.com"}  # Jibe (iCIMS) career sites with a public /api/jobs list, each added by hand once it has been checked
 TALENTBREW_SITES = {"careers.unitedhealthgroup.com"}  # TalentBrew (Radancy) career sites, each added by hand once it has been checked
@@ -162,7 +163,7 @@ def employer_ref(url: str) -> tuple[str, str] | None:
 READER_HOST_SUFFIXES = (
     ".greenhouse.io", ".lever.co", ".ashbyhq.com", ".smartrecruiters.com", ".myworkdayjobs.com", ".breezy.hr", ".workable.com",
     ".bamboohr.com", ".pinpointhq.com", ".applytojob.com", ".jobvite.com", ".oraclecloud.com", ".icims.com", ".taleo.net",
-    ".dayforcehcm.com", ".kpmguscareers.com", "apply.deloitte.com",
+    ".dayforcehcm.com", ".kpmguscareers.com", "apply.deloitte.com", "data.usajobs.gov",
 )
 
 
@@ -1301,13 +1302,173 @@ async def _read_jibe(identifier: str, client: httpx.AsyncClient, throttle: Throt
     return ReadResult(postings, complete=complete, notes=notes)
 
 
+# ---- USAJOBS (federal jobs) ---------------------------------------------------------------------------------------
+# The government's own Search API: https://data.usajobs.gov/api/search, free with a key (USAJOBS_API_KEY) and the email the key was
+# issued to, which USAJOBS wants as the User-Agent. One "employer" is one agency (its code from the public agency code list), so
+# every job carries the right company name. Only public jobs are returned by default. A search returns at most 10,000 rows.
+
+USAJOBS_HOST = "data.usajobs.gov"
+USAJOBS_PAGE = 500
+USAJOBS_MAX_JOBS = 10000
+
+
+def usajobs_ready() -> bool:
+    return bool((settings.USAJOBS_API_KEY or "").strip() and (settings.USAJOBS_EMAIL or "").strip())
+
+
+def _usajobs_headers() -> dict[str, str]:
+    key, email = (settings.USAJOBS_API_KEY or "").strip(), (settings.USAJOBS_EMAIL or "").strip()
+    if not key or not email:
+        raise ReaderError("USAJOBS needs USAJOBS_API_KEY and USAJOBS_EMAIL to be set", retry_after=24 * 3600)
+    return {"User-Agent": email, "Authorization-Key": key, "Accept": "application/json"}
+
+
+def _us_state_abbr(tail: str) -> str | None:
+    t = tail.strip()
+    return t.upper() if len(t) == 2 and t.upper() in STATE_BY_NAME.values() else STATE_BY_NAME.get(fold(t))
+
+
+def _usajobs_place(d: dict[str, Any]) -> str | None:
+    out: list[str] = []
+    for loc in d.get("PositionLocation") or []:
+        if not isinstance(loc, dict):
+            continue
+        place = str(loc.get("LocationName") or loc.get("CityName") or "").strip()
+        if not place:
+            continue
+        head, _, tail = place.rpartition(",")
+        abbr = _us_state_abbr(tail) if head else None
+        place = f"{head.strip()}, {abbr}" if abbr else place
+        if place not in out:
+            out.append(place)
+    return "; ".join(out[:5]) or (str(d.get("PositionLocationDisplay") or "").strip() or None)
+
+
+def _usajobs_pay(d: dict[str, Any]) -> tuple[str | None, float | None]:
+    rem = d.get("PositionRemuneration")
+    r = rem[0] if isinstance(rem, list) and rem and isinstance(rem[0], dict) else None
+    if not r:
+        return None, None
+    try:
+        lo, hi = float(r.get("MinimumRange")), float(r.get("MaximumRange"))
+    except (TypeError, ValueError):
+        return None, None
+    kind = fold(str(r.get("RateIntervalCode") or "") + " " + str(r.get("Description") or ""))
+    if lo <= 0 or hi < lo:
+        return None, None
+    if "pa" in kind.split() or "year" in kind or "annum" in kind:
+        factor, label, fmt = 1.0, "year", "{:,.0f}"
+    elif "ph" in kind.split() or "hour" in kind:
+        factor, label, fmt = 2080.0, "hour", "{:,.2f}"
+    else:
+        return None, None
+    mid = (lo + hi) / 2 * factor
+    if not 10_000 <= mid <= 1_000_000:
+        return None, None
+    a, b = fmt.format(lo), fmt.format(hi)
+    return (f"${a} - ${b} / {label}" if hi > lo else f"${a} / {label}"), mid
+
+
+def _usajobs_text(d: dict[str, Any], details: dict[str, Any]) -> str:
+    parts: list[str] = []
+    summary = html_to_text(str(details.get("JobSummary") or "")).strip()
+    if summary:
+        parts.append(summary)
+    duties = details.get("MajorDuties")
+    duty_text = "\n".join("- " + html_to_text(str(x)).strip() for x in duties if x) if isinstance(duties, list) else html_to_text(str(duties or "")).strip()
+    if duty_text.strip():
+        parts.append("Major duties\n" + duty_text)
+    for label, raw in (("Qualifications", d.get("QualificationSummary")), ("Requirements", details.get("Requirements")), ("Education", details.get("Education"))):
+        text_ = html_to_text(str(raw or "")).strip()
+        if text_:
+            parts.append(f"{label}\n{text_}")
+    return "\n\n".join(parts)
+
+
+def parse_usajobs(data: Any) -> tuple[list[PostingIn], int | None]:
+    """A USAJOBS search answer: {"SearchResult": {"SearchResultCountAll": n, "SearchResultItems": [{"MatchedObjectId", "MatchedObjectDescriptor":
+    {PositionTitle, PositionURI, PositionLocation[], PositionRemuneration[], PublicationStartDate, QualificationSummary, UserArea.Details ...}}]}}.
+    Returns (postings, total jobs the search matched)."""
+    result = data.get("SearchResult") if isinstance(data, dict) else None
+    if not isinstance(result, dict):
+        return [], None
+    total = result.get("SearchResultCountAll")
+    out: list[PostingIn] = []
+    seen: set[str] = set()
+    for item in result.get("SearchResultItems") or []:
+        d = item.get("MatchedObjectDescriptor") if isinstance(item, dict) else None
+        if not isinstance(d, dict):
+            continue
+        jid = str(item.get("MatchedObjectId") or d.get("PositionID") or "").strip()
+        title = str(d.get("PositionTitle") or "").strip()
+        apply_uris = d.get("ApplyURI") if isinstance(d.get("ApplyURI"), list) else []
+        url = str(d.get("PositionURI") or (apply_uris[0] if apply_uris else "") or "").strip()
+        if not jid or not title or not url.startswith("https://") or jid in seen:
+            continue
+        seen.add(jid)
+        user_area = d.get("UserArea") if isinstance(d.get("UserArea"), dict) else {}
+        details = user_area.get("Details") if isinstance(user_area.get("Details"), dict) else {}
+        loc = _usajobs_place(d)
+        remote = str(details.get("RemoteIndicator")).strip().lower() in ("true", "yes", "1")
+        pay_text, mid = _usajobs_pay(d)
+        body = _usajobs_text(d, details)
+        out.append(PostingIn(
+            ext_id=jid, title=title, url=url, location=loc, work_type="remote" if remote else work_type_from(None, loc, title),
+            pay_text=pay_text, pay_mid=mid, posted_at=_date(d.get("PublicationStartDate")), description=body or None, agency=False,
+        ))
+    return out, total if isinstance(total, int) else None
+
+
+async def _read_usajobs(identifier: str, client: httpx.AsyncClient, throttle: Throttle) -> ReadResult:
+    code = identifier.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9]{1,12}", code):
+        raise ReaderError("that is not an agency code", gone=True)
+    headers = _usajobs_headers()
+    postings: list[PostingIn] = []
+    seen: set[str] = set()
+    total: int | None = None
+    for page in range(1, USAJOBS_MAX_JOBS // USAJOBS_PAGE + 1):
+        data = await _request(client, throttle, "usajobs", "GET", f"https://{USAJOBS_HOST}/api/search",
+                              params={"Organization": code, "ResultsPerPage": USAJOBS_PAGE, "Page": page}, headers=headers)
+        found, total = parse_usajobs(data)
+        if page == 1 and not isinstance(data, dict):
+            raise ReaderError("we couldn't make sense of that answer")
+        new = [p for p in found if p.ext_id not in seen]
+        seen.update(p.ext_id for p in new)
+        postings.extend(new)
+        if not new or len(found) < USAJOBS_PAGE or (total is not None and len(postings) >= total):
+            break
+    complete = total is None or len(postings) >= total
+    return ReadResult(postings, complete=complete, notes=[] if complete else [f"read the first {len(postings)} of {total} jobs"])
+
+
+def _walk_codes(node: Any, out: dict[str, str]) -> None:
+    if isinstance(node, dict):
+        code, value = node.get("Code"), node.get("Value")
+        if isinstance(code, str) and isinstance(value, str) and code.strip() and value.strip() and str(node.get("IsDisabled", "No")).lower() != "yes":
+            out[code.strip().upper()] = value.strip()
+        for v in node.values():
+            _walk_codes(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _walk_codes(v, out)
+
+
+async def read_usajobs_agencies(client: httpx.AsyncClient, throttle: Throttle) -> dict[str, str]:
+    """{agency code: agency name} from USAJOBS's public agency code list (no key needed)."""
+    data = await _request(client, throttle, "usajobs", "GET", f"https://{USAJOBS_HOST}/api/codelist/agencysubelements")
+    out: dict[str, str] = {}
+    _walk_codes(data, out)
+    return out
+
+
 # ---- entry point --------------------------------------------------------------------------------------------------
 
 _READERS = {"greenhouse": _read_greenhouse, "lever": _read_lever, "ashby": _read_ashby, "workday": _read_workday, "smartrecruiters": _read_smartrecruiters,
     "breezy": _read_breezy, "workable": _read_workable, "bamboohr": _read_bamboohr, "pinpoint": _read_pinpoint,
     "jazzhr": _read_jazzhr, "jobvite": _read_jobvite, "oracle": _read_oracle, "icims": _read_icims,
     "taleo": _read_taleo, "phenom": _read_phenom, "successfactors": _read_successfactors,
-    "dayforce": _read_dayforce, "kpmg": _read_kpmg, "deloitte": _read_deloitte, "talentbrew": _read_talentbrew, "jibe": _read_jibe,
+    "dayforce": _read_dayforce, "kpmg": _read_kpmg, "deloitte": _read_deloitte, "talentbrew": _read_talentbrew, "jibe": _read_jibe, "usajobs": _read_usajobs,
 }
 
 

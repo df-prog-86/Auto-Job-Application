@@ -46,14 +46,17 @@ def timing_note(what: str, started: float) -> None:
 
 
 SYSTEM_LABELS = {"workday": "Workday", "greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "smartrecruiters": "SmartRecruiters",
-    "breezy": "Breezy HR", "workable": "Workable", "bamboohr": "BambooHR", "pinpoint": "Pinpoint", "jazzhr": "JazzHR", "jobvite": "Jobvite", "oracle": "Oracle Cloud", "icims": "iCIMS", "taleo": "Taleo", "phenom": "Phenom", "successfactors": "SuccessFactors", "dayforce": "Dayforce", "kpmg": "KPMG careers site", "deloitte": "Deloitte careers site", "talentbrew": "TalentBrew careers site", "jibe": "Jibe careers site",
+    "breezy": "Breezy HR", "workable": "Workable", "bamboohr": "BambooHR", "pinpoint": "Pinpoint", "jazzhr": "JazzHR", "jobvite": "Jobvite", "oracle": "Oracle Cloud", "icims": "iCIMS", "taleo": "Taleo", "phenom": "Phenom", "successfactors": "SuccessFactors", "dayforce": "Dayforce", "kpmg": "KPMG careers site", "deloitte": "Deloitte careers site", "talentbrew": "TalentBrew careers site", "jibe": "Jibe careers site", "usajobs": "USAJOBS",
 }
 CONCURRENT_EMPLOYERS = 4
 PRIORITY_HOURS, REGULAR_HOURS = 6.0, 24.0
 
 
 def disabled_systems() -> set[str]:
-    return {s.strip().lower() for s in (settings.JOB_CACHE_DISABLED_SYSTEMS or "").split(",") if s.strip()}
+    off = {s.strip().lower() for s in (settings.JOB_CACHE_DISABLED_SYSTEMS or "").split(",") if s.strip()}
+    if not (settings.USAJOBS_API_KEY.strip() and settings.USAJOBS_EMAIL.strip()):
+        off.add("usajobs")  # no key, no requests: the federal agencies stay saved but are not read
+    return off
 
 
 # ---- searching --------------------------------------------------------------------------------------------------

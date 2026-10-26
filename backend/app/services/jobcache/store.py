@@ -139,7 +139,7 @@ def pack_description(text_: str | None) -> tuple[bytes | None, str | None]:
     body = (text_ or "").strip()[:DESCRIPTION_CAP]
     if not body:
         return None, None
-    return zlib.compress(body.encode("utf-8"), 6), hashlib.sha1(body.encode("utf-8")).hexdigest()[:16]
+    return zlib.compress(body.encode("utf-8"), 6), hashlib.sha1(body.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
 
 
 def unpack_description(blob: bytes | None) -> str | None:

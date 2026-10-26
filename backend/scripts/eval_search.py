@@ -37,7 +37,7 @@ from app.services.discovery import web_search as ws
 from app.services.jobcache import service as cache_service
 from app.services.jobcache.store import JobCache
 from app.services.llm.client import LLMClient
-from scripts.search_ab import PRICES, SEARCH_FEE, Meter
+from scripts.search_ab import PRICES, Meter
 
 ARMS = ("saved", "full", "deep")
 FROZEN_NAME = "job_cache_frozen.db"

@@ -31,7 +31,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", help="a job cache file (default: the app's own)")
     args = ap.parse_args()
-    from app.services.jobcache import matcher, service
+    from app.services.jobcache import service
     from app.services.jobcache.store import JobCache
 
     if args.db:
@@ -39,7 +39,6 @@ def main() -> int:
     print(f"{'search':44} {'seconds':>8} {'candidates':>11} {'results':>8}")
     for title, place in SEARCHES:
         c = criteria(title, place)
-        plan = matcher.build_plan(c, None, None)
         t0 = time.perf_counter()
         out = service.search_sync(c, set(), None, 15)
         dt = time.perf_counter() - t0

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import html as htmllib
 import json
 import logging
 import math
@@ -19,7 +18,7 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -166,7 +165,7 @@ AGGREGATOR_DOMAINS = frozenset(
         "whatjobs.com", "recruit.net", "ihirehealthcare.com", "healthecareers.com", "jobtarget.com",
         "diversityworking.com", "mediabistro.com", "ladders.com", "nexxt.com", "jobserve.com", "salary.com",
         "ihiretechnology.com", "jobs-radar.com", "emploive.com", "feeny.ai", "talentify.io", "jobleads.com", "bebee.com",
-        "jobilize.com", "jobtome.com", "hiring.cafe", "jobrapido.com", "jobsbucket.com", "jobgether.com", "careerjet.com",
+        "jobilize.com", "jobtome.com", "hiring.cafe", "jobsbucket.com", "jobgether.com",
     }
 )
 MAX_RESOLVE = 2  # paid job-board lookups per search (a lookup is a web search; most find nothing)
@@ -945,7 +944,6 @@ async def search_jobs_full(criteria: JobSearchIn, known_keys: set[str] | None = 
 
     tidy_items(cached.items)
     items = _dedupe_by_address(cached.items + web_items)
-    merged = len(items)
     items = merge_same_jobs(items)
     items = merge_twin_postings(items)
     items, not_found = await resolve_original_sources(items)

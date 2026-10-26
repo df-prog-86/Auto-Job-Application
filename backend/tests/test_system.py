@@ -88,3 +88,19 @@ def test_master_resume_remembers_original_file_name(tmp_path, monkeypatch):
     master.save_master(b"y", None)
     assert master.master_status()["filename"] is None
     assert master.master_status()["saved"] is True
+
+
+def test_other_websites_cannot_act_on_the_local_app(app_and_db):
+    client, _ = app_and_db
+    evil = {"Origin": "https://evil.example"}
+    assert client.post("/api/v1/automation/pause", headers=evil).status_code == 403
+    assert client.get("/api/v1/jobs", headers=evil).status_code == 403
+    assert client.post("/api/v1/automation/pause", headers={"Origin": "null"}).status_code == 403
+    # a cross-site image/script/background request that sends no Origin is refused too, but opening the page by a link is fine
+    assert client.get("/api/v1/jobs", headers={"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors"}).status_code == 403
+    assert client.get("/api/v1/health", headers={"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate"}).status_code == 200
+    # the dashboard itself, the extension, and plain tools (no Origin) keep working
+    assert client.post("/api/v1/automation/pause", headers={"Origin": "http://127.0.0.1:8765"}).status_code == 200
+    assert client.post("/api/v1/automation/pause", headers={"Origin": "http://localhost:8765"}).status_code == 200
+    assert client.post("/api/v1/automation/pause", headers={"Origin": "chrome-extension://abcdefghijklmnop"}).status_code == 200
+    assert client.post("/api/v1/automation/pause").status_code == 200

@@ -81,7 +81,7 @@ async def rerank(criteria: Any, items: list[dict[str, Any]], keep: int) -> list[
     if not model:
         return items[:keep]
     text = _ask_text(criteria, items)
-    key = "rerank:" + hashlib.sha1(f"{model}|{text}".encode()).hexdigest()
+    key = "rerank:" + hashlib.sha1(f"{model}|{text}".encode(), usedforsecurity=False).hexdigest()
     scores: list[float] | None = None
     try:
         cache = JobCache()

@@ -12,7 +12,6 @@ It also lists jobs saved twice (same employer, title and place). It never delete
 from __future__ import annotations
 
 import argparse
-import shutil
 import sqlite3
 import sys
 import time

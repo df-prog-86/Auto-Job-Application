@@ -307,12 +307,12 @@ _OVERRIDES: dict[str, str] = {
     "veterinary emergency group": _P, "veterinary practice partners": _P, "lap of love": _P, "vetevolve": _P,
     # engineering, architecture, testing, consulting
     "aecom": _P, "eurofins": _P, "sgs": _P, "alten": _P, "assystem": _P, "afry": _P, "socotec": _P, "cima+": _P, "olsson": _P,
-    "deloitte": _P, "labella": _P, "atwell": _P, "dlr group": _P, "woolpert": _P, "llnl": _P, "ergomed": _P, "eversana": _P,
+    "deloitte": _P, "labella": _P, "dlr group": _P, "woolpert": _P, "llnl": _P, "ergomed": _P, "eversana": _P,
     "transperfect": _P, "geeks on site": _P, "actionet": _P, "credence": _P, "sosi": _P, "sqli": _P,
     # manufacturing
     "bosch": _M, "renesas": _M, "wabtec": _M, "aumovio": _M, "continental": _M, "syngenta": _M, "avery dennison": _M,
     "lucid motors": _M, "kronospan": _M, "jbs": _M, "beumer": _M, "lesaffre": _M, "o-i": _M, "jacobs douwe egberts": _M, "bertelsmann-jobs": _I,
-    "gotion": _M, "stäubli": _M,
+    "stäubli": _M,
     # retail and wholesale
     "h&m": _R, "a.t.u": _R, "reitmans": _R, "lush": _R, "redcare": _R, "kiabi": _R, "e. breuninger": _R, "conforama": _R,
     "groupement mousquetaires": _R, "metro/makro": _W, "baywa": _W, "rexel": _W,

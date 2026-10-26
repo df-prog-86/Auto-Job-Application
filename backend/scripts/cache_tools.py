@@ -61,6 +61,7 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from app.config import settings
 from app.services.jobcache import geo
@@ -330,7 +331,6 @@ async def _country(args: argparse.Namespace) -> int:
     For employers whose job lists show no usable place, opens up to three of their job pages and reads the country each page publishes
     (iCIMS and most systems in the page's job data, Workday in its job details). Prints a verdict per employer. Saves nothing.
     """
-    import httpx
 
     from app.services.discovery import manual_extraction as mx
     from app.services.discovery.ats import workday_api_url

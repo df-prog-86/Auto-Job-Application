@@ -1181,7 +1181,11 @@ async def _usajobs_seed(args: argparse.Namespace) -> int:
     async with make_client() as client:
         throttle = Throttle()
         agencies = await readers.read_usajobs_agencies(client, throttle)
-        print(f"{len(agencies)} agencies in the USAJOBS code list. {'WRITING to the saved lists.' if args.apply else 'Dry run: nothing is written.'}")
+        # Only the 4-character unit codes: a shorter code stands for a whole department and would list the same jobs a second time.
+        odd = sorted(c for c in agencies if len(c) != 4)
+        agencies = {c: n for c, n in agencies.items() if len(c) == 4}
+        print(f"{len(agencies)} agencies in the USAJOBS code list ({len(odd)} department-level codes left out: {odd[:8]}). "
+              f"{'WRITING to the saved lists.' if args.apply else 'Dry run: nothing is written.'}")
         if not args.apply:
             for code, name in list(agencies.items())[:15]:
                 print(f"  {code}  {name}")
@@ -1204,10 +1208,22 @@ async def _usajobs_seed(args: argparse.Namespace) -> int:
                     print("USAJOBS asked us to slow down; stopping. Run this again later.")
                     break
                 continue
-            cache.apply_refresh(eid, res.postings, now_ts(), 24.0, res.complete)
+            for attempt in (1, 2, 3, 4):  # the app and the fill may be writing at the same moment: wait and try again
+                try:
+                    if res.name:
+                        cache.upsert_employer("usajobs", code, res.name, args.source)
+                    cache.apply_refresh(eid, res.postings, now_ts(), 24.0, res.complete)
+                    break
+                except sqlite3.OperationalError as exc:
+                    if attempt == 4:
+                        failed += 1
+                        print(f"  could not save {name} ({code}): {exc}", flush=True)
+                        res.postings = []
+                    else:
+                        await asyncio.sleep(5 * attempt)
             jobs += len(res.postings)
             if res.postings:
-                print(f"  {name} ({code}): {len(res.postings)} jobs", flush=True)
+                print(f"  {res.name or name} ({code}): {len(res.postings)} jobs", flush=True)
     print(f"Done: {added} agencies added, {jobs} open jobs read, {failed} reads failed.")
     return 0
 

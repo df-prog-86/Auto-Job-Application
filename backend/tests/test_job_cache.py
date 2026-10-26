@@ -2317,7 +2317,7 @@ def test_setup_does_not_wait_for_a_busy_database_and_a_busy_location_save_is_ski
 
 USAJOBS_PAGE = {"SearchResult": {"SearchResultCountAll": 2, "SearchResultItems": [
     {"MatchedObjectId": "812345600", "MatchedObjectDescriptor": {
-        "PositionID": "26-ABC-123", "PositionTitle": "Registered Nurse", "PositionURI": "https://www.usajobs.gov/job/812345600",
+        "PositionID": "26-ABC-123", "PositionTitle": "Registered Nurse", "OrganizationName": "Veterans Health Administration", "PositionURI": "https://www.usajobs.gov:443/job/812345600",
         "ApplyURI": ["https://www.usajobs.gov/job/812345600"], "PublicationStartDate": "2026-10-20T00:00:00.0000",
         "PositionLocation": [{"LocationName": "Boston, Massachusetts"}, {"LocationName": "Bedford, Massachusetts"}, {"LocationName": "Boston, Massachusetts"}],
         "PositionRemuneration": [{"MinimumRange": "78592.0", "MaximumRange": "102171.0", "RateIntervalCode": "PA", "Description": "Per Year"}],
@@ -2380,6 +2380,7 @@ def test_usajobs_reader_pages(monkeypatch):
 
     monkeypatch.setattr(readers, "_request", fake)
     res = asyncio.run(readers._read_usajobs("va", None, None))
+    assert res.name == "Veterans Health Administration"
     assert len(res.postings) == 2 and res.complete and seen == [("https://data.usajobs.gov/api/search", 1, "k")]
     with pytest.raises(readers.ReaderError):
         asyncio.run(readers._read_usajobs("../x", None, None))

@@ -1403,6 +1403,7 @@ def parse_usajobs(data: Any) -> tuple[list[PostingIn], int | None]:
         title = str(d.get("PositionTitle") or "").strip()
         apply_uris = d.get("ApplyURI") if isinstance(d.get("ApplyURI"), list) else []
         url = str(d.get("PositionURI") or (apply_uris[0] if apply_uris else "") or "").strip()
+        url = url.replace("https://www.usajobs.gov:443/", "https://www.usajobs.gov/", 1)  # USAJOBS writes its own port into the link
         if not jid or not title or not url.startswith("https://") or jid in seen:
             continue
         seen.add(jid)
@@ -1427,19 +1428,25 @@ async def _read_usajobs(identifier: str, client: httpx.AsyncClient, throttle: Th
     postings: list[PostingIn] = []
     seen: set[str] = set()
     total: int | None = None
+    usajobs_agency_name: str | None = None
     for page in range(1, USAJOBS_MAX_JOBS // USAJOBS_PAGE + 1):
         data = await _request(client, throttle, "usajobs", "GET", f"https://{USAJOBS_HOST}/api/search",
                               params={"Organization": code, "ResultsPerPage": USAJOBS_PAGE, "Page": page}, headers=headers)
         found, total = parse_usajobs(data)
         if page == 1 and not isinstance(data, dict):
             raise ReaderError("we couldn't make sense of that answer")
+        if usajobs_agency_name is None:  # the agency's own name, as its jobs state it ("Central Intelligence Agency"), beats the code list's "... Headquarters"
+            names = [str((i.get("MatchedObjectDescriptor") or {}).get("OrganizationName") or "").strip()
+                     for i in ((data.get("SearchResult") or {}).get("SearchResultItems") or []) if isinstance(i, dict)]
+            names = [n for n in names if n]
+            usajobs_agency_name = max(set(names), key=names.count) if names else None
         new = [p for p in found if p.ext_id not in seen]
         seen.update(p.ext_id for p in new)
         postings.extend(new)
         if not new or len(found) < USAJOBS_PAGE or (total is not None and len(postings) >= total):
             break
     complete = total is None or len(postings) >= total
-    return ReadResult(postings, complete=complete, notes=[] if complete else [f"read the first {len(postings)} of {total} jobs"])
+    return ReadResult(postings, complete=complete, name=usajobs_agency_name, notes=[] if complete else [f"read the first {len(postings)} of {total} jobs"])
 
 
 def _walk_codes(node: Any, out: dict[str, str]) -> None:

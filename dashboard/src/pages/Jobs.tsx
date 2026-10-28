@@ -660,7 +660,7 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
                       <button
                         type="button"
                         className={`text-xs font-bold text-ink-500 hover:text-brand-700 disabled:opacity-50 ${tailorMutation.isPending ? "ai-working rounded-full px-3 py-1 !text-brand-700" : ""}`}
-                        onClick={() => setChoosingStrength(true)}
+                        onClick={startTailoring}
                         disabled={busyResume}
                       >
                         {tailorMutation.isPending ? "Creating…" : usingOriginal ? "Tailor it instead" : "Recreate"}

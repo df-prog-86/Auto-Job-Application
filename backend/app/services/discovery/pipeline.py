@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass, field
 
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.discovery import TargetEmployer
@@ -187,6 +188,9 @@ def _ingest_posting(
     result.jobs_updated += 1
 
 
+MIN_FILL_CHARS = 300  # below this a saved description is a search summary, not the posting
+
+
 def ingest_manual_posting(db: Session, posting: RawJobPosting, *, source_label: str) -> tuple[Job, bool]:
     """
     A single job the user explicitly submitted (pasted URL or extension
@@ -219,6 +223,14 @@ def ingest_manual_posting(db: Session, posting: RawJobPosting, *, source_label: 
 
     now = dt.datetime.now(dt.UTC)
     job = db.query(Job).filter(Job.canonical_job_key == canonical_key).first()
+    if job is None and len(description_text.strip()) >= MIN_FILL_CHARS:
+        # The same job saved earlier from a search (a different link, and no real description): fill that one in instead of adding a copy.
+        job = (
+            db.query(Job)
+            .filter(Job.normalized_company == normalized_company, Job.normalized_title == normalized_title)
+            .filter(or_(Job.description.is_(None), func.length(Job.description) < MIN_FILL_CHARS))
+            .first()
+        )
     created = job is None
 
     if job is None:

@@ -28,14 +28,22 @@ from app.services.llm.schemas import (
 )
 
 
-def _jsonld(title="Data Analyst", company="Globex", url="https://example.com/jobs/1") -> str:
+_FULL_DESCRIPTION = (
+    "<p>Analyze data with SQL. 3+ years of experience required.</p>"
+    "<p>You will build reports, work with finance and operations teams, and explain results to leaders. "
+    "Strong Excel and SQL skills are required, and experience with dashboards is a plus. "
+    "The role is based in Boston with some flexibility to work from home during the week.</p>"
+)
+
+
+def _jsonld(title="Data Analyst", company="Globex", url="https://example.com/jobs/1", description=_FULL_DESCRIPTION) -> str:
     return json.dumps(
         {
             "@context": "https://schema.org",
             "@type": "JobPosting",
             "title": title,
             "hiringOrganization": {"@type": "Organization", "name": company},
-            "description": "<p>Analyze data with SQL. 3+ years of experience required.</p>",
+            "description": description,
             "jobLocation": {"address": {"addressLocality": "Boston", "addressRegion": "MA"}},
             "url": url,
         }
@@ -725,3 +733,28 @@ def test_notes_name_new_keywords_and_where_they_were_added():
     assert "New wording in your summary that your master doesn't use: predictive, models. Check each one is true for you." in notes
     assert any(n.startswith("New wording in bullet 1 of Senior Consultant | Tria Federal: stakeholder, engagement.") for n in notes)
     assert not any("dashboards" in n and n.startswith("New wording") for n in notes)  # a word the master already uses is never flagged
+
+
+def test_tailoring_refuses_when_the_job_has_no_description(app_and_db, monkeypatch, docs_dir):
+    client, _ = app_and_db
+    job = _add_job(client, monkeypatch, description="<p>Short summary.</p>")
+    client.post(f"/api/v1/jobs/{job['id']}/proceed")
+    resp = client.post(f"/api/v1/jobs/{job['id']}/tailor")
+    assert resp.status_code == 428
+    assert "extension" in resp.json()["detail"]
+
+
+def test_capturing_the_page_fills_in_the_job_saved_earlier_without_a_description(app_and_db, monkeypatch):
+    client, _ = app_and_db
+    first = _add_job(client, monkeypatch, description="<p>Short summary.</p>", url="https://search.example/abc")
+    secret = client.post("/api/v1/system/pairing-secret").json()["pairing_secret"]
+    token = client.post("/api/v1/system/pair", json={"pairing_secret": secret, "extension_origin": "chrome-extension://t"}).json()["extension_token"]
+    body = {"url": "https://careers.globex.example/jobs/99", "page_title": "Data Analyst",
+            "json_ld": [_jsonld(url="https://careers.globex.example/jobs/99")], "body_text": ""}
+    resp = client.post("/api/v1/jobs/capture", json=body, headers={"X-Extension-Token": token})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["id"] == first["id"]  # the same job, not a copy
+    assert resp.json()["already_existed"] is True
+    assert len(client.get("/api/v1/jobs").json()) == 1
+    detail = client.get(f"/api/v1/jobs/{first['id']}").json()
+    assert "build reports" in detail["description"]

@@ -162,6 +162,9 @@ async def requalify_job(job_id: int, db: Session = Depends(get_db)) -> JobOut:
     return JobOut.model_validate(job)
 
 
+MIN_DESCRIPTION_CHARS = 300  # a one-line search summary is not a job description
+
+
 @router.post("/{job_id}/tailor", response_model=TailorResumeOut)
 async def tailor_resume_for_job(
     job_id: int, strength: Literal["light", "firm"] = "light", db: Session = Depends(get_db)
@@ -180,6 +183,12 @@ async def tailor_resume_for_job(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Click 'Proceed with Application' on this job before creating a tailored resume.",
+        )
+    if len((job.description or "").strip()) < MIN_DESCRIPTION_CHARS:
+        # Nothing to tailor from. 428 tells the dashboard to show "grab the description from the extension" instead of an error.
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail="This job has no description saved yet. Open the job and save it from the extension to add it, then tailor again.",
         )
     profile = get_current_profile(db)
     try:

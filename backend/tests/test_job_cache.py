@@ -2442,7 +2442,6 @@ def test_integrity_and_backup_and_single_writer(tmp_path, monkeypatch):
     import argparse, sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from filelock import FileLock
     from scripts import cache_tools
     path = str(tmp_path / "cache.db")
     monkeypatch.setattr(cache_tools.settings, "JOB_CACHE_PATH", path)

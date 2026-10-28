@@ -33,6 +33,7 @@ from app.repositories.profile_repository import get_current_profile
 from app.services.discovery.normalization import html_to_text, parse_salary
 from app.services.discovery.pipeline import ingest_manual_posting
 from app.services.jobcache.keys import loose_keys
+from app.services.jobcache.store import JobCache
 from app.services.llm.exceptions import LLMError, LLMNotConfiguredError
 from app.services.qualification.pipeline import QualificationError, score_against
 
@@ -408,6 +409,20 @@ async def add_result(result_id: int, db: Session = Depends(get_db)) -> AddResult
     """
     row = _get_new(db, result_id)
     posting = await _read_posting(db, row)
+
+    # The page could not be read, or gave back too little: the saved job list often holds the full description for this same link.
+    read_text = html_to_text(posting.description_html) if posting is not None and posting.description_html else ""
+    if len(read_text.strip()) < _MIN_SCORE_CHARS:
+        saved = await asyncio.to_thread(JobCache().description_for_url, row.url, _MIN_SCORE_CHARS)
+        if saved:
+            saved_html = "".join(f"<p>{html.escape(part)}</p>" for part in saved.split("\n") if part.strip())
+            if posting is None:
+                posting = RawJobPosting(
+                    external_job_id=row.url_key, title=row.title, company=row.company, location=row.location,
+                    description_html=saved_html, application_url=row.url, salary_text=row.salary_text,
+                )
+            else:
+                posting.description_html = saved_html
 
     from_summary = posting is None
     if posting is None:

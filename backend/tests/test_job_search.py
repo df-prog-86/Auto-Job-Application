@@ -1212,3 +1212,30 @@ def test_a_web_step_that_runs_past_its_minute_leaves_the_saved_results_alone(app
     monkeypatch.setattr(web_search, "search_jobs_full", slow)
     out = client.post("/api/v1/job-search/web", json={"titles": "analyst", "web": "only"})
     assert out.status_code == 200 and out.json()["added"] == 0 and out.json()["timed_out"] is True
+
+
+def test_add_uses_the_saved_job_lists_description_when_the_page_cannot_be_read(search, monkeypatch):
+    from app.services.discovery import manual_extraction
+    from app.services.jobcache.store import JobCache, PostingIn, now_ts
+
+    client, SessionLocal = search
+    _saved_job(SessionLocal)
+
+    async def blocked(url):
+        raise manual_extraction.ManualExtractionError("blocked")
+
+    monkeypatch.setattr(manual_extraction, "fetch_page", blocked)
+    out = client.post("/api/v1/job-search/run", json={"titles": "analyst"}).json()
+    first = next(r for r in out["results"] if r["title"] == "Revenue Cycle Billing Analyst")
+    with SessionLocal() as db:
+        from app.models.job_search import JobSearchResult
+
+        url = db.get(JobSearchResult, first["id"]).url
+    full = "Resolve denied claims and appeals for hospital billing. " * 8
+    cache = JobCache()
+    eid, _ = cache.upsert_employer("greenhouse", "acme", "Acme", "search")
+    cache.apply_refresh(eid, [PostingIn(ext_id="9", title="Revenue Cycle Billing Analyst", url=url, description=full)], now_ts(), 24.0, True)
+    added = client.post(f"/api/v1/job-search/results/{first['id']}/add").json()
+    assert added["from_summary"] is False
+    detail = client.get(f"/api/v1/jobs/{added['job']['id']}").json()
+    assert "denied claims" in detail["description"] and len(detail["description"]) > 300

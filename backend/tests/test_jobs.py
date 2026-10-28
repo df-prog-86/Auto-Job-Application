@@ -758,3 +758,21 @@ def test_capturing_the_page_fills_in_the_job_saved_earlier_without_a_description
     assert len(client.get("/api/v1/jobs").json()) == 1
     detail = client.get(f"/api/v1/jobs/{first['id']}").json()
     assert "build reports" in detail["description"]
+
+
+def test_capture_with_a_job_id_fills_in_that_exact_job(app_and_db, monkeypatch):
+    client, _ = app_and_db
+    first = _add_job(client, monkeypatch, description="<p>Short summary.</p>", url="https://search.example/abc")
+    other = _add_job(client, monkeypatch, title="Data Engineer", url="https://search.example/other", description="<p>Short.</p>")
+    secret = client.post("/api/v1/system/pairing-secret").json()["pairing_secret"]
+    token = client.post("/api/v1/system/pair", json={"pairing_secret": secret, "extension_origin": "chrome-extension://t"}).json()["extension_token"]
+    headers = {"X-Extension-Token": token}
+    page = {"url": "https://careers.example/anything", "page_title": "Whatever", "json_ld": [_jsonld(title="Some Other Title", company="Other Co")], "body_text": ""}
+    resp = client.post("/api/v1/jobs/capture", json={**page, "job_id": first["id"]}, headers=headers)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["id"] == first["id"] and resp.json()["title"] == "Data Analyst"  # the saved job keeps its own title
+    assert "build reports" in client.get(f"/api/v1/jobs/{first['id']}").json()["description"]
+    assert "build reports" not in client.get(f"/api/v1/jobs/{other['id']}").json()["description"]
+    assert len(client.get("/api/v1/jobs").json()) == 2
+    thin = {**page, "json_ld": [_jsonld(description="<p>Too short.</p>")]}
+    assert client.post("/api/v1/jobs/capture", json={**thin, "job_id": other["id"]}, headers=headers).status_code == 422

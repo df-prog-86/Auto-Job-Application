@@ -173,6 +173,7 @@ class CaptureJobIn(BaseModel):
     """
 
     url: str
+    job_id: int | None = None  # set when the extension opened this page to add a description to a job already saved
     page_title: str | None = None
     json_ld: list[str] = []
     body_text: str = ""

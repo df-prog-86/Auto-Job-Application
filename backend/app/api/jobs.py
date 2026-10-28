@@ -32,6 +32,7 @@ from app.schemas.discovery import (
     TailorResumeOut,
 )
 from app.services.discovery import ats, manual_extraction
+from app.services.discovery.normalization import compute_description_hash, html_to_text
 from app.services.discovery.pipeline import ingest_manual_posting
 from app.services.followup.draft import FollowUpDraftError, draft_follow_up
 from app.services.qualification.pipeline import QualificationError, qualify_job
@@ -124,6 +125,23 @@ async def add_job_from_extension(
     except manual_extraction.ManualExtractionError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
+    target = db.get(Job, payload.job_id) if payload.job_id else None
+    if target is not None:
+        # The extension opened this page to add a description to a job you already saved: fill in that exact job.
+        text = html_to_text(posting.description_html)
+        if len(text.strip()) < MIN_DESCRIPTION_CHARS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Couldn't find a full job description on this page. Open the job's own page and try again.",
+            )
+        target.description = text
+        target.description_hash = compute_description_hash(text)
+        target.last_seen = dt.datetime.now(dt.UTC)
+        db.commit()
+        db.refresh(target)
+        out = JobOut.model_validate(target)
+        out.already_existed = True
+        return out
     linked = ats.pick_ats_link(payload.apply_links, payload.url)
     if linked:
         posting.application_url = linked

@@ -687,6 +687,17 @@ class JobCache:
         with self.session() as db:
             db.executemany("UPDATE postings SET desc_hash = 'unavailable' WHERE id = ? AND description_z IS NULL", [(i,) for i in posting_ids])
 
+    def description_for_url(self, url: str, min_chars: int = 300) -> str | None:
+        """The saved description of the posting at this link (with or without a query string), or None when there is no real one."""
+        bare = url.split("?")[0]
+        with self.session() as db:
+            for candidate in dict.fromkeys((url, bare, bare.rstrip("/"))):
+                row = db.execute("SELECT description_z FROM postings WHERE url = ? AND description_z IS NOT NULL LIMIT 1", (candidate,)).fetchone()
+                text_ = unpack_description(row["description_z"]) if row else None
+                if text_ and len(text_.strip()) >= min_chars:
+                    return text_
+        return None
+
     def set_description(self, posting_id: int, text_: str, max_chars: int | None = None) -> bool:
         """Saves the text of one posting (and its place in the description index). False when there was nothing to save."""
         blob, fingerprint = pack_description((text_ or "")[:max_chars] if max_chars else text_)

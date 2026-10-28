@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { MenuItem, MoreMenu } from "@/components/MoreMenu";
 import { Button, Card, CheckIcon, Ring, inputClass } from "@/components/ui";
 import { FitPill, WhatsMissing, WhyItFits, scoreColor } from "@/components/match";
-import { completeApplication } from "@/lib/extensionBridge";
+import { completeApplication, grabDescription, onDescriptionAdded } from "@/lib/extensionBridge";
 import { statusOf } from "@/lib/jobStatus";
 import { duplicateKey, formatLocation, formatPosted, formatPostedBoth, formatSalary, inSentence, mayBeClosed } from "@/lib/jobText";
 import type { GeneratedDocumentOut, JobOut, TailorResumeOut } from "@/types/api";
@@ -318,6 +318,36 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
     onSuccess: refresh,
   });
   const [choosingStrength, setChoosingStrength] = useState(false);
+  // Set when Tailor is clicked on a job with no saved description: the notice below offers to grab it from the extension.
+  const [needsDescription, setNeedsDescription] = useState(false);
+  const [glowChoices, setGlowChoices] = useState(false);
+  const [grabNote, setGrabNote] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const startTailoring = () => (job.has_description === false ? setNeedsDescription(true) : setChoosingStrength(true));
+  const showTailorChoices = () => {
+    setNeedsDescription(false);
+    setGrabNote(null);
+    setChoosingStrength(true);
+    setGlowChoices(true);
+  };
+  useEffect(() => onDescriptionAdded((id) => {
+    if (id !== job.id) return;
+    void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    showTailorChoices();
+  }), [job.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Opened by the extension after it saved the description (the dashboard tab had been closed).
+  useEffect(() => {
+    if (highlight && searchParams.get("tailor") === "1" && job.has_description !== false) showTailorChoices();
+  }, [highlight, job.has_description]); // eslint-disable-line react-hooks/exhaustive-deps
+  const grabFromExtension = async () => {
+    setGrabNote(null);
+    const reply = await grabDescription(job.id, job.canonical_application_url, job.title);
+    if (!reply?.ok) {
+      // The extension isn't there (or isn't reloaded): open the page ourselves and say what to do.
+      window.open(job.canonical_application_url, "_blank", "noopener");
+      setGrabNote("Open the job page, click the OtterApply icon, then Save job. Install or reload the extension first if you don't see it.");
+    }
+  };
   const pickerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (choosingStrength) pickerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -325,6 +355,9 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
   const tailorMutation = useMutation<TailorResumeOut, ApiError, "light" | "firm">({
     mutationFn: (strength) => api.tailorResume(job.id, strength),
     onSuccess: refresh,
+    onError: (err) => {
+      if (err.status === 428) setNeedsDescription(true); // the app also checks, in case this page is out of date
+    },
   });
   const strengthPicker = choosingStrength && !tailorMutation.isPending && (
     <div ref={pickerRef} className="mt-3 rounded-2xl border border-[#e7e1fa] bg-[#f6f3ff] p-3">
@@ -344,8 +377,9 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
           <button
             key={value}
             type="button"
-            className="rounded-xl border border-[#ddd8f3] bg-white p-3 text-left transition hover:border-brand-400 hover:bg-brand-50"
+            className={`rounded-xl border border-[#ddd8f3] bg-white p-3 text-left transition hover:border-brand-400 hover:bg-brand-50 ${glowChoices ? "choice-glow" : ""}`}
             onClick={() => {
+              setGlowChoices(false);
               setChoosingStrength(false);
               tailorMutation.mutate(value);
             }}
@@ -486,7 +520,7 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
             )}
             {!job.applied_at && proceeding && !hasResume && (
               <>
-                <Button variant="primary" className={tailorMutation.isPending ? "ai-working" : ""} onClick={() => setChoosingStrength(true)} disabled={busyResume}>
+                <Button variant="primary" className={tailorMutation.isPending ? "ai-working" : ""} onClick={startTailoring} disabled={busyResume}>
                   {tailorMutation.isPending ? "Creating…" : "Tailor resume"}
                 </Button>
                 <Button variant="secondary" onClick={() => originalMutation.mutate()} disabled={busyResume}>
@@ -520,6 +554,16 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
         </div>
 
         {strengthPicker}
+        {needsDescription && (
+          <div className="mt-3 rounded-2xl border border-dashed border-amber-300 bg-amber-50/60 p-4 text-amber-800">
+            <p className="text-sm font-bold text-amber-900">Tailoring needs the job description.</p>
+            <p className="text-sm">Get it from the extension.</p>
+            <Button variant="primary" className="mt-3" onClick={() => void grabFromExtension()}>
+              Grab job description
+            </Button>
+            {grabNote && <p className="mt-2 text-xs">{grabNote}</p>}
+          </div>
+        )}
         {proceeding && !hasResume && !job.applied_at && (
           <p className="mt-2 text-xs text-ink-500">
             Either way, the application is filled from the resume you pick here, including each role's bullets.
@@ -680,7 +724,7 @@ function JobCard({ job, highlight = false, duplicate = false }: { job: JobOut; h
           </div>
         )}
 
-        {error && <p className="mt-3 text-sm text-red-600">{error.message}</p>}
+        {error && !(error instanceof ApiError && error.status === 428) && <p className="mt-3 text-sm text-red-600">{error.message}</p>}
       </Card>
     </li>
   );

@@ -37,3 +37,18 @@ export const pingExtension = () => ask("PING", {}, 1200);
 
 export const completeApplication = (jobId: number, url: string) =>
   ask("COMPLETE_APPLICATION", { jobId, url }, 5000);
+
+/** Asks the extension to open the job's page and wait for you to save it, so the description is added to this saved job. */
+export const grabDescription = (jobId: number, url: string, title: string) =>
+  ask("GRAB_DESCRIPTION", { jobId, url, title }, 5000);
+
+/** Called when the extension has saved the description and brought you back. Returns a function that stops listening. */
+export function onDescriptionAdded(callback: (jobId: number) => void): () => void {
+  const handler = (event: MessageEvent) => {
+    const d = event.data;
+    if (event.source !== window || !d || d.source !== REPLY || d.type !== "DESCRIPTION_ADDED" || typeof d.jobId !== "number") return;
+    callback(d.jobId);
+  };
+  window.addEventListener("message", handler);
+  return () => window.removeEventListener("message", handler);
+}

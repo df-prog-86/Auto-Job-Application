@@ -237,6 +237,8 @@ export interface TailorResumeOut {
 
 export interface JobOut {
   id: number;
+  /** False when only a short summary is saved: tailoring needs the real description first. */
+  has_description?: boolean;
   posted_at?: string | null;
   ats?: string | null;
   company: string;

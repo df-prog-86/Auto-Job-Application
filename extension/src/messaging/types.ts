@@ -15,6 +15,10 @@ export type ExtensionMessage =
   | { type: "CAPTURE_JOB"; tabId: number }
   | { type: "FILL_PAGE"; tabId: number; jobId?: number }
   | { type: "COMPLETE_APPLICATION"; jobId: number; url: string }
+  /** From the dashboard: open this saved job's page so its description can be saved. */
+  | { type: "GRAB_DESCRIPTION"; jobId: number; url: string; title: string }
+  /** From the popup: is this tab one opened to grab a description? */
+  | { type: "GET_PENDING_GRAB"; tabId: number }
   /** From the Workday walker running in the page. */
   | { type: "WORKDAY_WAITING" }
   /** From the page: answers the person typed themselves and agreed to keep. */
@@ -34,6 +38,11 @@ export interface AutomationStatusResult {
   ok: boolean;
   mode?: "PAUSED" | "REVIEW" | "AUTO";
   error?: string;
+}
+
+export interface PendingGrabResult {
+  pending: boolean;
+  title?: string;
 }
 
 export interface CaptureJobResult {

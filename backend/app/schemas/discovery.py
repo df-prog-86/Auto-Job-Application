@@ -109,6 +109,7 @@ class TailorResumeOut(BaseModel):
 
 class JobOut(BaseModel):
     id: int
+    has_description: bool = True  # False: tailoring needs the description first (the dashboard offers to grab it)
     ats: str | None
     company: str
     title: str

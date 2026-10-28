@@ -11,6 +11,7 @@ import type {
   ExtensionMessage,
   FillPageResult,
   PairingStateResult,
+  PendingGrabResult,
   PairResult,
 } from "@/messaging/types";
 
@@ -72,6 +73,30 @@ async function init(): Promise<void> {
       }
     });
     return;
+  }
+
+  // This tab was opened by the dashboard to grab a job's description: show only that.
+  const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (currentTab?.id !== undefined) {
+    const grab = await sendMessage<PendingGrabResult>({ type: "GET_PENDING_GRAB", tabId: currentTab.id });
+    if (grab.pending) {
+      $("grabSection").style.display = "block";
+      $("grabTitle").textContent = grab.title ?? "";
+      $("grabButton").addEventListener("click", async () => {
+        const button = $("grabButton") as HTMLButtonElement;
+        button.disabled = true;
+        button.textContent = "Saving…";
+        const result = await sendMessage<CaptureJobResult>({ type: "CAPTURE_JOB", tabId: currentTab.id as number });
+        if (result.ok) {
+          window.close(); // the page closes by itself and you land back on the job
+        } else {
+          showError(result.error ?? "Couldn't save the description. Open the job's own page and try again.");
+          button.disabled = false;
+          button.textContent = "Save job";
+        }
+      });
+      return;
+    }
   }
 
   $("mainSection").style.display = "block";

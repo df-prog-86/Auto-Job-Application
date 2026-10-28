@@ -776,3 +776,11 @@ def test_capture_with_a_job_id_fills_in_that_exact_job(app_and_db, monkeypatch):
     assert len(client.get("/api/v1/jobs").json()) == 2
     thin = {**page, "json_ld": [_jsonld(description="<p>Too short.</p>")]}
     assert client.post("/api/v1/jobs/capture", json={**thin, "job_id": other["id"]}, headers=headers).status_code == 422
+
+
+def test_jobs_say_whether_a_real_description_is_saved(app_and_db, monkeypatch):
+    client, _ = app_and_db
+    thin = _add_job(client, monkeypatch, description="<p>Short summary.</p>", url="https://search.example/thin")
+    full = _add_job(client, monkeypatch, title="Data Engineer", url="https://search.example/full")
+    assert thin["has_description"] is False
+    assert full["has_description"] is True

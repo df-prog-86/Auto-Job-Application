@@ -56,7 +56,7 @@ export const backend = {
       method: "POST",
     }),
 
-  captureJob: (page: { url: string; title: string; jsonLd: string[]; bodyText: string; applyLinks?: string[] }) =>
+  captureJob: (page: { url: string; title: string; jsonLd: string[]; bodyText: string; applyLinks?: string[] }, jobId?: number) =>
     request<{ id: number; title: string; company: string }>(
       "/api/v1/jobs/capture",
       {
@@ -67,6 +67,7 @@ export const backend = {
           json_ld: page.jsonLd,
           body_text: page.bodyText,
           apply_links: page.applyLinks ?? [],
+          ...(jobId ? { job_id: jobId } : {}),
         }),
       },
       true, // extension-token authed, same as any other extension-only endpoint

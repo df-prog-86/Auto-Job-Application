@@ -396,6 +396,82 @@ async function completeApplication(jobId: number, url: string): Promise<void> {
   }
 }
 
+
+// --- Grabbing a description for a job that was saved without one -----------------------------------------------------
+// The dashboard asks us to open the job's page. We remember which tab it is (in chrome.storage.session, because this worker
+// is stopped when idle), show a "Save" badge there, and when the person saves it the description goes to that exact job.
+
+interface PendingGrab {
+  jobId: number;
+  dashboardTabId: number;
+  title: string;
+}
+
+async function readGrabs(): Promise<Record<string, PendingGrab>> {
+  const stored = await chrome.storage.session.get("pendingGrabs");
+  return (stored.pendingGrabs as Record<string, PendingGrab> | undefined) ?? {};
+}
+
+async function writeGrabs(grabs: Record<string, PendingGrab>): Promise<void> {
+  await chrome.storage.session.set({ pendingGrabs: grabs });
+}
+
+function showSaveBadge(tabId: number): void {
+  void chrome.action.setBadgeText({ tabId, text: "Save" }).catch(() => undefined);
+  void chrome.action.setBadgeBackgroundColor({ tabId, color: "#5b57f5" }).catch(() => undefined);
+}
+
+async function startGrab(jobId: number, url: string, title: string, dashboardTabId: number): Promise<void> {
+  const tab = await chrome.tabs.create({ url, active: true });
+  if (tab.id === undefined) return;
+  const grabs = await readGrabs();
+  grabs[String(tab.id)] = { jobId, dashboardTabId, title };
+  await writeGrabs(grabs);
+  showSaveBadge(tab.id);
+  notify("Get the job description", "Click the OtterApply icon, then Save job.");
+}
+
+/** The description was saved: go back to the job in the dashboard, then close the page that was opened for it. */
+async function finishGrab(tabId: number, grab: PendingGrab): Promise<void> {
+  const grabs = await readGrabs();
+  delete grabs[String(tabId)];
+  await writeGrabs(grabs);
+  notify("Description added", "Back in OtterApply, choose how to tailor.");
+  try {
+    const dashboard = await chrome.tabs.get(grab.dashboardTabId);
+    await chrome.tabs.update(grab.dashboardTabId, { active: true });
+    if (dashboard.windowId !== undefined) await chrome.windows.update(dashboard.windowId, { focused: true });
+    try {
+      await chrome.tabs.sendMessage(grab.dashboardTabId, { type: "DESCRIPTION_ADDED", jobId: grab.jobId });
+    } catch {
+      // That page does not have the extension's helper loaded: reload it on the job instead.
+      await chrome.tabs.update(grab.dashboardTabId, { url: `${DASHBOARD_ORIGIN}/app/jobs?highlight=${grab.jobId}&tailor=1` });
+    }
+  } catch {
+    await chrome.tabs.create({ url: `${DASHBOARD_ORIGIN}/app/jobs?highlight=${grab.jobId}&tailor=1` });
+  }
+  await chrome.tabs.remove(tabId).catch(() => undefined);
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void (async () => {
+    const grabs = await readGrabs();
+    if (grabs[String(tabId)]) {
+      delete grabs[String(tabId)];
+      await writeGrabs(grabs);
+    }
+  })().catch(() => undefined);
+});
+
+// A page that redirects or reloads clears the toolbar badge; put it back while the job is still waiting to be saved.
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status !== "complete") return;
+  void readGrabs()
+    .then((grabs) => {
+      if (grabs[String(tabId)]) showSaveBadge(tabId);
+    })
+    .catch(() => undefined);
+});
 const HEALTH_CHECK_ALARM = "job-agent-health-check";
 
 async function ensureAlarms(): Promise<void> {
@@ -448,6 +524,37 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
       sendResponse({ ok: true });
       return false;
     }
+
+    case "GRAB_DESCRIPTION": {
+      // Only the dashboard (served from this computer) may ask for this, and only for a web page.
+      if (!sender.url || !sender.url.startsWith(`${DASHBOARD_ORIGIN}/app`) || sender.tab?.id === undefined) {
+        sendResponse({ ok: false, error: "Not allowed." });
+        return false;
+      }
+      let protocol = "";
+      try {
+        protocol = new URL(message.url).protocol;
+      } catch {
+        protocol = "";
+      }
+      if (!Number.isInteger(message.jobId) || (protocol !== "https:" && protocol !== "http:")) {
+        sendResponse({ ok: false, error: "That link can't be opened." });
+        return false;
+      }
+      startGrab(message.jobId, message.url, String(message.title ?? "").slice(0, 200), sender.tab.id)
+        .then(() => sendResponse({ ok: true }))
+        .catch((err: Error) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case "GET_PENDING_GRAB":
+      readGrabs()
+        .then((grabs) => {
+          const grab = grabs[String(message.tabId)];
+          sendResponse({ pending: !!grab, title: grab?.title });
+        })
+        .catch(() => sendResponse({ pending: false }));
+      return true;
 
     case "LEARN_ANSWERS":
       if (sender.id === chrome.runtime.id && sender.tab && Array.isArray(message.answers)) {
@@ -520,7 +627,9 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
             return;
           }
           try {
-            const job = await backend.captureJob(captured);
+            const grab = (await readGrabs())[String(message.tabId)];
+            const job = await backend.captureJob(captured, grab?.jobId);
+            if (grab) void finishGrab(message.tabId, grab).catch(() => undefined);
             sendResponse({ ok: true, jobTitle: job.title, company: job.company });
           } catch (err) {
             sendResponse({ ok: false, error: (err as Error).message });

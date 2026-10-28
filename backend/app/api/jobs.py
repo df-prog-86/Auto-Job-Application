@@ -202,7 +202,7 @@ async def tailor_resume_for_job(
             status_code=status.HTTP_409_CONFLICT,
             detail="Click 'Proceed with Application' on this job before creating a tailored resume.",
         )
-    if len((job.description or "").strip()) < MIN_DESCRIPTION_CHARS:
+    if not job.has_description:
         # Nothing to tailor from. 428 tells the dashboard to show "grab the description from the extension" instead of an error.
         raise HTTPException(
             status_code=status.HTTP_428_PRECONDITION_REQUIRED,

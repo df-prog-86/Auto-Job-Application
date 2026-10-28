@@ -56,7 +56,9 @@
   100% { box-shadow: 0 0 0 0 rgba(91, 87, 245, 0); border-color: transparent; }
 }
 .field-glow { animation: field-glow 2.2s ease-out 1; }
-@media (prefers-reduced-motion: reduce) { .field-glow { animation: none; box-shadow: 0 0 0 3px rgba(91, 87, 245, 0.4); border-color: #5b57f5; } }
+/* The two tailoring choices after the description is added: the same glow, three times, so it is clear where to click. */
+.choice-glow { animation: field-glow 2.2s ease-in-out 3; }
+@media (prefers-reduced-motion: reduce) { .field-glow, .choice-glow { animation: none; box-shadow: 0 0 0 3px rgba(91, 87, 245, 0.4); border-color: #5b57f5; } }
 
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .added-toast { animation: toast-in 0.25s ease-out; }

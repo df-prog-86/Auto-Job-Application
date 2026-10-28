@@ -75,6 +75,11 @@ class Job(Base, TimestampMixin):
         JobEvaluation per job, so there's normally exactly one row here."""
         return self.evaluations[0] if self.evaluations else None
 
+    @property
+    def has_description(self) -> bool:
+        """True when a real job description is saved (a one-line search summary does not count)."""
+        return len((self.description or "").strip()) >= 300
+
 
 class JobSource(Base, TimestampMixin):
     """Multiple discovery sources can point at the same Job (spec §20)."""

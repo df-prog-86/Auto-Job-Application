@@ -71,8 +71,8 @@ than guessing. Nothing else in Milestone 1/2 requires it.
    ```
    LLM_API_BASE_URL=https://openrouter.ai/api/v1
    LLM_API_KEY_REF=openrouter-main
-   PRIMARY_FAST_MODEL=deepseek/deepseek-chat
-   FALLBACK_FAST_MODEL=openai/gpt-6-luna
+   PRIMARY_FAST_MODEL=openai/gpt-6-luna
+   FALLBACK_FAST_MODEL=anthropic/claude-haiku-5.5
    ```
    Any OpenAI-compatible base URL works; model identifiers are provider-specific strings, not
    validated against a fixed list (spec §7 — "production code must verify provider capabilities

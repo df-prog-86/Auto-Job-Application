@@ -952,7 +952,7 @@ Model identifiers must be configurable because model availability and pricing ch
 
 
 
-A current inexpensive example is DeepSeek V4.1 Flash through OpenRouter, which supports structured output on compatible provider routes, but production code must verify provider capabilities rather than assume them. (OpenRouter⁠￼)
+The current choice is GPT-6 Luna as the primary model and Claude Haiku 5.5 as the fallback, both through OpenRouter. Models developed in China (such as DeepSeek) are not used. Production code must verify provider capabilities (such as structured output) rather than assume them.
 
 
 

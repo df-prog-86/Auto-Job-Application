@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -2435,3 +2436,34 @@ def test_repair_desc_index_rebuilds_from_saved_descriptions(tmp_path, monkeypatc
     again = JobCache(path)
     assert [r["title"] for r in again.candidates_by_description('"denied claims"', 10)] == ["Billing Analyst"]
     assert again.desc_ready()
+
+
+def test_integrity_and_backup_and_single_writer(tmp_path, monkeypatch):
+    import argparse, sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from filelock import FileLock
+    from scripts import cache_tools
+    path = str(tmp_path / "cache.db")
+    monkeypatch.setattr(cache_tools.settings, "JOB_CACHE_PATH", path)
+    cache = JobCache(path)
+    eid, _ = cache.upsert_employer("greenhouse", "acme", "Acme", "search")
+    cache.apply_refresh(eid, [PostingIn(ext_id="1", title="Billing Analyst", url="https://x.example/1", description="Resolve denied claims.")], now_ts(), 24.0, True)
+    cache.reindex_descriptions()
+    assert cache_tools.cmd_integrity(argparse.Namespace(db=None)) == 0
+    for _ in range(4):  # four backups: only the newest three stay
+        assert cache_tools.cmd_backup(argparse.Namespace(db=None, keep=3)) == 0
+        time.sleep(0.01)
+    assert len(list((tmp_path / "backups").glob("job_cache-auto-*.db"))) <= 3
+    damaged = tmp_path / "damaged.db"
+    data = bytearray(Path(path).read_bytes())
+    for i in range(4096 * 2, min(len(data), 4096 * 6)):
+        data[i] = 0xFF
+    damaged.write_bytes(bytes(data))
+    assert cache_tools.cmd_integrity(argparse.Namespace(db=str(damaged))) == 1
+    # a second writer is turned away while the first holds the lock
+    monkeypatch.setattr("app.run.LOCK_PATH", tmp_path / ".lock")
+    first = cache_tools._hold_single_writer()
+    with pytest.raises(SystemExit):
+        cache_tools._hold_single_writer()
+    first.release()

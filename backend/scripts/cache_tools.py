@@ -2,6 +2,8 @@
 Two safe helpers for the saved job lists (the job cache). Neither touches your job database (job_agent.db).
 
   cd backend
+  python -m scripts.cache_tools integrity                  # is the job list sound? (read only, safe while the app runs)
+  python -m scripts.cache_tools backup [--keep 3]          # a checked copy in backups/, oldest removed (safe while the app runs)
   python -m scripts.cache_tools coverage                  # how complete the saved lists are, by hiring system (read only)
   python -m scripts.cache_tools coverage --db PATH        # the same for another copy, such as the frozen test copy
   python -m scripts.cache_tools descriptions [--title 'revenue cycle']
@@ -1128,6 +1130,146 @@ def cmd_usshare(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fts_sample(conn: sqlite3.Connection) -> list[str]:
+    """Searches each full-text index once (read only). A damaged index raises here instead of in the middle of someone's search."""
+    problems = []
+    for table, word in (("postings_fts", "engineer"), ("postings_desc_fts", "nurse")):
+        try:
+            conn.execute(f"SELECT rowid FROM {table} WHERE {table} MATCH ? LIMIT 5", (word,)).fetchall()
+        except sqlite3.DatabaseError as exc:
+            problems.append(f"{table}: {exc}")
+    return problems
+
+
+def cmd_integrity(args: argparse.Namespace) -> int:
+    """
+    Is the saved job list sound? Reads only, so it is safe while the app runs (a full pass takes a minute or two).
+    Prints ok / WARN / PROBLEM per check and exits 1 on any PROBLEM.
+    """
+    import shutil
+    import subprocess
+
+    path = Path(args.db or settings.JOB_CACHE_PATH)
+    if not path.exists():
+        print(f"No saved job lists at {path}.")
+        return 1
+    bad = 0
+
+    def say(level: str, text: str) -> None:
+        nonlocal bad
+        bad += level == "PROBLEM"
+        print(f"  {level:8}{text}")
+
+    print(f"Checking {path} ({path.stat().st_size / 1e9:.2f} GB) ...", flush=True)
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=60)
+    try:
+        t0 = time.time()
+        found = [r[0] for r in conn.execute("PRAGMA quick_check(50)").fetchall()]
+        if found == ["ok"]:
+            say("ok", f"file structure is sound ({time.time() - t0:.0f}s)")
+        else:
+            say("PROBLEM", "file structure is damaged:")
+            for line in found[:8]:
+                print(f"            {line}")
+        issues = _fts_sample(conn)
+        say("PROBLEM" if issues else "ok", "search indexes answer a test search" if not issues else "search index damaged: " + "; ".join(issues))
+        n = conn.execute("SELECT COUNT(*) FROM postings").fetchone()[0]
+        say("ok" if n else "WARN", f"{n:,} postings saved")
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        say("ok" if mode == "wal" else "WARN", f"journal mode {mode}")
+    except sqlite3.DatabaseError as exc:
+        say("PROBLEM", f"the file could not be read: {exc}")
+    finally:
+        conn.close()
+    wal = Path(f"{path}-wal")
+    if wal.exists() and wal.stat().st_size > 1_000_000_000:
+        say("WARN", f"the write-ahead file is {wal.stat().st_size / 1e9:.1f} GB (the app has been busy a long time without a checkpoint; restart it)")
+    free = shutil.disk_usage(path.parent).free
+    say("ok" if free > 3 * path.stat().st_size else "WARN", f"{free / 1e9:.0f} GB free on this disk")
+    autos = sorted((path.parent / "backups").glob("job_cache-auto-*.db"))
+    if not autos:
+        say("WARN", "no automatic backup yet (run: python -m scripts.cache_tools backup)")
+    else:
+        age_h = (time.time() - autos[-1].stat().st_mtime) / 3600
+        say("ok" if age_h < 48 else "WARN", f"newest automatic backup is {age_h:.0f} hours old ({autos[-1].name})")
+    if "Mobile Documents" in str(path.resolve()):
+        say("PROBLEM", "the file lives inside iCloud Drive; sync can damage a database in use. Move it outside.")
+    try:  # macOS: is the Desktop folder synced to iCloud?
+        out = subprocess.run(["defaults", "read", "com.apple.finder", "FXICloudDriveDesktop"], capture_output=True, text=True, timeout=5).stdout.strip()
+        if out == "1" and str(path.resolve()).startswith(str(Path.home() / "Desktop")):
+            say("WARN", "this file is on the Desktop and Desktop sync to iCloud is ON; sync can damage a database in use. Move the project out of Desktop/Documents or switch the sync off.")
+    except (OSError, subprocess.SubprocessError):
+        pass
+    print("All checks passed." if not bad else f"{bad} PROBLEM(s) found. Do not restore or rebuild anything yet; send this output to Claude.")
+    return 1 if bad else 0
+
+
+def cmd_backup(args: argparse.Namespace) -> int:
+    """
+    Saves a checked copy of the job list in backups/ (job_cache-auto-DATE.db) and keeps the newest few. Safe while the app runs.
+    The copy is opened and tested before the old ones are removed, so a bad copy never replaces a good one.
+    """
+    import shutil
+
+    path = Path(args.db or settings.JOB_CACHE_PATH)
+    if not path.exists():
+        print(f"No saved job lists at {path}.")
+        return 1
+    folder = path.parent / "backups"
+    folder.mkdir(parents=True, exist_ok=True)
+    size = path.stat().st_size
+    if shutil.disk_usage(folder).free < 2 * size:
+        print(f"Not enough free disk space for another {size / 1e9:.1f} GB copy. Nothing was changed.")
+        return 1
+    dest = folder / f"job_cache-auto-{time.strftime('%Y%m%d-%H%M')}.db"
+    print(f"Copying to {dest.name} (a few minutes) ...", flush=True)
+    src, dst = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=120), sqlite3.connect(str(dest))
+    try:
+        src.backup(dst, pages=4000)
+    finally:
+        dst.close()
+        src.close()
+    check = sqlite3.connect(f"file:{dest}?mode=ro", uri=True, timeout=60)
+    try:
+        ok = [r[0] for r in check.execute("PRAGMA quick_check(50)").fetchall()] == ["ok"] and not _fts_sample(check)
+    except sqlite3.DatabaseError:
+        ok = False
+    finally:
+        check.close()
+    if not ok:
+        dest.unlink(missing_ok=True)
+        print("The copy did not pass its check, so it was removed and older backups were kept. The live file may be damaged: run `integrity`.")
+        return 1
+    old = sorted(folder.glob("job_cache-auto-*.db"))[: -max(1, args.keep)]
+    for f in old:
+        f.unlink()
+        for extra in (f"{f}-wal", f"{f}-shm"):
+            Path(extra).unlink(missing_ok=True)
+    print(f"Backup checked and saved. Kept the newest {args.keep}; removed {len(old)} older.")
+    return 0
+
+
+def _hold_single_writer() -> Any:
+    """
+    Only one program may change the job list at a time: the app holds this lock while it runs, and so does every command that writes.
+    If something else already holds it, stop with a clear message instead of two writers working on the same file.
+    """
+    from filelock import FileLock, Timeout
+
+    from app.run import LOCK_PATH
+
+    lock = FileLock(str(LOCK_PATH))
+    try:
+        lock.acquire(timeout=0)
+    except Timeout:
+        print(f"The app or another job-list command is running (lock {LOCK_PATH}). Stop it first, then run this again. Nothing was changed.")
+        raise SystemExit(1) from None
+    return lock
+
+
+READ_ONLY_COMMANDS = {"health", "coverage", "integrity", "backup", "descriptions", "probe", "sites", "country", "discover", "usajobs-probe", "reread"}
+
+
 def cmd_repair_desc_index(args: argparse.Namespace) -> int:
     """
     Rebuilds the description search index (postings_desc_fts) when it is damaged. The index is only a copy of the opening lines of the
@@ -1441,10 +1583,20 @@ def main() -> None:
     us_seed.add_argument("--read", action="store_true", help="also read each agency's jobs now (needs the key)")
     us_seed.add_argument("--source", default="curated")
     us_seed.add_argument("--resume", action="store_true", help="skip agencies that were already read successfully")
+    sub.add_parser("integrity").add_argument("--db", help="check another copy of the job list")
+    bk = sub.add_parser("backup")
+    bk.add_argument("--db")
+    bk.add_argument("--keep", type=int, default=3, help="how many automatic backups to keep")
     rp = sub.add_parser("repair-desc-index")
     rp.add_argument("--skip-backup", action="store_true")
     rp.add_argument("--force-schema", action="store_true", help="if the damaged index cannot be dropped normally, remove it from the schema and compact the file")
     args = p.parse_args()
+    if args.cmd not in READ_ONLY_COMMANDS:
+        _writer_lock = _hold_single_writer()  # kept until this process exits
+    if args.cmd == "integrity":
+        sys.exit(cmd_integrity(args))
+    if args.cmd == "backup":
+        sys.exit(cmd_backup(args))
     if args.cmd == "repair-desc-index":
         sys.exit(cmd_repair_desc_index(args))
     if args.cmd == "usajobs-probe":
